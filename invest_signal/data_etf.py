@@ -2,7 +2,10 @@
 
 import pandas as pd
 
-PERIOD = "720d"          # yfinance 1h봉은 최근 ~730일까지만 제공
+# Yahoo 1h봉은 최근 730일까지만 제공. period="720d"를 쓰면 상장 845일차 같은
+# 종목에서 yfinance가 상장일을 시작점으로 보내 거부당하므로(BITU·ETHU·AMDL
+# 실측) 명시적 start 날짜로 요청한다.
+LOOKBACK_DAYS = 700
 
 
 def yahoo_symbol(code: str, market: str) -> str:
@@ -61,7 +64,8 @@ def fetch_all(tickers: list[dict], log=print) -> dict[str, pd.DataFrame]:
     import yfinance as yf     # 무거운 임포트 — 테스트에서 모듈 로드만 할 땐 안 불리게 지연
 
     syms = [yahoo_symbol(t["code"], t["market"]) for t in tickers]
-    data = yf.download(syms, period=PERIOD, interval="1h", group_by="ticker",
+    start = (pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+    data = yf.download(syms, start=start, interval="1h", group_by="ticker",
                        auto_adjust=False, progress=False, threads=True)
     out: dict[str, pd.DataFrame] = {}
     for t in tickers:
