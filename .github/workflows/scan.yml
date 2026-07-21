@@ -1,0 +1,58 @@
+# 4h봉 마감 직후(UTC 00/04/08/12/16/20시 + 7분) 시그널 스캔.
+# 주의: schedule 트리거는 레포 '기본 브랜치'의 워크플로만 동작한다.
+name: Signal Scan
+
+on:
+  schedule:
+    - cron: "7 0,4,8,12,16,20 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write            # 알림 상태 파일 커밋용
+
+concurrency:
+  group: signal-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run scan
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # 미국 러너에서 fapi가 451이라 기본은 현물 미러 폴백으로 돈다.
+          # 진짜 퍼프 데이터가 필요하면 비미국 프록시 주소를 시크릿으로 지정.
+          BINANCE_FAPI_BASE: ${{ secrets.BINANCE_FAPI_BASE }}
+        run: python -m invest_signal --state state/alerts_state.json
+
+      - name: Commit alert state
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state/
+          if git diff --cached --quiet; then
+            echo "상태 변화 없음"
+            exit 0
+          fi
+          git commit -m "chore: update alert state [skip ci]"
+          for i in 1 2 3; do
+            git push && exit 0
+            git pull --rebase && sleep 3
+          done
+          git push

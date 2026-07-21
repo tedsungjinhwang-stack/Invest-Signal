@@ -1,8 +1,11 @@
-"""바이낸스 USDT 무기한 선물 4h 캔들 수집.
+"""바이낸스 USDT 4h 캔들 수집 — 선물(fapi) 우선, 미국 IP에선 현물 미러 폴백.
 
-주의: fapi.binance.com은 미국 IP(GitHub Actions 러너 포함)에서 HTTP 451로
-차단된다. 그 경우 BINANCE_FAPI_BASE 환경변수로 프록시/미러 주소를 지정하거나
-크립토 스캔을 미국 외 환경에서 돌려야 한다(README 참고).
+fapi.binance.com·api.binance.com은 미국 IP(GitHub Actions 러너 포함)에서
+HTTP 451로 차단된다. 공식 현물 데이터 미러 data-api.binance.vision은
+미국에서도 열려 있어서, source=auto(기본)면 fapi가 막혔을 때 현물 USDT
+페어로 자동 전환한다(현물·퍼프 4h 가격은 MA 시그널 용도로는 사실상 동일).
+진짜 퍼프 데이터가 필요하면 BINANCE_FAPI_BASE로 프록시를 지정하거나
+미국 외 환경에서 실행하면 된다.
 """
 
 import os
@@ -11,29 +14,33 @@ import time
 import pandas as pd
 import requests
 
-DEFAULT_BASE = "https://fapi.binance.com"
+FAPI_BASE = "https://fapi.binance.com"
+SPOT_MIRROR_BASE = "https://data-api.binance.vision"
 KLINE_INTERVAL = "4h"
-BAR_MS = 4 * 3600 * 1000
 
-# 분당 요청 가중치 한도(2400)에 여유를 두고 이 값을 넘으면 잠시 쉰다.
+# 분당 요청 가중치 한도(선물 2400)에 여유를 두고 이 값을 넘으면 잠시 쉰다.
 WEIGHT_SOFT_LIMIT = 1800
+
+# 현물 유니버스에서 뺄 스테이블코인(스테이블/스테이블 페어는 시그널 무의미)
+STABLE_BASES = {"USDC", "FDUSD", "TUSD", "USDP", "DAI", "EUR", "EURI", "AEUR",
+                "USDE", "USD1", "XUSD", "BUSD", "PAXG"}
 
 
 class GeoBlockedError(RuntimeError):
     """미국 등 제한 지역 IP에서 바이낸스가 451을 돌려줄 때."""
 
 
-def _base() -> str:
-    return os.environ.get("BINANCE_FAPI_BASE", DEFAULT_BASE).rstrip("/")
+def fapi_base() -> str:
+    return os.environ.get("BINANCE_FAPI_BASE", FAPI_BASE).rstrip("/")
 
 
-def _get(session: requests.Session, path: str, params: dict | None = None,
-         tries: int = 3) -> requests.Response:
-    url = f"{_base()}{path}"
+def _get(session: requests.Session, base: str, path: str,
+         params: dict | None = None, tries: int = 3) -> requests.Response:
+    url = f"{base}{path}"
     delay = 1.0
     for attempt in range(1, tries + 1):
         try:
-            rsp = session.get(url, params=params, timeout=15)
+            rsp = session.get(url, params=params, timeout=20)
         except requests.RequestException:
             if attempt == tries:
                 raise
@@ -42,9 +49,8 @@ def _get(session: requests.Session, path: str, params: dict | None = None,
             continue
         if rsp.status_code == 451:
             raise GeoBlockedError(
-                "바이낸스 선물 API가 이 IP(제한 지역)를 차단했습니다. "
-                "BINANCE_FAPI_BASE로 프록시를 지정하거나 미국 외 환경에서 실행하세요.")
-        if rsp.status_code in (418, 429):        # 레이트리밋 — 잠시 쉬고 재시도
+                "바이낸스 API가 이 IP(제한 지역)를 차단했습니다(HTTP 451).")
+        if rsp.status_code in (418, 429):        # 레이트리밋 — 쉬고 재시도
             wait = int(rsp.headers.get("Retry-After", "30"))
             time.sleep(min(wait, 120))
             continue
@@ -66,16 +72,28 @@ def _throttle(rsp: requests.Response) -> None:
 
 def usdt_perp_symbols(session: requests.Session,
                       exclude: set[str] | None = None) -> list[str]:
-    """거래 중인 전체 USDT 무기한 심볼 목록."""
-    info = _get(session, "/fapi/v1/exchangeInfo").json()
+    """거래 중인 전체 USDT 무기한 심볼 (fapi)."""
+    info = _get(session, fapi_base(), "/fapi/v1/exchangeInfo").json()
     exclude = exclude or set()
-    out = []
-    for s in info.get("symbols", []):
-        if (s.get("contractType") == "PERPETUAL"
-                and s.get("status") == "TRADING"
-                and s.get("quoteAsset") == "USDT"
-                and s["symbol"] not in exclude):
-            out.append(s["symbol"])
+    out = [s["symbol"] for s in info.get("symbols", [])
+           if s.get("contractType") == "PERPETUAL"
+           and s.get("status") == "TRADING"
+           and s.get("quoteAsset") == "USDT"
+           and s["symbol"] not in exclude]
+    return sorted(out)
+
+
+def usdt_spot_symbols(session: requests.Session,
+                      exclude: set[str] | None = None) -> list[str]:
+    """거래 중인 전체 USDT 현물 페어 (vision 미러) — 스테이블 베이스 제외."""
+    info = _get(session, SPOT_MIRROR_BASE, "/api/v3/exchangeInfo").json()
+    exclude = exclude or set()
+    out = [s["symbol"] for s in info.get("symbols", [])
+           if s.get("status") == "TRADING"
+           and s.get("quoteAsset") == "USDT"
+           and s.get("isSpotTradingAllowed", True)
+           and s.get("baseAsset") not in STABLE_BASES
+           and s["symbol"] not in exclude]
     return sorted(out)
 
 
@@ -100,30 +118,49 @@ def parse_klines(rows: list, now_ms: int | None = None) -> pd.DataFrame:
     return df
 
 
-def klines_4h(session: requests.Session, symbol: str, limit: int = 600) -> pd.DataFrame:
-    rows = _get(session, "/fapi/v1/klines",
+def resolve_source(session: requests.Session, requested: str,
+                   exclude: set[str], log=print) -> tuple[str, list[str]]:
+    """설정된 source(auto|fapi|spot_mirror)를 실제 소스+심볼 목록으로 확정."""
+    if requested in ("auto", "fapi"):
+        try:
+            syms = usdt_perp_symbols(session, exclude)
+            return "fapi", syms
+        except GeoBlockedError:
+            if requested == "fapi":
+                raise
+            log("[binance] fapi 451 차단 — 현물 미러(data-api.binance.vision)로 폴백")
+    return "spot_mirror", usdt_spot_symbols(session, exclude)
+
+
+def klines_4h(session: requests.Session, symbol: str, source: str,
+              limit: int = 600) -> pd.DataFrame:
+    if source == "fapi":
+        base, path = fapi_base(), "/fapi/v1/klines"
+    else:
+        base, path = SPOT_MIRROR_BASE, "/api/v3/klines"
+    rows = _get(session, base, path,
                 {"symbol": symbol, "interval": KLINE_INTERVAL, "limit": limit}).json()
     return parse_klines(rows)
 
 
-def fetch_all(symbols: list[str], limit: int = 600,
-              pause: float = 0.12, log=print) -> dict[str, pd.DataFrame]:
+def fetch_all(session: requests.Session, symbols: list[str], source: str,
+              limit: int = 600, pause: float = 0.1,
+              log=print) -> dict[str, pd.DataFrame]:
     """전 심볼 4h 캔들 수집. 개별 실패는 건너뛰고, 451은 즉시 중단."""
     out: dict[str, pd.DataFrame] = {}
     failed = []
-    with requests.Session() as session:
-        for i, sym in enumerate(symbols):
-            try:
-                out[sym] = klines_4h(session, sym, limit)
-            except GeoBlockedError:
-                raise
-            except Exception as e:                     # noqa: BLE001 — 종목별 실패는 스캔 전체를 막지 않는다
-                failed.append(sym)
-                log(f"[binance] {sym} 수집 실패: {e}")
-            if pause:
-                time.sleep(pause)
-            if (i + 1) % 100 == 0:
-                log(f"[binance] {i + 1}/{len(symbols)} 수집")
+    for i, sym in enumerate(symbols):
+        try:
+            out[sym] = klines_4h(session, sym, source, limit)
+        except GeoBlockedError:
+            raise
+        except Exception as e:                     # noqa: BLE001 — 종목별 실패는 스캔 전체를 막지 않는다
+            failed.append(sym)
+            log(f"[binance] {sym} 수집 실패: {e}")
+        if pause:
+            time.sleep(pause)
+        if (i + 1) % 100 == 0:
+            log(f"[binance] {i + 1}/{len(symbols)} 수집")
     if failed:
         log(f"[binance] 실패 {len(failed)}종: {', '.join(failed[:10])}"
             + (" ..." if len(failed) > 10 else ""))

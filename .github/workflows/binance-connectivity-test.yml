@@ -1,28 +1,52 @@
-# GitHub Actions 러너(미국 Azure IP)에서 바이낸스 API 접근 가능 여부 실측용.
-# Actions 탭에서 수동 실행(workflow_dispatch)으로만 돈다.
-name: Binance Connectivity Test
+# GitHub Actions 러너에서 데이터 소스 접근 + 스캐너 전체 dry-run 검증용.
+# (알림 발송·상태 저장 없이 데이터 수집→시그널 판정까지만 돈다)
+name: Connectivity & Dry-Run Test
 
 on:
   workflow_dispatch: {}
   push:
     branches: [claude/signal-alarm-feature-yo698c]
-    paths: [".github/workflows/binance-connectivity-test.yml"]
+    paths:
+      - ".github/workflows/binance-connectivity-test.yml"
+      - "invest_signal/**"
+      - "config.yaml"
+      - "requirements.txt"
+
+concurrency:
+  group: connectivity-test
+  cancel-in-progress: true
 
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
+      - uses: actions/checkout@v4
+
       - name: Probe Binance endpoints
         run: |
           probe () {
             local name="$1" url="$2"
             code=$(curl -sS -o /tmp/body -w "%{http_code}" --max-time 15 "$url" || echo "ERR")
             echo "== $name -> HTTP $code"
-            head -c 300 /tmp/body; echo; echo
           }
-          probe "futures ping (fapi.binance.com)"      "https://fapi.binance.com/fapi/v1/ping"
-          probe "futures klines BTCUSDT 4h"            "https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=4h&limit=2"
-          probe "futures exchangeInfo"                 "https://fapi.binance.com/fapi/v1/exchangeInfo"
-          probe "spot ping (api.binance.com)"          "https://api.binance.com/api/v3/ping"
-          probe "spot data mirror (binance.vision)"    "https://data-api.binance.vision/api/v3/ping"
+          probe "futures (fapi.binance.com)"         "https://fapi.binance.com/fapi/v1/ping"
+          probe "spot (api.binance.com)"             "https://api.binance.com/api/v3/ping"
+          probe "spot data mirror (binance.vision)"  "https://data-api.binance.vision/api/v3/ping"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: ETF scan dry-run
+        run: python -m invest_signal --only etf --dry-run
+
+      - name: Crypto scan dry-run
+        run: python -m invest_signal --only crypto --dry-run

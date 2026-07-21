@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..indicators import sma
+from ..indicators import quarterly_vwap, sma
 from . import SignalEvent
 
 NAME = "uptrend_onset"
@@ -28,6 +28,7 @@ class Params:
     ma_touch: int = 240         # 터치 판정 기준선
     touch_window_bars: int = 60  # 터치 유효기간(봉 수). 4h×60 = 10일
     grace_bars: int = 1         # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
+    require_above_qvwap: bool = False   # True면 트리거 봉 종가가 분기 VWAP 위일 때만
 
 
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> SignalEvent | None:
@@ -67,6 +68,12 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> SignalEv
         if close.iloc[i] < m_entry.iloc[i]:
             if i < last - params.grace_bars:
                 return None      # 이미 지나간 시그널 — 이번 실행에선 알리지 않음
+            qv = quarterly_vwap(df)
+            qv_val = None
+            if qv is not None and not pd.isna(qv.iloc[i]):
+                qv_val = float(qv.iloc[i])
+            if params.require_above_qvwap and (qv_val is None or close.iloc[i] <= qv_val):
+                return None
             return SignalEvent(
                 symbol=symbol,
                 signal=NAME,
@@ -78,6 +85,8 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> SignalEv
                     "ma240": float(m_touch.iloc[i]) if not pd.isna(m_touch.iloc[i]) else None,
                     "touch_time": df.index[touch_idx].isoformat(),
                     "touch_high": float(high.iloc[touch_idx]),
+                    "qvwap": qv_val,
+                    "above_qvwap": (float(close.iloc[i]) > qv_val) if qv_val else None,
                 },
             )
     return None
