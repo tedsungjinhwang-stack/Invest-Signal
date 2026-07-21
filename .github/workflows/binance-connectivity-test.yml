@@ -4,6 +4,9 @@ name: Binance Connectivity Test
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [claude/signal-alarm-feature-yo698c]
+    paths: [".github/workflows/binance-connectivity-test.yml"]
 
 jobs:
   probe:
