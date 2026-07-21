@@ -1,0 +1,25 @@
+# GitHub Actions 러너(미국 Azure IP)에서 바이낸스 API 접근 가능 여부 실측용.
+# Actions 탭에서 수동 실행(workflow_dispatch)으로만 돈다.
+name: Binance Connectivity Test
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe Binance endpoints
+        run: |
+          probe () {
+            local name="$1" url="$2"
+            code=$(curl -sS -o /tmp/body -w "%{http_code}" --max-time 15 "$url" || echo "ERR")
+            echo "== $name -> HTTP $code"
+            head -c 300 /tmp/body; echo; echo
+          }
+          probe "futures ping (fapi.binance.com)"      "https://fapi.binance.com/fapi/v1/ping"
+          probe "futures klines BTCUSDT 4h"            "https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=4h&limit=2"
+          probe "futures exchangeInfo"                 "https://fapi.binance.com/fapi/v1/exchangeInfo"
+          probe "spot ping (api.binance.com)"          "https://api.binance.com/api/v3/ping"
+          probe "spot data mirror (binance.vision)"    "https://data-api.binance.vision/api/v3/ping"
