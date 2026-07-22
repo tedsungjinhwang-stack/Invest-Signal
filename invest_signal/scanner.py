@@ -71,10 +71,7 @@ def _load_stock_tickers(cfg: dict, log=print) -> list[dict]:
     static = s.get("tickers") or []
     if s.get("source", "quant_portfolio") != "quant_portfolio":
         return static
-    token = os.environ.get("QP_GITHUB_TOKEN")
-    if not token:
-        log("[stocks] QP_GITHUB_TOKEN 없음 — config 정적 목록 사용")
-        return static
+    token = os.environ.get("QP_GITHUB_TOKEN") or None   # 퍼블릭 레포면 토큰 없이도 OK
     try:
         dyn = data_qp.parse_report(data_qp.fetch_report(token))
         if dyn:
@@ -82,7 +79,8 @@ def _load_stock_tickers(cfg: dict, log=print) -> list[dict]:
             return dyn
         log("[stocks] 리포트 파싱 결과 0종 — 정적 목록 사용")
     except Exception as e:                          # noqa: BLE001 — 동적 로드 실패는 폴백으로
-        log(f"[stocks] 리포트 로드 실패({e}) — 정적 목록 사용")
+        hint = "" if token else " (프라이빗 레포면 QP_GITHUB_TOKEN 필요)"
+        log(f"[stocks] 리포트 로드 실패({e}){hint} — 정적 목록 사용")
     return static
 
 

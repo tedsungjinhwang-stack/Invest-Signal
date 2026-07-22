@@ -63,11 +63,11 @@
 - **주식 (매일 자동 갱신)**: Quant-Portfolio 레포의 `reports/latest.md`에서
   매 스캔마다 로드 — 미국·한국 각각 강한 섹터 대장주(2×3)와 개별 RS Top5,
   약 20종. 코스피/코스닥은 `.KS` 실패 시 `.KQ`로 자동 재시도.
-  - 필요 시크릿: `QP_GITHUB_TOKEN` — Quant-Portfolio **Contents Read-only**
-    fine-grained PAT ([github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens)
-    → Generate new token → Repository access: Only select → Quant-Portfolio
-    → Permissions: Contents Read-only)
-  - 토큰이 없거나 조회 실패 시 `config.yaml`의 정적 스냅샷으로 폴백
+  - Quant-Portfolio가 **퍼블릭이면 추가 설정 불필요**. 프라이빗이면
+    `QP_GITHUB_TOKEN` 시크릿 필요 — Contents Read-only fine-grained PAT
+    ([github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens)
+    → Only select repositories → Quant-Portfolio → Contents: Read-only)
+  - 조회 실패 시 `config.yaml`의 정적 스냅샷으로 폴백
 
 ## 바이낸스 지역 차단(451)과 데이터 소스
 

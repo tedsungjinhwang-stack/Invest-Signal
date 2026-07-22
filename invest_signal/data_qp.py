@@ -18,12 +18,13 @@ RS_TOP_N = 5
 _PICK = r"([^,:|]+?)\(([A-Z][A-Z0-9\.]{0,5}|\d{6})\)"
 
 
-def fetch_report(token: str, timeout: int = 20) -> str:
+def fetch_report(token: str | None = None, timeout: int = 20) -> str:
+    """리포트 원문 조회 — 레포가 퍼블릭이면 토큰 없이도 된다."""
     url = f"https://api.github.com/repos/{QP_REPO}/contents/{REPORT_PATH}"
-    rsp = requests.get(url, timeout=timeout, headers={
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github.raw+json",
-    })
+    headers = {"Accept": "application/vnd.github.raw+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    rsp = requests.get(url, timeout=timeout, headers=headers)
     rsp.raise_for_status()
     return rsp.text
 
