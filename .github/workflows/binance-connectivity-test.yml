@@ -50,7 +50,7 @@ jobs:
 
       - name: ETF scan dry-run
         env:
-          QP_GITHUB_TOKEN: ${{ secrets.QP_GITHUB_TOKEN }}
+          QP_GITHUB_TOKEN: ${{ secrets.QP_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
         run: python -m invest_signal --only etf --dry-run
 
       - name: Crypto scan dry-run

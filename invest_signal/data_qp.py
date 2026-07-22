@@ -19,12 +19,20 @@ _PICK = r"([^,:|]+?)\(([A-Z][A-Z0-9\.]{0,5}|\d{6})\)"
 
 
 def fetch_report(token: str | None = None, timeout: int = 20) -> str:
-    """리포트 원문 조회 — 레포가 퍼블릭이면 토큰 없이도 된다."""
-    url = f"https://api.github.com/repos/{QP_REPO}/contents/{REPORT_PATH}"
-    headers = {"Accept": "application/vnd.github.raw+json"}
+    """리포트 원문 조회.
+
+    토큰이 있으면 API(레이트리밋 여유, 프라이빗도 가능), 없으면 퍼블릭
+    raw 경로(HEAD = 기본 브랜치 자동 추적)로 읽는다.
+    """
     if token:
-        headers["Authorization"] = f"Bearer {token}"
-    rsp = requests.get(url, timeout=timeout, headers=headers)
+        rsp = requests.get(
+            f"https://api.github.com/repos/{QP_REPO}/contents/{REPORT_PATH}",
+            timeout=timeout,
+            headers={"Accept": "application/vnd.github.raw+json",
+                     "Authorization": f"Bearer {token}"})
+    else:
+        rsp = requests.get(f"https://github.com/{QP_REPO}/raw/HEAD/{REPORT_PATH}",
+                           timeout=timeout)
     rsp.raise_for_status()
     return rsp.text
 
