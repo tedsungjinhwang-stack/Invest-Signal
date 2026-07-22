@@ -113,9 +113,9 @@ GitHub Actions 러너(미국 IP) 실측 결과:
 
 ### 2. 스케줄
 
-`.github/workflows/scan.yml`이 KST 07시 기준 4시간 간격
-(07/11/15/19/23/03시 = UTC 22/02/06/10/14/18시)으로 자동 실행된다.
-(GitHub 크론 특성상 수십 분 지연될 수 있음)
+`.github/workflows/scan.yml`이 KST 07/11/15/19/23시(하루 5회, 심야 제외)에
+자동 실행된다. (GitHub 크론 특성상 수십 분 지연될 수 있음)
+`scan.yml`을 수정해 푸시하면 즉시 1회 실행된다.
 **schedule 트리거는 기본 브랜치에서만 동작**하므로 이 브랜치를 main에
 머지해야 활성화된다. 중복 알림은 `state/alerts_state.json`으로 방지하며
 실행 후 자동 커밋된다.
