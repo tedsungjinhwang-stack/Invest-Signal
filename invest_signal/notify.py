@@ -72,63 +72,48 @@ def format_events(events_crypto: list, events_etf: list,
                   etf_names: dict[str, str],
                   ongoing_crypto: list = (), ongoing_etf: list = (),
                   events_stocks: list = (), ongoing_stocks: list = ()) -> str:
-    """텔레그램 메시지 — 시그널 종류를 최상위로, 그 아래 시장별로 묶는다."""
+    """텔레그램 메시지 — 시그널별 → 시장별. 신규는 상세 줄, 추적 중 종목은
+    같은 칸 아래 ↳ 한 줄로 붙는다."""
     now_kst = pd.Timestamp.now(tz=KST).strftime("%m-%d %H:%M")
     lines = [f"🚨 <b>4h 시그널</b> · {now_kst} KST"]
 
-    markets_new = [("크립토", events_crypto, "crypto"),
-                   ("ETF", events_etf, "etf"),
-                   ("주식", events_stocks, "etf")]   # 주식 링크 규칙은 ETF와 동일
-    markets_hold = [("크립토", ongoing_crypto, "crypto"),
-                    ("ETF", ongoing_etf, "etf"),
-                    ("주식", ongoing_stocks, "etf")]
+    markets = [("크립토", events_crypto, ongoing_crypto, "crypto"),
+               ("ETF", events_etf, ongoing_etf, "etf"),
+               ("주식", events_stocks, ongoing_stocks, "etf")]   # 주식 링크 규칙은 ETF와 동일
 
     def label_of(e):
         label = e.detail.get("label", e.signal)
         return DISPLAY_GROUP.get(label, label)
 
-    def ordered_labels(markets):
-        present = {label_of(e) for _, evs, _ in markets for e in evs}
-        return [k for k in SIGNAL_ORDER if k in present] + \
-               sorted(k for k in present if k not in SIGNAL_ORDER)
+    present = {label_of(e) for _, new, hold, _ in markets for e in list(new) + list(hold)}
+    ordered = [k for k in SIGNAL_ORDER if k in present] + \
+              sorted(k for k in present if k not in SIGNAL_ORDER)
 
-    # ── 신규: 시그널 → 시장 → 종목 라인
-    for label in ordered_labels(markets_new):
+    def hold_item(e, kind):
+        align = e.detail.get("align")
+        is_mss = e.signal == "mss" or e.detail.get("label") == "MSS"
+        return (f"{_short_symbol(e.symbol, kind, '')}({_age_days(e.bar_time)}d"
+                + (f"·{align}" if align else "")
+                + ("·MSS" if is_mss else "") + ")")
+
+    for label in ordered:
         lines.append(f"\n{SIGNAL_EMOJI.get(label, '▪')} <b>{label}</b>")
-        for mtitle, evs, kind in markets_new:
-            sel = sorted((e for e in evs if label_of(e) == label),
-                         key=lambda x: x.symbol)
-            if not sel:
+        for mtitle, new, hold, kind in markets:
+            new_sel = sorted((e for e in new if label_of(e) == label),
+                             key=lambda x: x.symbol)
+            hold_sel = sorted((e for e in hold if label_of(e) == label),
+                              key=lambda x: x.bar_time, reverse=True)   # 최신 순
+            if not new_sel and not hold_sel:
                 continue
             lines.append(f"[{mtitle}]")
-            for e in sel:
+            for e in new_sel:
                 name = etf_names.get(e.symbol, "") if kind != "crypto" else ""
                 market = "KR" if (kind != "crypto" and e.symbol[:1].isdigit()) else "US"
                 lines.append(_event_line(e, chart_url(e.symbol, kind, market), name, kind))
-
-    # ── 유지 중: 시그널·시장 한 줄씩, 경과일(Nd)로 압축
-    hold_labels = ordered_labels(markets_hold)
-    if hold_labels:
-        lines.append("")
-        for label in hold_labels:
-            for mtitle, evs, kind in markets_hold:
-                sel = sorted((e for e in evs if label_of(e) == label),
-                             key=lambda x: x.bar_time, reverse=True)   # 최신 순
-                if not sel:
-                    continue
-                shown = sel[:ONGOING_MAX_PER_LABEL]
-                extra = len(sel) - len(shown)
-
-                def item(e):
-                    align = e.detail.get("align")
-                    sym = _short_symbol(e.symbol, kind, "")
-                    is_mss = e.signal == "mss" or e.detail.get("label") == "MSS"
-                    return (f"{sym}({_age_days(e.bar_time)}d"
-                            + (f"·{align}" if align else "")
-                            + ("·MSS" if is_mss else "") + ")")
-
-                lines.append(f"📌 {label}·{mtitle}: "
-                             + " · ".join(item(e) for e in shown)
+            if hold_sel:
+                shown = hold_sel[:ONGOING_MAX_PER_LABEL]
+                extra = len(hold_sel) - len(shown)
+                lines.append("↳ " + " · ".join(hold_item(e, kind) for e in shown)
                              + (f" 외 {extra}종" if extra > 0 else ""))
 
     return "\n".join(lines)

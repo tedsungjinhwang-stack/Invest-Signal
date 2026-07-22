@@ -69,11 +69,11 @@ def test_format_events_ongoing_section():
     ongoing = [_event("ETHUSDT", {"label": "상승초입"}),
                _event("SOLUSDT", {"label": "MSS", "broken_low": 70.0})]
     msg = format_events([_event("BTCUSDT")], [], {}, ongoing_crypto=ongoing)
-    assert "📌 상승초입·크립토: ETH(" in msg   # 시그널·시장 한 줄 + 경과일 표기
-    assert "📌 풀백·크립토: SOL(" in msg       # MSS는 풀백 칸에 태그로 병합
+    assert "↳ ETH(" in msg                    # 추적 중 종목은 같은 칸 아래 ↳ 줄
+    assert "풀백" in msg and "SOL(" in msg    # MSS는 풀백 칸에 태그로 병합
     assert "·MSS)" in msg
-    # 리스트가 없으면 📌 줄도 없다
-    assert "📌" not in format_events([_event("BTCUSDT")], [], {})
+    # 추적 목록이 없으면 ↳ 줄도 없다
+    assert "↳" not in format_events([_event("BTCUSDT")], [], {})
 
 
 def test_ongoing_list_caps_per_label():
