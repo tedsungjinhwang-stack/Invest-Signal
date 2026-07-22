@@ -6,10 +6,9 @@ signal:
     touch_window_bars: 60   # 240선 터치 후 60선 이탈을 기다리는 기간 — 60봉 = 10일
     grace_bars: 1           # 직전 스캔을 놓쳤을 때 소급 허용할 봉 수
     qvwap_condition: true   # 트리거 봉 종가가 분기 앵커드 VWAP 위여야 알림
-  pullback:                 # 눌림목 (4h봉): 240선 상향돌파 유지 중 120선 하회
+  pullback:                 # 눌림목 (4h봉): 240선>480선 구간에서 120선 하회
     enabled: true
     ma_entry: 120           # 하회 판정 기준선 — 60으로 바꾸면 얕은 눌림도 잡음
-    breakout_window_bars: 180  # 240선 돌파 유효기간 — 180봉 = 30일
     grace_bars: 1
   downtrend_reversal:       # 하락전환 (4h봉): 60선 아래 눌림의 직전저점 하향돌파(CHoCH)
     # 알림·리스트에 표시하지 않음 — 하락전환 활성 종목의 상승초입·눌림목을

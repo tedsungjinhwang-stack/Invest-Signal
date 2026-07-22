@@ -64,6 +64,9 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     for t in range(max(need, last - params.grace_bars), last + 1):
         if not below_entry(t):
             continue
+        # 240선이 480선 위면 이미 '눌림목 구간' — 상승초입은 발동하지 않는다
+        if not pd.isna(a3.iloc[t]) and a2.iloc[t] > a3.iloc[t]:
+            continue
         touch_idx = None        # t 직전 touch_window 안에서 가장 최근 터치
         for i in range(t - 1, max(need - 1, t - params.touch_window_bars) - 1, -1):
             if is_touch(i):

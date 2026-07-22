@@ -5,6 +5,7 @@ import pandas as pd
 
 from invest_signal.signals import pullback
 from invest_signal.signals.pullback import Params
+from invest_signal.signals import SignalEvent
 
 P = Params()
 
@@ -15,80 +16,77 @@ def make_df(closes, start="2025-01-01"):
     return pd.DataFrame({"Open": c, "High": c, "Low": c, "Close": c})
 
 
-def base_setup(hold_bars=60):
-    """완만한 하락 → 240선 상향돌파(급등) → 240선 위 유지 구조를 만든다."""
-    closes = list(np.linspace(150.0, 100.0, 300))    # 완만한 하락 — 240선이 가격 위
-    closes.append(140.0)                             # 급등 봉 = 240선 상향돌파
-    for i in range(hold_bars):
-        closes.append(140.0 + 0.1 * i)               # 240선 위 유지
+def uptrend_regime(bars=600):
+    """장기 상승 — 240선이 480선 위(눌림목 구간), 종가는 120선 위."""
+    return list(np.linspace(100.0, 400.0, bars))
+
+
+def recovery_no_regime():
+    """급락 후 짧은 반등 — 종가는 120선 위지만 아직 240선 < 480선."""
+    closes = list(np.linspace(400.0, 100.0, 500))
+    closes += list(np.linspace(100.0, 180.0, 100))
     return closes
 
 
 def dip_below_ma120(closes):
-    """현재 시점 120선 바로 아래 종가를 계산한다."""
     m120 = make_df(closes)["Close"].rolling(120).mean().iloc[-1]
-    return float(m120) - 2.0
+    return float(m120) - 5.0
 
 
-def test_fires_when_close_dips_below_ma120_after_breakout():
-    closes = base_setup()
-    closes.append(dip_below_ma120(closes))           # 120선 하회 눌림
+def test_fires_on_dip_in_regime():
+    closes = uptrend_regime()
+    df0 = make_df(closes)
+    m240 = df0["Close"].rolling(240).mean().iloc[-1]
+    m480 = df0["Close"].rolling(480).mean().iloc[-1]
+    assert m240 > m480                               # 전제: 눌림목 구간
+    closes.append(dip_below_ma120(closes))
     df = make_df(closes)
     evs = pullback.detect(df, "TEST", P)
     assert len(evs) == 1
-    ev = evs[0]
-    assert ev.signal == "pullback"
-    assert ev.bar_time == df.index[-1]
-    assert ev.detail["cross_time"] == df.index[300].isoformat()   # 급등 봉이 돌파 봉
+    assert evs[0].signal == "pullback"
+    assert evs[0].bar_time == df.index[-1]
 
 
-def test_no_breakout_no_signal():
-    """240선 상향돌파 없이 120선만 하회하면 미발화 — 그냥 하락장."""
-    closes = list(np.linspace(400.0, 100.0, 400))    # 지속 하락: 종가 < 120선
-    df = make_df(closes)
-    assert pullback.detect(df, "TEST", P) == []
-
-
-def test_broken_trend_no_signal():
-    """돌파 후 종가가 240선 아래로 내려간 적이 있으면(추세 이탈) 미발화."""
-    closes = base_setup(hold_bars=10)
-    m240 = make_df(closes)["Close"].rolling(240).mean().iloc[-1]
-    closes.append(float(m240) - 5)                   # 240선 아래로 마감 → 추세 깨짐
-    for _ in range(3):
-        closes.append(closes[-1] + 1)                # 240선 아래 머묾
-    closes.append(dip_below_ma120(closes))           # 120선 하회
+def test_no_fire_outside_regime():
+    """240선이 아직 480선 아래면(상승초입 구간) 120선 하회해도 미발화."""
+    closes = recovery_no_regime()
+    df0 = make_df(closes)
+    m240 = df0["Close"].rolling(240).mean().iloc[-1]
+    m480 = df0["Close"].rolling(480).mean().iloc[-1]
+    assert m240 < m480                               # 전제: 구간 아님
+    closes.append(dip_below_ma120(closes))
     df = make_df(closes)
     assert pullback.detect(df, "TEST", P) == []
 
 
 def test_consecutive_dip_bars_alert_once():
-    """연속 하회 구간은 첫 봉만 — 두 번째 봉 시점엔 grace로 첫 봉을 돌려준다."""
-    closes = base_setup()
+    closes = uptrend_regime()
     dip = dip_below_ma120(closes)
-    closes.append(dip)                               # 첫 하회 봉(트리거)
-    closes.append(dip - 0.5)                         # 연속 하회 봉
+    closes.append(dip)
+    closes.append(dip - 0.5)
     df = make_df(closes)
     evs = pullback.detect(df, "TEST", Params(grace_bars=1))
     assert len(evs) == 1 and evs[0].bar_time == df.index[-2]
 
 
-def test_breakout_window_expiry():
-    """돌파가 window보다 오래됐으면 미발화."""
-    closes = base_setup(hold_bars=60)                # 돌파 후 60봉 유지 → 간격 61봉
-    closes.append(dip_below_ma120(closes))
-    df = make_df(closes)
-    assert pullback.detect(df, "TEST", Params(breakout_window_bars=40)) == []
-    assert len(pullback.detect(df, "TEST", Params(breakout_window_bars=180))) == 1
-
-
-def test_still_active_requires_between_ma120_and_ma240():
-    closes = base_setup(hold_bars=120)           # 120·240선 간격을 충분히 벌린다
+def test_still_active_requires_below_120_and_regime():
+    closes = uptrend_regime()
     dip = dip_below_ma120(closes)
     closes.append(dip)
     df = make_df(closes)
     ev = pullback.detect(df, "TEST", P)[0]
-    closes.append(dip - 0.5)                     # 여전히 120선 아래·240선 위
+    closes.append(dip - 0.5)                         # 계속 120선 아래·구간 유지
     assert pullback.still_active(make_df(closes), ev, P)
-    m240 = make_df(closes)["Close"].rolling(240).mean().iloc[-1]
-    closes.append(float(m240) - 5)               # 240선까지 깨짐 → 추세 이탈
+    m120 = make_df(closes)["Close"].rolling(120).mean().iloc[-1]
+    closes.append(float(m120) + 10)                  # 120선 위 복귀 → 종료
     assert not pullback.still_active(make_df(closes), ev, P)
+
+
+def test_still_active_false_when_regime_lost():
+    """240선 < 480선인 데이터에서는 유지 판정도 거짓."""
+    closes = recovery_no_regime()
+    closes.append(dip_below_ma120(closes))
+    df = make_df(closes)
+    ev = SignalEvent(symbol="TEST", signal="pullback", bar_time=df.index[-1],
+                     price=float(df["Close"].iloc[-1]), detail={})
+    assert not pullback.still_active(df, ev, P)
