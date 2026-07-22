@@ -96,3 +96,13 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
             },
         ))
     return events
+
+
+def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:
+    """트리거 이후 종가가 계속 60선 아래에 머물러 있으면 '유지 중'."""
+    try:
+        t = df.index.get_loc(event.bar_time)
+    except KeyError:
+        return False
+    m = sma(df["Close"], params.ma_entry)
+    return bool((df["Close"].iloc[t:] < m.iloc[t:]).all())

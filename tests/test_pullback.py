@@ -79,3 +79,16 @@ def test_breakout_window_expiry():
     df = make_df(closes)
     assert pullback.detect(df, "TEST", Params(breakout_window_bars=40)) == []
     assert len(pullback.detect(df, "TEST", Params(breakout_window_bars=180))) == 1
+
+
+def test_still_active_requires_between_ma120_and_ma240():
+    closes = base_setup(hold_bars=120)           # 120·240선 간격을 충분히 벌린다
+    dip = dip_below_ma120(closes)
+    closes.append(dip)
+    df = make_df(closes)
+    ev = pullback.detect(df, "TEST", P)[0]
+    closes.append(dip - 0.5)                     # 여전히 120선 아래·240선 위
+    assert pullback.still_active(make_df(closes), ev, P)
+    m240 = make_df(closes)["Close"].rolling(240).mean().iloc[-1]
+    closes.append(float(m240) - 5)               # 240선까지 깨짐 → 추세 이탈
+    assert not pullback.still_active(make_df(closes), ev, P)

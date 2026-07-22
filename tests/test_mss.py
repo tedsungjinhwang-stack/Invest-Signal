@@ -63,3 +63,14 @@ def test_unconfirmed_low_is_not_reference():
     df = make_df(list(map(float, closes)))
     # 확정된 스윙저점이 아직 없으므로(105는 우측 봉 부족) 발화하지 않는다
     assert mss.detect(df, "TEST", P) == []
+
+
+def test_still_active_tracks_hold_below_broken_level():
+    closes, _, level = swing_low_setup()
+    closes.append(level - 1)
+    df = make_df(closes)
+    ev = mss.detect(df, "TEST", P)[0]
+    closes.append(level - 2)                     # 계속 저점 아래
+    assert mss.still_active(make_df(closes), ev, P)
+    closes.append(level + 1)                     # 저점 위 복귀 마감
+    assert not mss.still_active(make_df(closes), ev, P)

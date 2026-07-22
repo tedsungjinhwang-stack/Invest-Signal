@@ -82,3 +82,18 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
             },
         ))
     return events
+
+
+def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:
+    """트리거 이후 종가가 계속 120선 아래 '그리고' 240선 위면 '유지 중'.
+
+    240선까지 깨고 내려갔으면 눌림목이 아니라 추세 이탈이므로 목록에서 뺀다.
+    """
+    try:
+        t = df.index.get_loc(event.bar_time)
+    except KeyError:
+        return False
+    c = df["Close"].iloc[t:]
+    m_entry = sma(df["Close"], params.ma_entry).iloc[t:]
+    m_break = sma(df["Close"], params.ma_break).iloc[t:]
+    return bool((c < m_entry).all() and (c > m_break).all())

@@ -63,3 +63,20 @@ def test_split_chunks_preserves_content():
     chunks = split_chunks(text, size=1000)
     assert all(len(c) <= 1000 for c in chunks)
     assert "\n".join(chunks) == text
+
+
+def test_format_events_ongoing_section():
+    ongoing = [_event("ETHUSDT", {"label": "상승초입"}),
+               _event("SOLUSDT", {"label": "MSS", "broken_low": 70.0})]
+    msg = format_events([_event("BTCUSDT")], [], {}, ongoing_crypto=ongoing)
+    assert "유지 중" in msg
+    assert "상승초입: ETHUSDT" in msg
+    assert "MSS: SOLUSDT" in msg
+    # 유지 목록이 없으면 섹션도 없다
+    assert "유지 중" not in format_events([_event("BTCUSDT")], [], {})
+
+
+def test_ongoing_list_caps_per_label():
+    evs = [_event(f"C{i:02d}USDT", {"label": "눌림목"}) for i in range(20)]
+    msg = format_events([_event("BTCUSDT")], [], {}, ongoing_crypto=evs)
+    assert "외 5종" in msg

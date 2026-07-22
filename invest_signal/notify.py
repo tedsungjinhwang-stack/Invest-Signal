@@ -10,6 +10,7 @@ import requests
 KST = ZoneInfo("Asia/Seoul")
 TG_LIMIT = 4096          # 텔레그램 메시지 최대 길이
 CHUNK = 3800             # 여유를 둔 분할 기준
+ONGOING_MAX_PER_LABEL = 15   # 유지 중 목록 — 라벨당 최대 표시 종목 수
 
 
 def _fmt_price(v: float) -> str:
@@ -55,8 +56,9 @@ def _event_line(e, url: str, name: str) -> str:
 
 
 def format_events(events_crypto: list, events_etf: list,
-                  etf_names: dict[str, str]) -> str:
-    """이번 스캔에서 새로 뜬 시그널들을 텔레그램 HTML 메시지로."""
+                  etf_names: dict[str, str],
+                  ongoing_crypto: list = (), ongoing_etf: list = ()) -> str:
+    """이번 스캔의 신규 시그널 + '유지 중' 목록을 텔레그램 HTML 메시지로."""
     now_kst = pd.Timestamp.now(tz=KST).strftime("%m-%d %H:%M")
     lines = [f"🚨 <b>4h 시그널</b> ({now_kst} KST)"]
 
@@ -69,8 +71,25 @@ def format_events(events_crypto: list, events_etf: list,
             market = "KR" if (kind == "etf" and e.symbol[:1].isdigit()) else "US"
             lines.append(_event_line(e, chart_url(e.symbol, kind, market), name))
 
+    def hold_block(title, events):
+        """트리거 후 조건이 계속 유지 중인 종목들 — 시그널별로 압축 표기."""
+        if not events:
+            return
+        lines.append(f"\n📌 <b>[{title} · 유지 중]</b>")
+        by_label = {}
+        for e in sorted(events, key=lambda x: x.symbol):
+            by_label.setdefault(e.detail.get("label", e.signal), []).append(e)
+        for label, evs in by_label.items():
+            evs = sorted(evs, key=lambda x: x.bar_time, reverse=True)   # 최신 순
+            shown = evs[:ONGOING_MAX_PER_LABEL]
+            items = " · ".join(f"{e.symbol}({_kst(e.bar_time)}~)" for e in shown)
+            extra = len(evs) - len(shown)
+            lines.append(f"{label}: {items}" + (f" 외 {extra}종" if extra > 0 else ""))
+
     block("크립토 USDT-P", events_crypto, "crypto")
     block("레버리지 ETF", events_etf, "etf")
+    hold_block("크립토", ongoing_crypto)
+    hold_block("ETF", ongoing_etf)
     return "\n".join(lines)
 
 

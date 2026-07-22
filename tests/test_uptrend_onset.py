@@ -172,3 +172,17 @@ def test_insufficient_data_returns_empty():
     closes = list(np.linspace(200.0, 100.0, 100))
     df = make_df(closes, closes)
     assert uptrend_onset.detect(df, "TEST", P) == []
+
+
+def test_still_active_tracks_hold_below_entry_line():
+    closes, highs = base_decline()
+    add_touch(closes, highs)
+    add_drop(closes, highs)
+    df = make_df(closes, highs)
+    ev = uptrend_onset.detect(df, "TEST", P)[0]
+    add_drop(closes, highs)                      # 계속 60선 아래
+    df2 = make_df(closes, highs)
+    assert uptrend_onset.still_active(df2, ev, P)
+    add_sideways(closes, highs, bars=1, level=140.0)   # 60선(≈115) 위로 복귀 마감
+    df3 = make_df(closes, highs)
+    assert not uptrend_onset.still_active(df3, ev, P)
