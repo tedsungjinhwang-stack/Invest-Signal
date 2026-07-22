@@ -53,3 +53,16 @@ def test_resample_4h_drops_incomplete_bucket():
     # 05:00 시점 — 04:00 버킷은 아직 진행 중이므로 00:00 버킷만 남아야 함
     out = resample_4h(df, now=pd.Timestamp("2025-06-02 05:00", tz="UTC"))
     assert list(out.index.hour) == [0]
+
+
+def test_resample_4h_excludes_bucket_fed_by_in_progress_us_bar():
+    """미국 :30 기준 1h봉 — 진행 중인 15:30봉이 속한 12:00 버킷은 확정 전엔 제외."""
+    idx = pd.date_range("2025-06-02 13:30", periods=3, freq="1h", tz="UTC")
+    df = pd.DataFrame({"Open": [10.0, 11, 12], "High": [11.0, 12, 13],
+                       "Low": [9.0, 10, 11], "Close": [10.5, 11.5, 12.5],
+                       "Volume": [1.0, 1, 1]}, index=idx)
+    # 16:07 — 15:30봉이 아직 진행 중 → 12:00 버킷 전체가 미확정 → 아무것도 없음
+    assert resample_4h(df, now=pd.Timestamp("2025-06-02 16:07", tz="UTC")) is None
+    # 16:37 — 15:30봉 마감 → 12:00 버킷 확정, 종가는 15:30봉 종가
+    out = resample_4h(df, now=pd.Timestamp("2025-06-02 16:37", tz="UTC"))
+    assert list(out.index.hour) == [12] and out["Close"].iloc[0] == 12.5

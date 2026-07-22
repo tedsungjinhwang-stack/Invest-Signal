@@ -21,6 +21,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check Telegram secrets
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 시크릿이 비어 있습니다. 레포 Settings → Secrets에 등록하세요." >&2
+            exit 1
+          fi
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -36,12 +46,13 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # 미국 러너에서 fapi가 451이라 기본은 현물 미러 폴백으로 돈다.
+          # 미국 러너에서 fapi가 막히면 자동으로 현물 미러 폴백.
           # 진짜 퍼프 데이터가 필요하면 비미국 프록시 주소를 시크릿으로 지정.
           BINANCE_FAPI_BASE: ${{ secrets.BINANCE_FAPI_BASE }}
         run: python -m invest_signal --state state/alerts_state.json
 
       - name: Commit alert state
+        if: always()
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -50,9 +61,19 @@ jobs:
             echo "상태 변화 없음"
             exit 0
           fi
+          # 봇 소유 파일이므로 우리 버전이 항상 이긴다 — 충돌 시 리셋 후 재커밋
+          cp state/alerts_state.json /tmp/alerts_state.json
           git commit -m "chore: update alert state [skip ci]"
-          for i in 1 2 3; do
-            git push && exit 0
-            git pull --rebase && sleep 3
+          BRANCH="${GITHUB_REF_NAME}"
+          for i in 1 2 3 4; do
+            git push origin "HEAD:${BRANCH}" && exit 0
+            git rebase --abort 2>/dev/null || true
+            git fetch origin "${BRANCH}"
+            git reset --hard "origin/${BRANCH}"
+            cp /tmp/alerts_state.json state/alerts_state.json
+            git add state/
+            git commit -m "chore: update alert state [skip ci]" || true
+            sleep 3
           done
-          git push
+          echo "::error::상태 파일 푸시 실패 — 다음 실행에서 중복 알림 가능" >&2
+          exit 1

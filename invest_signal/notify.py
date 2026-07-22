@@ -1,6 +1,7 @@
 """텔레그램 알림 발송 및 메시지 포맷."""
 
 import os
+import time
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -35,30 +36,38 @@ def chart_url(symbol: str, kind: str, market: str = "US") -> str:
     return f"https://www.tradingview.com/symbols/{symbol}/"
 
 
+def _event_line(e, url: str, name: str) -> str:
+    d = e.detail
+    label = f"{e.symbol} {name}".strip()
+    parts = [f"· [{d.get('label', e.signal)}] <a href=\"{url}\">{label}</a>"
+             f" — 종가 {_fmt_price(e.price)}"]
+    if d.get("entry_ma"):
+        parts.append(f"&lt; {d.get('entry_ma_period', 60)}선 {_fmt_price(d['entry_ma'])}")
+    if d.get("touch_time"):                          # 상승초입: 240 터치 시각
+        parts.append(f"(240터치 {_kst(d['touch_time'])})")
+    if d.get("cross_time"):                          # 눌림목: 240 돌파 시각
+        parts.append(f"(240돌파 {_kst(d['cross_time'])})")
+    if d.get("mvwap"):
+        parts.append(f"· MVWAP {_fmt_price(d['mvwap'])} 터치")
+    if d.get("above_qvwap") is not None:
+        parts.append("· QVWAP↑" if d["above_qvwap"] else "· QVWAP↓")
+    return " ".join(parts)
+
+
 def format_events(events_crypto: list, events_etf: list,
                   etf_names: dict[str, str]) -> str:
     """이번 스캔에서 새로 뜬 시그널들을 텔레그램 HTML 메시지로."""
     now_kst = pd.Timestamp.now(tz=KST).strftime("%m-%d %H:%M")
-    lines = [f"🚨 <b>상승초입 4h 시그널</b> ({now_kst} KST)"]
+    lines = [f"🚨 <b>4h 시그널</b> ({now_kst} KST)"]
 
     def block(title, events, kind):
         if not events:
             return
         lines.append(f"\n<b>[{title}]</b>")
-        for e in sorted(events, key=lambda x: x.symbol):
+        for e in sorted(events, key=lambda x: (x.symbol, x.signal)):
             name = etf_names.get(e.symbol, "") if kind == "etf" else ""
             market = "KR" if (kind == "etf" and e.symbol[:1].isdigit()) else "US"
-            url = chart_url(e.symbol, kind, market)
-            label = f"{e.symbol} {name}".strip()
-            ma60 = e.detail.get("ma60")
-            touch = e.detail.get("touch_time", "")
-            above_qv = e.detail.get("above_qvwap")
-            qv_tag = "" if above_qv is None else (" · QVWAP↑" if above_qv else " · QVWAP↓")
-            lines.append(
-                f"· <a href=\"{url}\">{label}</a> — 종가 {_fmt_price(e.price)}"
-                + (f" &lt; 60선 {_fmt_price(ma60)}" if ma60 else "")
-                + (f" (240터치 {_kst(touch)})" if touch else "")
-                + qv_tag)
+            lines.append(_event_line(e, chart_url(e.symbol, kind, market), name))
 
     block("크립토 USDT-P", events_crypto, "crypto")
     block("레버리지 ETF", events_etf, "etf")
@@ -81,26 +90,48 @@ def split_chunks(text: str, size: int = CHUNK) -> list[str]:
     return chunks
 
 
-def send_telegram(text: str, log=print) -> bool:
-    """TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID 환경변수로 발송. 성공 여부 반환."""
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat = os.environ.get("TELEGRAM_CHAT_ID")
-    if not token or not chat:
-        log("[telegram] 토큰/챗ID 없음 — 발송 건너뜀(메시지는 아래 로그로 출력)")
-        log(text)
-        return False
-    ok = True
-    for chunk in split_chunks(text):
+def _post_chunk(token: str, chat: str, chunk: str, log) -> bool:
+    """청크 1개 발송 — 429는 retry_after만큼 쉬고 최대 3회 재시도."""
+    for attempt in range(3):
         try:
             rsp = requests.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
                 json={"chat_id": chat, "text": chunk, "parse_mode": "HTML",
                       "disable_web_page_preview": True},
                 timeout=15)
-            if rsp.status_code != 200:
-                log(f"[telegram] 실패 {rsp.status_code}: {rsp.text[:200]}")
-                ok = False
         except requests.RequestException as e:
-            log(f"[telegram] 예외: {e}")
-            ok = False
+            log(f"[telegram] 예외(시도 {attempt + 1}): {e}")
+            time.sleep(2 * (attempt + 1))
+            continue
+        if rsp.status_code == 200:
+            return True
+        if rsp.status_code == 429:
+            try:
+                wait = int(rsp.json().get("parameters", {}).get("retry_after", 5))
+            except Exception:   # noqa: BLE001
+                wait = 5
+            time.sleep(min(wait, 60))
+            continue
+        log(f"[telegram] 실패 {rsp.status_code}: {rsp.text[:200]}")
+        return False
+    return False
+
+
+def send_telegram(text: str, log=print) -> bool:
+    """TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID 환경변수로 발송. 전체 성공 여부 반환.
+
+    미설정이면 메시지를 로그로만 출력하고 False — 호출 측이 상태를 저장하지
+    않아 다음 스캔에서 재시도된다.
+    """
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat:
+        log("[telegram] 토큰/챗ID 없음 — 발송 불가(메시지는 아래 로그로 출력)")
+        log(text)
+        return False
+    ok = True
+    for i, chunk in enumerate(split_chunks(text)):
+        if i:
+            time.sleep(1.1)     # 텔레그램 초당 1건 제한 회피
+        ok = _post_chunk(token, chat, chunk, log) and ok
     return ok

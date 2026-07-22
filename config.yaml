@@ -1,46 +1,44 @@
 # Invest-Signal 설정
 
 signal:
-  uptrend_onset:            # 상승초입 (4h봉)
+  uptrend_onset:            # 상승초입 (4h봉): 역배열 + 240터치 → 60선 이탈
+    enabled: true
     touch_window_bars: 60   # 240선 터치 후 60선 이탈을 기다리는 기간 — 60봉 = 10일
     grace_bars: 1           # 직전 스캔을 놓쳤을 때 소급 허용할 봉 수
-    require_above_qvwap: false  # true면 트리거 종가가 분기 VWAP 위일 때만 알림
+    qvwap_condition: true   # 트리거 봉 종가가 분기 앵커드 VWAP 위여야 알림
+  pullback:                 # 눌림목 (4h봉): 240선 상향돌파 유지 중 60선 하회
+    enabled: true
+    breakout_window_bars: 180  # 240선 돌파 유효기간 — 180봉 = 30일
+    grace_bars: 1
 
 crypto:
   enabled: true
-  # auto: fapi(전체 USDT 무기한) 시도 → 미국 IP라 451이면 현물 미러로 폴백
-  # fapi: 선물 API만 사용(차단 시 크립토 스캔 건너뜀) / spot_mirror: 미러만 사용
+  # auto: fapi(전체 USDT 무기한) 시도 → 미국 IP 등 실패 시 현물 미러로 폴백
+  # fapi: 선물 API만 사용(차단 시 크립토 스캔 실패로 표시) / spot_mirror: 미러만 사용
   source: auto
   exclude: []               # 제외할 심볼. 예: [BTCDOMUSDT]
   kline_limit: 750          # 480MA·분기VWAP(최대 552봉) + 터치윈도우 + 여유
 
 etf:
   enabled: true
-  # 퀀트포트폴리오 레포(LEV_PAIRS 불 사이드 + LEV_SINGLES) 기준 레버리지 ETF
   tickers:
+    # 미국 섹터·지수
     - {code: SOXL,   market: US, name: "반도체 3x"}
+    - {code: SOXS,   market: US, name: "반도체 -3x"}
     - {code: TQQQ,   market: US, name: "나스닥100 3x"}
+    - {code: SQQQ,   market: US, name: "나스닥100 -3x"}
     - {code: FAS,    market: US, name: "금융 3x"}
     - {code: LABU,   market: US, name: "바이오 3x"}
     - {code: ERX,    market: US, name: "에너지 2x"}
     - {code: NUGT,   market: US, name: "금광 2x"}
     - {code: YINN,   market: US, name: "중국 3x"}
-    - {code: TMF,    market: US, name: "장기국채 3x"}
-    - {code: DRN,    market: US, name: "부동산 3x"}
-    - {code: DPST,   market: US, name: "지역은행 3x"}
-    - {code: UTSL,   market: US, name: "유틸 3x"}
-    - {code: DFEN,   market: US, name: "방산 3x"}
-    - {code: NAIL,   market: US, name: "주택건설 3x"}
     - {code: RETL,   market: US, name: "소매 3x"}
+    - {code: TMF,    market: US, name: "미국 장기국채 3x"}
+    - {code: DFEN,   market: US, name: "방산·우주 3x"}
     - {code: BITU,   market: US, name: "비트코인 2x"}
     - {code: ETHU,   market: US, name: "이더리움 2x"}
-    - {code: TSLL,   market: US, name: "테슬라 2x"}
-    - {code: NVDL,   market: US, name: "엔비디아 2x"}
-    - {code: CONL,   market: US, name: "코인베이스 2x"}
-    - {code: MSTX,   market: US, name: "MSTR 2x"}
-    - {code: AAPU,   market: US, name: "애플 2x"}
-    - {code: AMDL,   market: US, name: "AMD 2x"}
+    # 한국
     - {code: "122630", market: KR, name: "KODEX 레버리지"}
     - {code: "233740", market: KR, name: "KODEX 코스닥150레버리지"}
-    - {code: "0193W0", market: KR, name: "삼성전자 2x"}
-    - {code: "0193T0", market: KR, name: "SK하이닉스 2x"}
+    - {code: "252670", market: KR, name: "KODEX 200선물인버스2X"}
+    - {code: "251340", market: KR, name: "KODEX 코스닥150선물인버스2X"}

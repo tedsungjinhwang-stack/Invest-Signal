@@ -1,4 +1,6 @@
-pandas>=2.0
-requests>=2.31
-PyYAML>=6.0
-yfinance>=0.2.40
+# 무인 크론 잡이라 정확히 고정 — 2026-07-22 GitHub Actions 실측 검증 조합.
+# 올릴 때는 로컬에서 pytest + dry-run 확인 후 갱신할 것.
+pandas==3.0.3
+requests==2.34.2
+PyYAML==6.0.3
+yfinance==1.5.1

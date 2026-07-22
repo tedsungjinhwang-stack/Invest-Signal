@@ -44,3 +44,11 @@ def test_quarterly_vwap_without_volume_returns_none():
     df = _df([10, 20], [1, 1])
     assert quarterly_vwap(df.drop(columns=["Volume"])) is None
     assert quarterly_vwap(_df([10, 20], [0, 0])) is None
+
+
+def test_monthly_vwap_resets_at_month_start():
+    from invest_signal.indicators import monthly_vwap
+    df = _df([10, 20, 30, 40] * 6, [1] * 24, start="2025-04-30")
+    mv = monthly_vwap(df)
+    first_may = np.where(df.index >= pd.Timestamp("2025-05-01", tz="UTC"))[0][0]
+    assert mv.iloc[first_may] == df["Close"].iloc[first_may]

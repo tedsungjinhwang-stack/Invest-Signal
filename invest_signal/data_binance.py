@@ -23,7 +23,7 @@ WEIGHT_SOFT_LIMIT = 1800
 
 # 현물 유니버스에서 뺄 스테이블코인(스테이블/스테이블 페어는 시그널 무의미)
 STABLE_BASES = {"USDC", "FDUSD", "TUSD", "USDP", "DAI", "EUR", "EURI", "AEUR",
-                "USDE", "USD1", "XUSD", "BUSD", "PAXG"}
+                "USDE", "USD1", "XUSD", "BUSD"}
 
 
 class GeoBlockedError(RuntimeError):
@@ -31,7 +31,8 @@ class GeoBlockedError(RuntimeError):
 
 
 def fapi_base() -> str:
-    return os.environ.get("BINANCE_FAPI_BASE", FAPI_BASE).rstrip("/")
+    # GitHub Actions는 미설정 시크릿을 빈 문자열로 넘기므로 빈 값도 기본값 취급
+    return (os.environ.get("BINANCE_FAPI_BASE") or FAPI_BASE).rstrip("/")
 
 
 def _get(session: requests.Session, base: str, path: str,
@@ -120,7 +121,11 @@ def parse_klines(rows: list, now_ms: int | None = None) -> pd.DataFrame:
 
 def resolve_source(session: requests.Session, requested: str,
                    exclude: set[str], log=print) -> tuple[str, list[str]]:
-    """설정된 source(auto|fapi|spot_mirror)를 실제 소스+심볼 목록으로 확정."""
+    """설정된 source(auto|fapi|spot_mirror)를 실제 소스+심볼 목록으로 확정.
+
+    auto 모드는 451뿐 아니라 어떤 fapi 실패(타임아웃·연결 리셋 등)에도
+    현물 미러로 폴백한다 — 지역 차단이 늘 깔끔한 451로 오지는 않는다.
+    """
     if requested in ("auto", "fapi"):
         try:
             syms = usdt_perp_symbols(session, exclude)
@@ -129,6 +134,10 @@ def resolve_source(session: requests.Session, requested: str,
             if requested == "fapi":
                 raise
             log("[binance] fapi 451 차단 — 현물 미러(data-api.binance.vision)로 폴백")
+        except Exception as e:              # noqa: BLE001
+            if requested == "fapi":
+                raise
+            log(f"[binance] fapi 실패({e}) — 현물 미러로 폴백")
     return "spot_mirror", usdt_spot_symbols(session, exclude)
 
 

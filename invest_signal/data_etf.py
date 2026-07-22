@@ -13,7 +13,12 @@ def yahoo_symbol(code: str, market: str) -> str:
 
 
 def resample_4h(df1h: pd.DataFrame, now: pd.Timestamp | None = None) -> pd.DataFrame | None:
-    """1h OHLC → UTC 4h봉. 아직 진행 중인 마지막 버킷은 버린다."""
+    """1h OHLC → UTC 4h봉. 미확정 데이터가 섞일 수 있는 마지막 버킷은 버린다.
+
+    미국 종목의 Yahoo 1h봉은 :30 기준(13:30, 14:30… UTC)이라 4h 버킷 경계를
+    30분 넘어간다. 진행 중인 1h봉을 먼저 제거하고, 그 봉이 속했던 버킷과
+    4시간이 다 지나지 않은 버킷을 끝에서 잘라내 확정된 봉만 남긴다.
+    """
     if df1h is None or len(df1h) == 0:
         return None
     d = df1h.dropna(subset=["Close"]).copy()
@@ -23,6 +28,13 @@ def resample_4h(df1h: pd.DataFrame, now: pd.Timestamp | None = None) -> pd.DataF
         d.index = d.index.tz_localize("UTC")
     else:
         d.index = d.index.tz_convert("UTC")
+    if now is None:
+        now = pd.Timestamp.now(tz="UTC")
+    bar_end = d.index + pd.Timedelta(hours=1)
+    live_buckets = set(d.index[bar_end > now].floor("4h"))   # 진행 중 1h봉이 속한 버킷
+    d = d[bar_end <= now]
+    if len(d) == 0:
+        return None
     agg = {
         "Open": d["Open"].resample("4h").first(),
         "High": d["High"].resample("4h").max(),
@@ -32,12 +44,8 @@ def resample_4h(df1h: pd.DataFrame, now: pd.Timestamp | None = None) -> pd.DataF
     if "Volume" in d.columns:
         agg["Volume"] = d["Volume"].resample("4h").sum()
     out = pd.DataFrame(agg).dropna(subset=["Open", "High", "Low", "Close"])
-    if len(out) == 0:
-        return None
-    if now is None:
-        now = pd.Timestamp.now(tz="UTC")
-    # 마지막 버킷의 4시간 구간이 아직 안 끝났으면 미확정 봉이므로 제외
-    if out.index[-1] + pd.Timedelta(hours=4) > now:
+    while len(out) and (out.index[-1] + pd.Timedelta(hours=4) > now
+                        or out.index[-1] in live_buckets):
         out = out.iloc[:-1]
     return out if len(out) else None
 

@@ -12,7 +12,7 @@ from invest_signal.state import AlertState
 def _event(symbol, detail=None):
     return SignalEvent(symbol=symbol, signal="uptrend_onset",
                        bar_time=pd.Timestamp("2026-07-21 04:00", tz="UTC"),
-                       price=123.45, detail=detail or {"ma60": 130.0})
+                       price=123.45, detail=detail or {"label": "상승초입", "entry_ma": 130.0})
 
 
 def test_state_dedup_roundtrip(tmp_path):
@@ -47,7 +47,7 @@ def test_state_survives_corrupt_file(tmp_path):
 
 def test_format_events_sections_and_links():
     msg = format_events(
-        [_event("BTCUSDT", {"ma60": 130.0, "above_qvwap": True,
+        [_event("BTCUSDT", {"label": "상승초입", "entry_ma": 130.0, "above_qvwap": True,
                             "touch_time": "2026-07-19T12:00:00+00:00"})],
         [_event("122630"), _event("SOXL")],
         {"122630": "KODEX 레버리지", "SOXL": "반도체 3x"})

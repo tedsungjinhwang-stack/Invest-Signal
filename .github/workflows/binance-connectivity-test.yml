@@ -1,23 +1,23 @@
-# GitHub Actions 러너에서 데이터 소스 접근 + 스캐너 전체 dry-run 검증용.
-# (알림 발송·상태 저장 없이 데이터 수집→시그널 판정까지만 돈다)
-name: Connectivity & Dry-Run Test
+# 테스트 + GitHub Actions 러너에서 데이터 소스 접근/스캐너 dry-run 검증.
+name: Test & Dry-Run
 
 on:
   workflow_dispatch: {}
   push:
-    branches: [claude/signal-alarm-feature-yo698c]
+    branches: [main, claude/signal-alarm-feature-yo698c]
     paths:
       - ".github/workflows/binance-connectivity-test.yml"
       - "invest_signal/**"
+      - "tests/**"
       - "config.yaml"
-      - "requirements.txt"
+      - "requirements*.txt"
 
 concurrency:
   group: connectivity-test
   cancel-in-progress: true
 
 jobs:
-  probe:
+  test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -38,12 +38,15 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: requirements-dev.txt
 
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Unit tests
+        run: python -m pytest -q
 
       - name: ETF scan dry-run
         run: python -m invest_signal --only etf --dry-run
