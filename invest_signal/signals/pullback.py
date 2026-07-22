@@ -76,16 +76,8 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
 
 
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:
-    """트리거 이후 종가가 계속 120선 아래이고 240>480 구간이 유지되면 '유지 중'.
-
-    240선이 480선 아래로 되돌아가면 눌림목 구간 자체가 끝난 것이므로 뺀다.
+    """눌림목은 발생 후 계속 리스트에 남는다 — 120선 위로 복귀해 정배열로
+    올라가는 동안에도 추적한다. 제거는 두 경로뿐:
+    ① 하락전환(CHoCH) 발생 시 스캐너가 걷어냄 ② 조회 범위(7일) 경과.
     """
-    try:
-        t = df.index.get_loc(event.bar_time)
-    except KeyError:
-        return False
-    c = df["Close"].iloc[t:]
-    m_entry = sma(df["Close"], params.ma_entry).iloc[t:]
-    m_fast = sma(df["Close"], params.ma_fast).iloc[t:]
-    m_slow = sma(df["Close"], params.ma_slow).iloc[t:]
-    return bool((c < m_entry).all() and (m_fast > m_slow).all())
+    return event.bar_time in df.index

@@ -69,24 +69,14 @@ def test_consecutive_dip_bars_alert_once():
     assert len(evs) == 1 and evs[0].bar_time == df.index[-2]
 
 
-def test_still_active_requires_below_120_and_regime():
+def test_still_active_persists_after_recovery():
+    """눌림목은 120선 위로 복귀해 올라가는 동안에도 리스트에 남는다."""
     closes = uptrend_regime()
     dip = dip_below_ma120(closes)
     closes.append(dip)
     df = make_df(closes)
     ev = pullback.detect(df, "TEST", P)[0]
-    closes.append(dip - 0.5)                         # 계속 120선 아래·구간 유지
+    m120 = df["Close"].rolling(120).mean().iloc[-1]
+    closes.append(float(m120) + 20)                  # 120선 위 복귀·상승
+    closes.append(float(m120) + 30)
     assert pullback.still_active(make_df(closes), ev, P)
-    m120 = make_df(closes)["Close"].rolling(120).mean().iloc[-1]
-    closes.append(float(m120) + 10)                  # 120선 위 복귀 → 종료
-    assert not pullback.still_active(make_df(closes), ev, P)
-
-
-def test_still_active_false_when_regime_lost():
-    """240선 < 480선인 데이터에서는 유지 판정도 거짓."""
-    closes = recovery_no_regime()
-    closes.append(dip_below_ma120(closes))
-    df = make_df(closes)
-    ev = SignalEvent(symbol="TEST", signal="pullback", bar_time=df.index[-1],
-                     price=float(df["Close"].iloc[-1]), detail={})
-    assert not pullback.still_active(df, ev, P)
