@@ -14,6 +14,10 @@ signal:
     enabled: true
     lookback_bars: 180      # 직전저점 유효기간 — 180봉 = 30일
     grace_bars: 1
+  mss:                      # MSS (4h봉): 직전 스윙저점(좌우 3봉) 하향돌파
+    enabled: true
+    pivot_k: 3              # 스윙저점 판정 — 좌우 k봉보다 낮은 저가
+    grace_bars: 1
 
 crypto:
   enabled: true
