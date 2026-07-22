@@ -54,7 +54,7 @@ def test_format_events_sections_and_links():
     assert "크립토" in msg and "ETF" in msg
     assert "binance.com/en/futures/BTCUSDT" in msg
     assert "KRX-122630" in msg                 # 한국 종목은 KRX 차트 링크
-    assert "QVWAP↑" in msg
+    assert "QVWAP" not in msg              # QVWAP은 조건으로만 쓰고 표시하지 않음
     assert "KODEX 레버리지" in msg
 
 
@@ -69,22 +69,22 @@ def test_format_events_ongoing_section():
     ongoing = [_event("ETHUSDT", {"label": "상승초입"}),
                _event("SOLUSDT", {"label": "MSS", "broken_low": 70.0})]
     msg = format_events([_event("BTCUSDT")], [], {}, ongoing_crypto=ongoing)
-    assert "유지 중" in msg
-    assert "상승초입·크립토: ETH(" in msg   # 시그널·시장 한 줄 + 경과일 표기
-    assert "MSS·크립토: SOL(" in msg
-    # 유지 목록이 없으면 섹션도 없다
-    assert "유지 중" not in format_events([_event("BTCUSDT")], [], {})
+    assert "📌 상승초입·크립토: ETH(" in msg   # 시그널·시장 한 줄 + 경과일 표기
+    assert "📌 풀백·크립토: SOL(" in msg       # MSS는 풀백 칸에 태그로 병합
+    assert "·MSS)" in msg
+    # 리스트가 없으면 📌 줄도 없다
+    assert "📌" not in format_events([_event("BTCUSDT")], [], {})
 
 
 def test_ongoing_list_caps_per_label():
-    evs = [_event(f"C{i:02d}USDT", {"label": "눌림목"}) for i in range(20)]
+    evs = [_event(f"C{i:02d}USDT", {"label": "풀백"}) for i in range(20)]
     msg = format_events([_event("BTCUSDT")], [], {}, ongoing_crypto=evs)
     assert "외 5종" in msg
 
 
 def test_align_tag_shown_in_lines_and_ongoing():
     new = _event("BTCUSDT", {"label": "상승초입", "align": "역배열"})
-    hold = _event("ETHUSDT", {"label": "눌림목", "align": "혼조"})
+    hold = _event("ETHUSDT", {"label": "풀백", "align": "혼조"})
     msg = format_events([new], [], {}, ongoing_crypto=[hold])
     assert "역배열" in msg
     assert "ETH(" in msg and "·혼조)" in msg

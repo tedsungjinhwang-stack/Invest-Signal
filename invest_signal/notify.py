@@ -37,8 +37,9 @@ def chart_url(symbol: str, kind: str, market: str = "US") -> str:
     return f"https://www.tradingview.com/symbols/{symbol}/"
 
 
-SIGNAL_EMOJI = {"상승초입": "🟢", "눌림목": "🔵", "MSS": "🔴"}
-SIGNAL_ORDER = ["상승초입", "눌림목", "MSS"]
+SIGNAL_EMOJI = {"상승초입": "🟢", "풀백": "🔵"}
+SIGNAL_ORDER = ["상승초입", "풀백"]
+DISPLAY_GROUP = {"MSS": "풀백", "눌림목": "풀백"}   # MSS는 풀백 칸에 태그로 표시
 
 
 def _short_symbol(symbol: str, kind: str, name: str) -> str:
@@ -59,10 +60,9 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     d = e.detail
     head = f"· <a href=\"{url}\">{_short_symbol(e.symbol, kind, name)}</a> {_fmt_price(e.price)}"
     tags = []
-    if e.signal == "mss" and d.get("broken_low"):
-        tags.append(f"저점 {_fmt_price(d['broken_low'])} 이탈")
-    if d.get("above_qvwap") is not None:
-        tags.append("QVWAP↑" if d["above_qvwap"] else "QVWAP↓")
+    if e.signal == "mss" or d.get("label") == "MSS":
+        tags.append(f"MSS(저점 {_fmt_price(d['broken_low'])} 이탈)"
+                    if d.get("broken_low") else "MSS")
     if d.get("align"):
         tags.append(d["align"])
     return " · ".join([head] + tags)
@@ -84,7 +84,8 @@ def format_events(events_crypto: list, events_etf: list,
                     ("주식", ongoing_stocks, "etf")]
 
     def label_of(e):
-        return e.detail.get("label", e.signal)
+        label = e.detail.get("label", e.signal)
+        return DISPLAY_GROUP.get(label, label)
 
     def ordered_labels(markets):
         present = {label_of(e) for _, evs, _ in markets for e in evs}
@@ -108,7 +109,7 @@ def format_events(events_crypto: list, events_etf: list,
     # ── 유지 중: 시그널·시장 한 줄씩, 경과일(Nd)로 압축
     hold_labels = ordered_labels(markets_hold)
     if hold_labels:
-        lines.append("\n📌 <b>유지 중</b>")
+        lines.append("")
         for label in hold_labels:
             for mtitle, evs, kind in markets_hold:
                 sel = sorted((e for e in evs if label_of(e) == label),
@@ -121,10 +122,12 @@ def format_events(events_crypto: list, events_etf: list,
                 def item(e):
                     align = e.detail.get("align")
                     sym = _short_symbol(e.symbol, kind, "")
+                    is_mss = e.signal == "mss" or e.detail.get("label") == "MSS"
                     return (f"{sym}({_age_days(e.bar_time)}d"
-                            + (f"·{align}" if align else "") + ")")
+                            + (f"·{align}" if align else "")
+                            + ("·MSS" if is_mss else "") + ")")
 
-                lines.append(f"{SIGNAL_EMOJI.get(label, '▪')} {label}·{mtitle}: "
+                lines.append(f"📌 {label}·{mtitle}: "
                              + " · ".join(item(e) for e in shown)
                              + (f" 외 {extra}종" if extra > 0 else ""))
 

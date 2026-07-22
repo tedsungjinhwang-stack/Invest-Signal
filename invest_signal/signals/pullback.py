@@ -17,7 +17,7 @@ from ..indicators import sma
 from . import SignalEvent
 
 NAME = "pullback"
-LABEL = "눌림목"
+LABEL = "풀백"
 
 
 @dataclass(frozen=True)
