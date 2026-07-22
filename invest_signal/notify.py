@@ -72,54 +72,62 @@ def format_events(events_crypto: list, events_etf: list,
                   etf_names: dict[str, str],
                   ongoing_crypto: list = (), ongoing_etf: list = (),
                   events_stocks: list = (), ongoing_stocks: list = ()) -> str:
-    """이번 스캔의 신규 시그널 + '유지 중' 목록을 텔레그램 HTML 메시지로."""
+    """텔레그램 메시지 — 시그널 종류를 최상위로, 그 아래 시장별로 묶는다."""
     now_kst = pd.Timestamp.now(tz=KST).strftime("%m-%d %H:%M")
     lines = [f"🚨 <b>4h 시그널</b> · {now_kst} KST"]
 
-    def by_label(events):
-        out = {}
-        for e in sorted(events, key=lambda x: x.symbol):
-            out.setdefault(e.detail.get("label", e.signal), []).append(e)
-        order = [k for k in SIGNAL_ORDER if k in out] + \
-                [k for k in out if k not in SIGNAL_ORDER]
-        return [(k, out[k]) for k in order]
+    markets_new = [("크립토", events_crypto, "crypto"),
+                   ("ETF", events_etf, "etf"),
+                   ("주식", events_stocks, "etf")]   # 주식 링크 규칙은 ETF와 동일
+    markets_hold = [("크립토", ongoing_crypto, "crypto"),
+                    ("ETF", ongoing_etf, "etf"),
+                    ("주식", ongoing_stocks, "etf")]
 
-    def block(title, events, kind):
-        if not events:
-            return
-        lines.append(f"\n<b>━ {title} 신규 ━</b>")
-        for label, evs in by_label(events):
-            lines.append(f"{SIGNAL_EMOJI.get(label, '▪')} <b>{label}</b>")
-            for e in evs:
+    def label_of(e):
+        return e.detail.get("label", e.signal)
+
+    def ordered_labels(markets):
+        present = {label_of(e) for _, evs, _ in markets for e in evs}
+        return [k for k in SIGNAL_ORDER if k in present] + \
+               sorted(k for k in present if k not in SIGNAL_ORDER)
+
+    # ── 신규: 시그널 → 시장 → 종목 라인
+    for label in ordered_labels(markets_new):
+        lines.append(f"\n{SIGNAL_EMOJI.get(label, '▪')} <b>{label}</b>")
+        for mtitle, evs, kind in markets_new:
+            sel = sorted((e for e in evs if label_of(e) == label),
+                         key=lambda x: x.symbol)
+            if not sel:
+                continue
+            lines.append(f"[{mtitle}]")
+            for e in sel:
                 name = etf_names.get(e.symbol, "") if kind != "crypto" else ""
                 market = "KR" if (kind != "crypto" and e.symbol[:1].isdigit()) else "US"
                 lines.append(_event_line(e, chart_url(e.symbol, kind, market), name, kind))
 
-    def hold_block(title, events, kind):
-        """트리거 후 조건이 계속 유지 중인 종목들 — 경과일(Nd)로 압축 표기."""
-        if not events:
-            return
-        lines.append(f"\n📌 <b>{title} 유지 중</b>")
+    # ── 유지 중: 시그널·시장 한 줄씩, 경과일(Nd)로 압축
+    hold_labels = ordered_labels(markets_hold)
+    if hold_labels:
+        lines.append("\n📌 <b>유지 중</b>")
+        for label in hold_labels:
+            for mtitle, evs, kind in markets_hold:
+                sel = sorted((e for e in evs if label_of(e) == label),
+                             key=lambda x: x.bar_time, reverse=True)   # 최신 순
+                if not sel:
+                    continue
+                shown = sel[:ONGOING_MAX_PER_LABEL]
+                extra = len(sel) - len(shown)
 
-        def item(e):
-            align = e.detail.get("align")
-            sym = _short_symbol(e.symbol, kind, "")
-            return f"{sym}({_age_days(e.bar_time)}d" + (f"·{align}" if align else "") + ")"
+                def item(e):
+                    align = e.detail.get("align")
+                    sym = _short_symbol(e.symbol, kind, "")
+                    return (f"{sym}({_age_days(e.bar_time)}d"
+                            + (f"·{align}" if align else "") + ")")
 
-        for label, evs in by_label(events):
-            evs = sorted(evs, key=lambda x: x.bar_time, reverse=True)   # 최신 순
-            shown = evs[:ONGOING_MAX_PER_LABEL]
-            extra = len(evs) - len(shown)
-            lines.append(f"{SIGNAL_EMOJI.get(label, '▪')} {label}: "
-                         + " · ".join(item(e) for e in shown)
-                         + (f" 외 {extra}종" if extra > 0 else ""))
+                lines.append(f"{SIGNAL_EMOJI.get(label, '▪')} {label}·{mtitle}: "
+                             + " · ".join(item(e) for e in shown)
+                             + (f" 외 {extra}종" if extra > 0 else ""))
 
-    block("크립토", events_crypto, "crypto")
-    block("ETF", events_etf, "etf")
-    block("주식", events_stocks, "etf")      # 링크 규칙은 ETF와 동일(야후/KRX)
-    hold_block("크립토", ongoing_crypto, "crypto")
-    hold_block("ETF", ongoing_etf, "etf")
-    hold_block("주식", ongoing_stocks, "etf")
     return "\n".join(lines)
 
 

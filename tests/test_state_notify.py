@@ -70,8 +70,8 @@ def test_format_events_ongoing_section():
                _event("SOLUSDT", {"label": "MSS", "broken_low": 70.0})]
     msg = format_events([_event("BTCUSDT")], [], {}, ongoing_crypto=ongoing)
     assert "유지 중" in msg
-    assert "상승초입: ETH(" in msg          # USDT 접미사 제거 + 경과일 표기
-    assert "MSS: SOL(" in msg
+    assert "상승초입·크립토: ETH(" in msg   # 시그널·시장 한 줄 + 경과일 표기
+    assert "MSS·크립토: SOL(" in msg
     # 유지 목록이 없으면 섹션도 없다
     assert "유지 중" not in format_events([_event("BTCUSDT")], [], {})
 
