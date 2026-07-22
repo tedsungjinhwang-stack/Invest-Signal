@@ -45,8 +45,8 @@
 
 ### 알림 메시지 구성
 
-- **신규 시그널**: 시장(크립토/ETF/주식)별 → 시그널별(🟢상승초입 🔵눌림목
-  🔴MSS) 그룹. 크립토는 USDT 접미사 없이 표기, 차트 링크·QVWAP·배열 상태 포함
+- **신규 시그널**: 시그널별(🟢상승초입 🔵눌림목 🔴MSS) → 그 아래
+  [크립토]/[ETF]/[주식] 그룹. 크립토는 USDT 접미사 없이 표기, 차트 링크·QVWAP·배열 상태 포함
 - **📌 유지 중**: 이전 시그널 중 조건이 계속 참인 종목 — `심볼(경과일d·배열)`
   - 상승초입: 종가가 계속 60선 아래 / 눌림목: 계속 120선 아래·240>480 유지
   - MSS: 종가가 계속 깨진 직전저점 아래
@@ -136,7 +136,7 @@ signal:
     qvwap_condition: true      # 트리거 종가 > 분기 VWAP 요구
   pullback:
     enabled: true
-    breakout_window_bars: 180  # 240선 돌파 유효기간 — 180봉 = 30일
+    ma_entry: 120              # 하회 판정 기준선
     grace_bars: 1
 crypto:
   source: auto                 # auto | fapi | spot_mirror
