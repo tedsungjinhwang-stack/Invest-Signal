@@ -80,3 +80,11 @@ def test_ongoing_list_caps_per_label():
     evs = [_event(f"C{i:02d}USDT", {"label": "눌림목"}) for i in range(20)]
     msg = format_events([_event("BTCUSDT")], [], {}, ongoing_crypto=evs)
     assert "외 5종" in msg
+
+
+def test_align_tag_shown_in_lines_and_ongoing():
+    new = _event("BTCUSDT", {"label": "상승초입", "align": "역배열"})
+    hold = _event("ETHUSDT", {"label": "눌림목", "align": "혼조"})
+    msg = format_events([new], [], {}, ongoing_crypto=[hold])
+    assert "· 역배열" in msg
+    assert "ETHUSDT(" in msg and "혼조)" in msg

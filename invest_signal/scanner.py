@@ -11,24 +11,35 @@ import dataclasses
 import requests
 
 from . import config as cfg_mod
-from . import data_binance, data_etf, notify
+from . import data_binance, data_etf, indicators, notify
 from .state import AlertState
 
 ONGOING_LOOKBACK_BARS = 42      # '유지 중' 판정 시 트리거를 찾아볼 범위 — 42봉 = 7일
 
 
 def _detect_all(frames: dict, detectors, log=print) -> tuple[list, list]:
-    """전 종목 시그널 검출 + '유지 중'(트리거 후 조건이 계속 참) 목록."""
+    """전 종목 시그널 검출 + '유지 중'(트리거 후 조건이 계속 참) 목록.
+
+    각 이벤트에 현재 이평선 배열 상태(역배열→혼조→정배열 전환 추적)를 붙인다.
+    """
     events, ongoing = [], []
     for sym, df in frames.items():
+        sym_events, sym_ongoing = [], []
         for mod, params in detectors:
-            events.extend(mod.detect(df, sym, params))
+            sym_events.extend(mod.detect(df, sym, params))
             wide = dataclasses.replace(params, grace_bars=ONGOING_LOOKBACK_BARS)
             past = mod.detect(df, sym, wide)
             if past:
                 latest = max(past, key=lambda e: e.bar_time)
                 if mod.still_active(df, latest, params):
-                    ongoing.append(latest)
+                    sym_ongoing.append(latest)
+        if sym_events or sym_ongoing:
+            align = indicators.alignment(df)
+            if align:
+                for e in sym_events + sym_ongoing:
+                    e.detail["align"] = align
+        events.extend(sym_events)
+        ongoing.extend(sym_ongoing)
     return events, ongoing
 
 

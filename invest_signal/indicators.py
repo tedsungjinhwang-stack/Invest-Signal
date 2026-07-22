@@ -9,6 +9,23 @@ def sma(close: pd.Series, n: int) -> pd.Series:
     return close.rolling(n).mean()
 
 
+def alignment(df: pd.DataFrame, periods: tuple = (120, 240, 480)) -> str | None:
+    """마지막 봉의 이동평균 배열 상태 — "역배열"/"정배열"/"혼조".
+
+    짧은 선부터 순서대로 커지면 역배열(하락 구조), 작아지면 정배열(상승 구조).
+    데이터가 모자라 최장 MA가 NaN이면 None.
+    """
+    c = df["Close"]
+    vals = [c.rolling(k).mean().iloc[-1] for k in periods]
+    if any(pd.isna(v) for v in vals):
+        return None
+    if all(vals[i] < vals[i + 1] for i in range(len(vals) - 1)):
+        return "역배열"
+    if all(vals[i] > vals[i + 1] for i in range(len(vals) - 1)):
+        return "정배열"
+    return "혼조"
+
+
 def anchored_vwap(df: pd.DataFrame, period: str) -> pd.Series | None:
     """앵커드 VWAP — 기간 시작(UTC)마다 리셋. period: "Q"(분기) 또는 "M"(월).
 

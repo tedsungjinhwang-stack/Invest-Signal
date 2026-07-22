@@ -52,6 +52,8 @@ def _event_line(e, url: str, name: str) -> str:
         parts.append(f"&lt; 직전저점 {_fmt_price(d['broken_low'])} (저점 {_kst(d['low_time'])})")
     if d.get("above_qvwap") is not None:
         parts.append("· QVWAP↑" if d["above_qvwap"] else "· QVWAP↓")
+    if d.get("align"):
+        parts.append(f"· {d['align']}")
     return " ".join(parts)
 
 
@@ -79,10 +81,15 @@ def format_events(events_crypto: list, events_etf: list,
         by_label = {}
         for e in sorted(events, key=lambda x: x.symbol):
             by_label.setdefault(e.detail.get("label", e.signal), []).append(e)
+        def item(e):
+            align = e.detail.get("align")
+            return (f"{e.symbol}({_kst(e.bar_time)}~"
+                    + (f" · {align}" if align else "") + ")")
+
         for label, evs in by_label.items():
             evs = sorted(evs, key=lambda x: x.bar_time, reverse=True)   # 최신 순
             shown = evs[:ONGOING_MAX_PER_LABEL]
-            items = " · ".join(f"{e.symbol}({_kst(e.bar_time)}~)" for e in shown)
+            items = " · ".join(item(e) for e in shown)
             extra = len(evs) - len(shown)
             lines.append(f"{label}: {items}" + (f" 외 {extra}종" if extra > 0 else ""))
 

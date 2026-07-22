@@ -52,3 +52,15 @@ def test_monthly_vwap_resets_at_month_start():
     mv = monthly_vwap(df)
     first_may = np.where(df.index >= pd.Timestamp("2025-05-01", tz="UTC"))[0][0]
     assert mv.iloc[first_may] == df["Close"].iloc[first_may]
+
+
+def test_alignment_states():
+    from invest_signal.indicators import alignment
+    idx = pd.date_range("2025-01-01", periods=600, freq="4h", tz="UTC")
+    down = pd.Series(np.linspace(400.0, 100.0, 600), index=idx)
+    df_down = pd.DataFrame({"Open": down, "High": down, "Low": down, "Close": down})
+    assert alignment(df_down) == "역배열"
+    up = pd.Series(np.linspace(100.0, 400.0, 600), index=idx)
+    df_up = pd.DataFrame({"Open": up, "High": up, "Low": up, "Close": up})
+    assert alignment(df_up) == "정배열"
+    assert alignment(df_up.iloc[:100]) is None   # 480선 계산 불가
