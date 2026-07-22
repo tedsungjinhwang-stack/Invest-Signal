@@ -6,7 +6,7 @@ import pandas as pd
 from invest_signal.signals import mss
 from invest_signal.signals.mss import Params
 
-P = Params()
+P = Params(pivot_k=3)          # 픽스처가 k=3 기준으로 구성됨
 
 
 def make_df(closes, lows=None, start="2025-01-01"):
@@ -50,9 +50,9 @@ def test_fires_once_then_silent():
     closes.append(level - 1)                     # 돌파 봉
     closes.append(level - 2)                     # 계속 아래 — 재발화 없음
     df = make_df(closes)
-    evs = mss.detect(df, "TEST", Params(grace_bars=1))
+    evs = mss.detect(df, "TEST", Params(pivot_k=3, grace_bars=1))
     assert len(evs) == 1 and evs[0].bar_time == df.index[-2]
-    assert mss.detect(df, "TEST", Params(grace_bars=0)) == []
+    assert mss.detect(df, "TEST", Params(pivot_k=3, grace_bars=0)) == []
 
 
 def test_unconfirmed_low_is_not_reference():

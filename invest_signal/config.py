@@ -36,6 +36,7 @@ def pullback_params(cfg: dict) -> pullback.Params:
 def downtrend_params(cfg: dict) -> downtrend_reversal.Params:
     s = (cfg.get("signal") or {}).get("downtrend_reversal") or {}
     return downtrend_reversal.Params(
+        ma_ref=int(s.get("ma_ref", 60)),
         lookback_bars=int(s.get("lookback_bars", 180)),
         grace_bars=int(s.get("grace_bars", 1)),
     )
@@ -44,7 +45,7 @@ def downtrend_params(cfg: dict) -> downtrend_reversal.Params:
 def mss_params(cfg: dict) -> mss.Params:
     s = (cfg.get("signal") or {}).get("mss") or {}
     return mss.Params(
-        pivot_k=int(s.get("pivot_k", 3)),
+        pivot_k=int(s.get("pivot_k", 6)),
         grace_bars=int(s.get("grace_bars", 1)),
     )
 

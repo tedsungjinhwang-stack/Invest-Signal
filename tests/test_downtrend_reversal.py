@@ -18,19 +18,19 @@ def make_df(closes, lows=None, start="2025-01-01"):
 
 
 def uptrend_with_completed_dip(dip_wick=None, recover_bars=5):
-    """상승 → 120선 아래 눌림(저점 형성) → 120선 위 복귀 구조를 만든다.
+    """상승 → 60선 아래 눌림(저점 형성) → 60선 위 복귀 구조를 만든다.
 
     반환: (closes, lows, level) — level은 눌림 구간 최저 저가.
     """
-    closes = list(np.linspace(100.0, 200.0, 200))    # 상승 — 종가가 120선 위
+    closes = list(np.linspace(100.0, 200.0, 200))    # 상승 — 종가가 60선 위
     lows = closes.copy()
-    m120 = float(pd.Series(closes).rolling(120).mean().iloc[-1])   # ≈ 170
-    dip = m120 - 10.0
+    m60 = float(pd.Series(closes).rolling(60).mean().iloc[-1])    # ≈ 185
+    dip = m60 - 10.0
     level = dip_wick if dip_wick is not None else dip - 5.0
-    closes += [dip, dip - 2, dip]                     # 눌림 3봉 (종가 < 120선)
+    closes += [dip, dip - 2, dip]                     # 눌림 3봉 (종가 < 60선)
     lows += [dip, level, dip]                         # 가운데 봉 꼬리가 최저점
-    for i in range(recover_bars):                     # 120선 위 복귀 → 눌림 완성
-        closes.append(m120 + 15.0 + i)
+    for i in range(recover_bars):                     # 60선 위 복귀 → 눌림 완성
+        closes.append(m60 + 15.0 + i)
         lows.append(closes[-1])
     return closes, lows, level
 
