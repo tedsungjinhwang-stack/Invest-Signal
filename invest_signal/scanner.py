@@ -18,15 +18,15 @@ from .state import AlertState
 ONGOING_LOOKBACK_BARS = 42      # '유지 중' 판정 시 트리거를 찾아볼 범위 — 42봉 = 7일
 
 
-LONG_SIGNALS = {"uptrend_onset", "pullback"}     # 하락전환 발생 시 리스트에서 걷어낼 롱 셋업
+CHOCH_EVICTS = {"pullback"}     # CHoCH 발생 시 리스트에서 걷어낼 셋업 (상승초입은 240선 재이탈로만 제거)
 
 
 def _detect_all(frames: dict, detectors, log=print) -> tuple[list, list]:
     """전 종목 시그널 검출 + '유지 중' 목록.
 
     하락전환(downtrend_reversal)은 알림·리스트에 표시하지 않는다 — 대신
-    셋업(상승초입·눌림목) 이후에 하락전환이 발생했으면 그 항목을 유지 중
-    리스트에서 영구 제거하는 청소 역할만 한다.
+    눌림목 셋업 이후에 하락전환이 발생했으면 그 항목을 유지 중 리스트에서
+    영구 제거하는 청소 역할만 한다(상승초입은 240선 재이탈로만 제거).
     각 이벤트에 현재 이평선 배열 상태(역배열→혼조→정배열 전환 추적)를 붙인다.
     """
     events, ongoing = [], []
@@ -44,9 +44,9 @@ def _detect_all(frames: dict, detectors, log=print) -> tuple[list, list]:
             sym_events.extend(mod.detect(df, sym, params))
             if latest is not None and mod.still_active(df, latest, params):
                 sym_ongoing.append(latest)
-        if choch_time is not None:      # CHoCH 이후에 만들어진 셋업만 살아남는다
+        if choch_time is not None:      # CHoCH 이후에 만들어진 눌림목만 살아남는다
             sym_ongoing = [e for e in sym_ongoing
-                           if e.signal not in LONG_SIGNALS or e.bar_time > choch_time]
+                           if e.signal not in CHOCH_EVICTS or e.bar_time > choch_time]
         if sym_events or sym_ongoing:
             align = indicators.alignment(df)
             if align:

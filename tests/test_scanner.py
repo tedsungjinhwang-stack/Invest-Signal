@@ -41,13 +41,15 @@ def test_detect_all_choch_evicts_prior_long_holds():
                                still_active=lambda d, e, p: True)
 
     pb = ev2("pullback", "눌림목", 3)
+    up = ev2("uptrend_onset", "상승초입", 2)
     mss_ev = ev2("mss", "MSS", 4)
-    # CHoCH(5봉)가 눌림목(3봉) 이후 → 눌림목 제거, MSS는 계속 표시
+    # CHoCH(5봉)가 셋업들 이후 → 눌림목만 제거, 상승초입·MSS는 유지
     dets = [(mod("pullback", [pb]), Params()),
+            (mod("uptrend_onset", [up]), Params()),
             (mod("mss", [mss_ev]), Params()),
             (mod("downtrend_reversal", [ev2("downtrend_reversal", "하락전환", 5)]), Params())]
     _, ongoing = _detect_all({"X": df}, dets)
-    assert [e.signal for e in ongoing] == ["mss"]
+    assert [e.signal for e in ongoing] == ["uptrend_onset", "mss"]
     # CHoCH(1봉)가 눌림목(3봉)보다 과거 → 눌림목 유지
     dets = [(mod("pullback", [pb]), Params()),
             (mod("downtrend_reversal", [ev2("downtrend_reversal", "하락전환", 1)]), Params())]

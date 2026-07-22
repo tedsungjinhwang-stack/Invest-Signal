@@ -102,10 +102,21 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
 
 
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:
-    """트리거 이후 종가가 계속 60선 아래에 머물러 있으면 '유지 중'."""
+    """상승초입은 발생 후 상승 과정을 계속 추적한다(60선 위 복귀해도 유지).
+
+    제거 조건: 종가가 240선 위로 올라섰다가 다시 240선 아래로 마감하면
+    돌파 실패로 제거. 아직 240선을 넘지 못한 동안은 계속 유지되고,
+    CHoCH(하락전환)로는 제거하지 않는다. 조회 범위(7일) 경과 시 자동 제거.
+    """
     try:
         t = df.index.get_loc(event.bar_time)
     except KeyError:
         return False
-    m = sma(df["Close"], params.ma_entry)
-    return bool((df["Close"].iloc[t:] < m.iloc[t:]).all())
+    c = df["Close"].iloc[t:]
+    m240 = sma(df["Close"], params.ma_touch).iloc[t:]
+    above = c > m240
+    if not above.any():
+        return True                  # 240선 재도전 전 — 계속 추적
+    first_above = above.idxmax()     # 첫 240선 상향 마감 시점
+    fail = c.loc[first_above:] < m240.loc[first_above:]
+    return not bool(fail.any())      # 돌파 후 재이탈했으면 실패로 제거

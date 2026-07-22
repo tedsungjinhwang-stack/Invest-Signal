@@ -174,15 +174,16 @@ def test_insufficient_data_returns_empty():
     assert uptrend_onset.detect(df, "TEST", P) == []
 
 
-def test_still_active_tracks_hold_below_entry_line():
+def test_still_active_tracks_until_240_refail():
+    """상승초입은 60선 복귀·240선 돌파까지 유지하고, 240선 재이탈 시 제거."""
     closes, highs = base_decline()
     add_touch(closes, highs)
-    add_drop(closes, highs)
+    add_drop(closes, highs)                            # 트리거
     df = make_df(closes, highs)
     ev = uptrend_onset.detect(df, "TEST", P)[0]
-    add_drop(closes, highs)                      # 계속 60선 아래
-    df2 = make_df(closes, highs)
-    assert uptrend_onset.still_active(df2, ev, P)
-    add_sideways(closes, highs, bars=1, level=140.0)   # 60선(≈115) 위로 복귀 마감
-    df3 = make_df(closes, highs)
-    assert not uptrend_onset.still_active(df3, ev, P)
+    add_sideways(closes, highs, bars=2, level=130.0)   # 60선 위 복귀 — 유지
+    assert uptrend_onset.still_active(make_df(closes, highs), ev, P)
+    add_sideways(closes, highs, bars=2, level=200.0)   # 240선(≈160) 위 마감 — 유지
+    assert uptrend_onset.still_active(make_df(closes, highs), ev, P)
+    add_drop(closes, highs, 140.0)                     # 240선 아래 재마감 → 실패
+    assert not uptrend_onset.still_active(make_df(closes, highs), ev, P)
