@@ -47,8 +47,8 @@ def _event_line(e, url: str, name: str) -> str:
         parts.append(f"(240터치 {_kst(d['touch_time'])})")
     if d.get("cross_time"):                          # 눌림목: 240 돌파 시각
         parts.append(f"(240돌파 {_kst(d['cross_time'])})")
-    if d.get("mvwap"):
-        parts.append(f"· MVWAP {_fmt_price(d['mvwap'])} 터치")
+    if d.get("broken_low"):                          # 하락전환: 깨진 직전저점
+        parts.append(f"&lt; 직전저점 {_fmt_price(d['broken_low'])} (저점 {_kst(d['low_time'])})")
     if d.get("above_qvwap") is not None:
         parts.append("· QVWAP↑" if d["above_qvwap"] else "· QVWAP↓")
     return " ".join(parts)
