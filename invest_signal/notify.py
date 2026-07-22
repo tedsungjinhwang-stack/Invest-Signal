@@ -37,24 +37,35 @@ def chart_url(symbol: str, kind: str, market: str = "US") -> str:
     return f"https://www.tradingview.com/symbols/{symbol}/"
 
 
-def _event_line(e, url: str, name: str) -> str:
+SIGNAL_EMOJI = {"상승초입": "🟢", "눌림목": "🔵", "MSS": "🔴"}
+SIGNAL_ORDER = ["상승초입", "눌림목", "MSS"]
+
+
+def _short_symbol(symbol: str, kind: str, name: str) -> str:
+    """표시용 심볼 — 크립토는 USDT 접미사 제거, ETF/주식은 이름 병기."""
+    if kind == "crypto":
+        return symbol[:-4] if symbol.endswith("USDT") else symbol
+    return f"{symbol} {name}".strip()
+
+
+def _age_days(bar_time) -> int:
+    t = pd.Timestamp(bar_time)
+    if t.tz is None:
+        t = t.tz_localize("UTC")
+    return max(0, (pd.Timestamp.now(tz="UTC") - t).days)
+
+
+def _event_line(e, url: str, name: str, kind: str) -> str:
     d = e.detail
-    label = f"{e.symbol} {name}".strip()
-    parts = [f"· [{d.get('label', e.signal)}] <a href=\"{url}\">{label}</a>"
-             f" — 종가 {_fmt_price(e.price)}"]
-    if d.get("entry_ma"):
-        parts.append(f"&lt; {d.get('entry_ma_period', 60)}선 {_fmt_price(d['entry_ma'])}")
-    if d.get("touch_time"):                          # 상승초입: 240 터치 시각
-        parts.append(f"(240터치 {_kst(d['touch_time'])})")
-    if d.get("cross_time"):                          # 눌림목: 240 돌파 시각
-        parts.append(f"(240돌파 {_kst(d['cross_time'])})")
-    if d.get("broken_low"):                          # 하락전환: 깨진 직전저점
-        parts.append(f"&lt; 직전저점 {_fmt_price(d['broken_low'])} (저점 {_kst(d['low_time'])})")
+    head = f"· <a href=\"{url}\">{_short_symbol(e.symbol, kind, name)}</a> {_fmt_price(e.price)}"
+    tags = []
+    if e.signal == "mss" and d.get("broken_low"):
+        tags.append(f"저점 {_fmt_price(d['broken_low'])} 이탈")
     if d.get("above_qvwap") is not None:
-        parts.append("· QVWAP↑" if d["above_qvwap"] else "· QVWAP↓")
+        tags.append("QVWAP↑" if d["above_qvwap"] else "QVWAP↓")
     if d.get("align"):
-        parts.append(f"· {d['align']}")
-    return " ".join(parts)
+        tags.append(d["align"])
+    return " · ".join([head] + tags)
 
 
 def format_events(events_crypto: list, events_etf: list,
@@ -63,43 +74,52 @@ def format_events(events_crypto: list, events_etf: list,
                   events_stocks: list = (), ongoing_stocks: list = ()) -> str:
     """이번 스캔의 신규 시그널 + '유지 중' 목록을 텔레그램 HTML 메시지로."""
     now_kst = pd.Timestamp.now(tz=KST).strftime("%m-%d %H:%M")
-    lines = [f"🚨 <b>4h 시그널</b> ({now_kst} KST)"]
+    lines = [f"🚨 <b>4h 시그널</b> · {now_kst} KST"]
+
+    def by_label(events):
+        out = {}
+        for e in sorted(events, key=lambda x: x.symbol):
+            out.setdefault(e.detail.get("label", e.signal), []).append(e)
+        order = [k for k in SIGNAL_ORDER if k in out] + \
+                [k for k in out if k not in SIGNAL_ORDER]
+        return [(k, out[k]) for k in order]
 
     def block(title, events, kind):
         if not events:
             return
-        lines.append(f"\n<b>[{title}]</b>")
-        for e in sorted(events, key=lambda x: (x.symbol, x.signal)):
-            name = etf_names.get(e.symbol, "") if kind == "etf" else ""
-            market = "KR" if (kind == "etf" and e.symbol[:1].isdigit()) else "US"
-            lines.append(_event_line(e, chart_url(e.symbol, kind, market), name))
+        lines.append(f"\n<b>━ {title} 신규 ━</b>")
+        for label, evs in by_label(events):
+            lines.append(f"{SIGNAL_EMOJI.get(label, '▪')} <b>{label}</b>")
+            for e in evs:
+                name = etf_names.get(e.symbol, "") if kind != "crypto" else ""
+                market = "KR" if (kind != "crypto" and e.symbol[:1].isdigit()) else "US"
+                lines.append(_event_line(e, chart_url(e.symbol, kind, market), name, kind))
 
-    def hold_block(title, events):
-        """트리거 후 조건이 계속 유지 중인 종목들 — 시그널별로 압축 표기."""
+    def hold_block(title, events, kind):
+        """트리거 후 조건이 계속 유지 중인 종목들 — 경과일(Nd)로 압축 표기."""
         if not events:
             return
-        lines.append(f"\n📌 <b>[{title} · 유지 중]</b>")
-        by_label = {}
-        for e in sorted(events, key=lambda x: x.symbol):
-            by_label.setdefault(e.detail.get("label", e.signal), []).append(e)
+        lines.append(f"\n📌 <b>{title} 유지 중</b>")
+
         def item(e):
             align = e.detail.get("align")
-            return (f"{e.symbol}({_kst(e.bar_time)}~"
-                    + (f" · {align}" if align else "") + ")")
+            sym = _short_symbol(e.symbol, kind, "")
+            return f"{sym}({_age_days(e.bar_time)}d" + (f"·{align}" if align else "") + ")"
 
-        for label, evs in by_label.items():
+        for label, evs in by_label(events):
             evs = sorted(evs, key=lambda x: x.bar_time, reverse=True)   # 최신 순
             shown = evs[:ONGOING_MAX_PER_LABEL]
-            items = " · ".join(item(e) for e in shown)
             extra = len(evs) - len(shown)
-            lines.append(f"{label}: {items}" + (f" 외 {extra}종" if extra > 0 else ""))
+            lines.append(f"{SIGNAL_EMOJI.get(label, '▪')} {label}: "
+                         + " · ".join(item(e) for e in shown)
+                         + (f" 외 {extra}종" if extra > 0 else ""))
 
-    block("크립토 USDT-P", events_crypto, "crypto")
-    block("레버리지 ETF", events_etf, "etf")
+    block("크립토", events_crypto, "crypto")
+    block("ETF", events_etf, "etf")
     block("주식", events_stocks, "etf")      # 링크 규칙은 ETF와 동일(야후/KRX)
-    hold_block("크립토", ongoing_crypto)
-    hold_block("ETF", ongoing_etf)
-    hold_block("주식", ongoing_stocks)
+    hold_block("크립토", ongoing_crypto, "crypto")
+    hold_block("ETF", ongoing_etf, "etf")
+    hold_block("주식", ongoing_stocks, "etf")
     return "\n".join(lines)
 
 

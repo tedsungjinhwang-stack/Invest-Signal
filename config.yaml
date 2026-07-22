@@ -12,6 +12,8 @@ signal:
     breakout_window_bars: 180  # 240선 돌파 유효기간 — 180봉 = 30일
     grace_bars: 1
   downtrend_reversal:       # 하락전환 (4h봉): 60선 아래 눌림의 직전저점 하향돌파(CHoCH)
+    # 알림·리스트에 표시하지 않음 — 하락전환 활성 종목의 상승초입·눌림목을
+    # '유지 중' 리스트에서 제거하는 용도로만 사용 (enabled: false면 제거도 안 함)
     enabled: true
     ma_ref: 60              # 눌림 판정 기준선
     lookback_bars: 180      # 직전저점 유효기간 — 180봉 = 30일

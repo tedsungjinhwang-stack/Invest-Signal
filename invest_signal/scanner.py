@@ -18,22 +18,34 @@ from .state import AlertState
 ONGOING_LOOKBACK_BARS = 42      # '유지 중' 판정 시 트리거를 찾아볼 범위 — 42봉 = 7일
 
 
+LONG_SIGNALS = {"uptrend_onset", "pullback"}     # 하락전환 발생 시 리스트에서 걷어낼 롱 셋업
+
+
 def _detect_all(frames: dict, detectors, log=print) -> tuple[list, list]:
     """전 종목 시그널 검출 + '유지 중'(트리거 후 조건이 계속 참) 목록.
 
+    하락전환(downtrend_reversal)은 알림·리스트에 표시하지 않는다 — 대신
+    하락전환이 활성(깨진 저점 아래 유지)인 종목의 상승초입·눌림목을
+    유지 중 리스트에서 제거하는 청소 역할만 한다.
     각 이벤트에 현재 이평선 배열 상태(역배열→혼조→정배열 전환 추적)를 붙인다.
     """
     events, ongoing = [], []
     for sym, df in frames.items():
         sym_events, sym_ongoing = [], []
+        structure_broken = False
         for mod, params in detectors:
-            sym_events.extend(mod.detect(df, sym, params))
             wide = dataclasses.replace(params, grace_bars=ONGOING_LOOKBACK_BARS)
             past = mod.detect(df, sym, wide)
-            if past:
-                latest = max(past, key=lambda e: e.bar_time)
-                if mod.still_active(df, latest, params):
-                    sym_ongoing.append(latest)
+            latest = max(past, key=lambda e: e.bar_time) if past else None
+            active = latest is not None and mod.still_active(df, latest, params)
+            if mod.NAME == "downtrend_reversal":
+                structure_broken = active       # 표시 대신 상태만 사용
+                continue
+            sym_events.extend(mod.detect(df, sym, params))
+            if active:
+                sym_ongoing.append(latest)
+        if structure_broken:
+            sym_ongoing = [e for e in sym_ongoing if e.signal not in LONG_SIGNALS]
         if sym_events or sym_ongoing:
             align = indicators.alignment(df)
             if align:

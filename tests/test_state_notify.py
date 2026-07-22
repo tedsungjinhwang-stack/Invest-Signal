@@ -51,7 +51,7 @@ def test_format_events_sections_and_links():
                             "touch_time": "2026-07-19T12:00:00+00:00"})],
         [_event("122630"), _event("SOXL")],
         {"122630": "KODEX 레버리지", "SOXL": "반도체 3x"})
-    assert "크립토" in msg and "레버리지 ETF" in msg
+    assert "크립토" in msg and "ETF" in msg
     assert "binance.com/en/futures/BTCUSDT" in msg
     assert "KRX-122630" in msg                 # 한국 종목은 KRX 차트 링크
     assert "QVWAP↑" in msg
@@ -70,8 +70,8 @@ def test_format_events_ongoing_section():
                _event("SOLUSDT", {"label": "MSS", "broken_low": 70.0})]
     msg = format_events([_event("BTCUSDT")], [], {}, ongoing_crypto=ongoing)
     assert "유지 중" in msg
-    assert "상승초입: ETHUSDT" in msg
-    assert "MSS: SOLUSDT" in msg
+    assert "상승초입: ETH(" in msg          # USDT 접미사 제거 + 경과일 표기
+    assert "MSS: SOL(" in msg
     # 유지 목록이 없으면 섹션도 없다
     assert "유지 중" not in format_events([_event("BTCUSDT")], [], {})
 
@@ -86,5 +86,5 @@ def test_align_tag_shown_in_lines_and_ongoing():
     new = _event("BTCUSDT", {"label": "상승초입", "align": "역배열"})
     hold = _event("ETHUSDT", {"label": "눌림목", "align": "혼조"})
     msg = format_events([new], [], {}, ongoing_crypto=[hold])
-    assert "· 역배열" in msg
-    assert "ETHUSDT(" in msg and "혼조)" in msg
+    assert "역배열" in msg
+    assert "ETH(" in msg and "·혼조)" in msg
