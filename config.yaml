@@ -52,3 +52,36 @@ etf:
     - {code: "233740", market: KR, name: "KODEX 코스닥150레버리지"}
     - {code: "252670", market: KR, name: "KODEX 200선물인버스2X"}
     - {code: "251340", market: KR, name: "KODEX 코스닥150선물인버스2X"}
+
+stocks:
+  enabled: true
+  # quant_portfolio: 매 스캔마다 Quant-Portfolio 레포의 reports/latest.md에서
+  #   섹터 대장주(2×3) + RS Top5(미국·한국)를 자동 로드 — QP_GITHUB_TOKEN 시크릿 필요.
+  #   토큰이 없거나 조회 실패 시 아래 정적 목록으로 폴백. static: 아래 목록만 사용.
+  source: quant_portfolio
+  # 폴백용 스냅샷 (2026-07-21 리포트 기준)
+  tickers:
+    # 미국 트랙① 강한 섹터 대장주 (사이버보안·반도체·석유E&P × 2)
+    - {code: FTNT,   market: US, name: "Fortinet"}
+    - {code: PANW,   market: US, name: "Palo Alto"}
+    - {code: MU,     market: US, name: "Micron"}
+    - {code: AMD,    market: US, name: "AMD"}
+    - {code: OVV,    market: US, name: "Ovintiv"}
+    - {code: EOG,    market: US, name: "EOG"}
+    # 미국 트랙② RS Top5 (섹터 중복 MU·AMD 제외)
+    - {code: DELL,   market: US, name: "Dell"}
+    - {code: SNDK,   market: US, name: "Sandisk"}
+    - {code: DDOG,   market: US, name: "Datadog"}
+    # 한국 트랙① 강한 섹터 대장주 (반도체·보험·은행 × 2)
+    - {code: "000660", market: KR, name: "SK하이닉스"}
+    - {code: "005930", market: KR, name: "삼성전자"}
+    - {code: "032830", market: KR, name: "삼성생명"}
+    - {code: "001450", market: KR, name: "현대해상"}
+    - {code: "086790", market: KR, name: "하나금융지주"}
+    - {code: "105560", market: KR, name: "KB금융"}
+    # 한국 트랙② RS Top5
+    - {code: "036930", market: KQ, name: "주성엔지니어링"}
+    - {code: "009150", market: KR, name: "삼성전기"}
+    - {code: "319660", market: KQ, name: "피에스케이"}
+    - {code: "000500", market: KR, name: "가온전선"}
+    - {code: "131290", market: KQ, name: "티에스이"}

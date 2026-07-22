@@ -59,7 +59,8 @@ def _event_line(e, url: str, name: str) -> str:
 
 def format_events(events_crypto: list, events_etf: list,
                   etf_names: dict[str, str],
-                  ongoing_crypto: list = (), ongoing_etf: list = ()) -> str:
+                  ongoing_crypto: list = (), ongoing_etf: list = (),
+                  events_stocks: list = (), ongoing_stocks: list = ()) -> str:
     """이번 스캔의 신규 시그널 + '유지 중' 목록을 텔레그램 HTML 메시지로."""
     now_kst = pd.Timestamp.now(tz=KST).strftime("%m-%d %H:%M")
     lines = [f"🚨 <b>4h 시그널</b> ({now_kst} KST)"]
@@ -95,8 +96,10 @@ def format_events(events_crypto: list, events_etf: list,
 
     block("크립토 USDT-P", events_crypto, "crypto")
     block("레버리지 ETF", events_etf, "etf")
+    block("주식", events_stocks, "etf")      # 링크 규칙은 ETF와 동일(야후/KRX)
     hold_block("크립토", ongoing_crypto)
     hold_block("ETF", ongoing_etf)
+    hold_block("주식", ongoing_stocks)
     return "\n".join(lines)
 
 

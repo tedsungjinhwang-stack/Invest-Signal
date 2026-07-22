@@ -9,7 +9,12 @@ LOOKBACK_DAYS = 700
 
 
 def yahoo_symbol(code: str, market: str) -> str:
-    return f"{code}.KS" if market == "KR" else code
+    """야후 심볼 — KR(코스피)은 .KS, KQ(코스닥)은 .KQ, 미국은 그대로."""
+    if market == "KR":
+        return f"{code}.KS"
+    if market == "KQ":
+        return f"{code}.KQ"
+    return code
 
 
 def resample_4h(df1h: pd.DataFrame, now: pd.Timestamp | None = None) -> pd.DataFrame | None:
@@ -67,21 +72,40 @@ def extract_ohlc(data: pd.DataFrame, sym: str) -> pd.DataFrame | None:
     return df if len(df) else None
 
 
-def fetch_all(tickers: list[dict], log=print) -> dict[str, pd.DataFrame]:
-    """config의 ETF 목록 전체를 받아 {코드: 4h OHLC}를 돌려준다."""
+def _download(syms: list[str]):
     import yfinance as yf     # 무거운 임포트 — 테스트에서 모듈 로드만 할 땐 안 불리게 지연
 
-    syms = [yahoo_symbol(t["code"], t["market"]) for t in tickers]
     start = (pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
-    data = yf.download(syms, start=start, interval="1h", group_by="ticker",
+    return yf.download(syms, start=start, interval="1h", group_by="ticker",
                        auto_adjust=False, progress=False, threads=True)
+
+
+def fetch_all(tickers: list[dict], log=print) -> dict[str, pd.DataFrame]:
+    """티커 목록 전체를 받아 {코드: 4h OHLC}를 돌려준다.
+
+    KR(.KS)로 조회했는데 데이터가 없는 6자리 코드는 코스닥(.KQ)으로
+    재시도한다 — 퀀트포트폴리오 리포트에는 코스피/코스닥 구분이 없어서.
+    """
+    data = _download([yahoo_symbol(t["code"], t["market"]) for t in tickers])
     out: dict[str, pd.DataFrame] = {}
+    retry_kq = []
     for t in tickers:
         sym = yahoo_symbol(t["code"], t["market"])
         df1h = extract_ohlc(data, sym)
         d4 = resample_4h(df1h) if df1h is not None else None
-        if d4 is None or len(d4) == 0:
+        if d4 is not None and len(d4):
+            out[t["code"]] = d4
+        elif t["market"] == "KR":
+            retry_kq.append(t)
+        else:
             log(f"[etf] {t['code']} 데이터 없음/부족 — 건너뜀")
-            continue
-        out[t["code"]] = d4
+    if retry_kq:
+        data2 = _download([f"{t['code']}.KQ" for t in retry_kq])
+        for t in retry_kq:
+            df1h = extract_ohlc(data2, f"{t['code']}.KQ")
+            d4 = resample_4h(df1h) if df1h is not None else None
+            if d4 is not None and len(d4):
+                out[t["code"]] = d4
+            else:
+                log(f"[etf] {t['code']} 데이터 없음(KS/KQ 모두) — 건너뜀")
     return out
