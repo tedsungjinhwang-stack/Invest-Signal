@@ -28,6 +28,7 @@ def uptrend_params(cfg: dict) -> uptrend_onset.Params:
 def pullback_params(cfg: dict) -> pullback.Params:
     s = (cfg.get("signal") or {}).get("pullback") or {}
     return pullback.Params(
+        ma_entry=int(s.get("ma_entry", 120)),
         breakout_window_bars=int(s.get("breakout_window_bars", 180)),
         grace_bars=int(s.get("grace_bars", 1)),
     )
