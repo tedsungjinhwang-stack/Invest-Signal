@@ -45,9 +45,12 @@ DIVIDER = "─" * 16
 
 
 def _short_symbol(symbol: str, kind: str, name: str) -> str:
-    """표시용 심볼 — 크립토는 USDT 접미사 제거, ETF/주식은 이름 병기."""
+    """표시용 심볼 — 크립토는 USDT 접미사 제거, 미국은 티커+이름 병기,
+    한국(숫자 코드)은 코드 대신 종목명만."""
     if kind == "crypto":
         return symbol[:-4] if symbol.endswith("USDT") else symbol
+    if symbol[:1].isdigit() and name:
+        return name
     return f"{symbol} {name}".strip()
 
 
@@ -98,6 +101,7 @@ def format_events(events_crypto: list, events_etf: list,
 
     def hold_line(e, kind):
         d = e.detail
+        name = etf_names.get(e.symbol, "") if kind != "crypto" else ""
         tags = [f"{_age_days(e.bar_time)}d"]
         if e.signal == "mss" or d.get("label") == "MSS":
             # MSS는 신규 줄과 같은 형식으로 — 깨진 저점 레벨 포함
@@ -106,7 +110,7 @@ def format_events(events_crypto: list, events_etf: list,
         elif d.get("align"):
             tags.append(d["align"])
         price = d.get("last_price")
-        return (f"↳ {_short_symbol(e.symbol, kind, '')}"
+        return (f"↳ {_short_symbol(e.symbol, kind, name)}"
                 + (f"  {_fmt_price(price)}" if price else "")
                 + " · " + "·".join(tags))
 

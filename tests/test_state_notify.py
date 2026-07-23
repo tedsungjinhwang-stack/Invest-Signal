@@ -55,7 +55,7 @@ def test_format_events_sections_and_links():
     assert "binance.com/en/futures/BTCUSDT" in msg
     assert "KRX-122630" in msg                 # 한국 종목은 KRX 차트 링크
     assert "QVWAP" not in msg              # QVWAP은 조건으로만 쓰고 표시하지 않음
-    assert "KODEX 레버리지" in msg
+    assert ">KODEX 레버리지</a>" in msg    # 한국 종목은 코드 없이 종목명만 표시
 
 
 def test_split_chunks_preserves_content():
