@@ -40,6 +40,9 @@ def chart_url(symbol: str, kind: str, market: str = "US") -> str:
 SIGNAL_EMOJI = {"상승초입": "🟢", "풀백": "🔵", "하락전환": "🔻"}
 SIGNAL_ORDER = ["상승초입", "풀백", "하락전환"]
 DISPLAY_GROUP = {"MSS": "풀백", "눌림목": "풀백"}   # MSS는 풀백 칸에 태그로 표시
+MARKET_EMOJI = {"크립토": "🪙", "ETF": "📊", "주식": "🏛"}
+DIVIDER = "─" * 16
+EXPANDABLE_FROM = 7      # 추적 항목이 이 수 이상이면 접힌 인용블록으로
 
 
 def _short_symbol(symbol: str, kind: str, name: str) -> str:
@@ -58,16 +61,17 @@ def _age_days(bar_time) -> int:
 
 def _event_line(e, url: str, name: str, kind: str) -> str:
     d = e.detail
-    head = f"· <a href=\"{url}\">{_short_symbol(e.symbol, kind, name)}</a> {_fmt_price(e.price)}"
+    head = (f"• <a href=\"{url}\">{_short_symbol(e.symbol, kind, name)}</a>"
+            f"  <b>{_fmt_price(e.price)}</b>")
     tags = []
     if e.signal == "mss" or d.get("label") == "MSS":
-        tags.append(f"MSS(저점 {_fmt_price(d['broken_low'])} 이탈)"
-                    if d.get("broken_low") else "MSS")
+        tags.append(f"⚠️MSS 저점 {_fmt_price(d['broken_low'])} 이탈"
+                    if d.get("broken_low") else "⚠️MSS")
     elif e.signal == "downtrend_reversal" and d.get("broken_low"):
         tags.append(f"직전저점 {_fmt_price(d['broken_low'])} 이탈")
     if d.get("align"):
         tags.append(d["align"])
-    return " · ".join([head] + tags)
+    return head + (" · " + " · ".join(tags) if tags else "")
 
 
 def format_events(events_crypto: list, events_etf: list,
@@ -94,12 +98,14 @@ def format_events(events_crypto: list, events_etf: list,
     def hold_item(e, kind):
         align = e.detail.get("align")
         is_mss = e.signal == "mss" or e.detail.get("label") == "MSS"
-        return (f"{_short_symbol(e.symbol, kind, '')}({_age_days(e.bar_time)}d"
+        return (f"{_short_symbol(e.symbol, kind, '')} {_age_days(e.bar_time)}d"
                 + (f"·{align}" if align else "")
-                + ("·MSS" if is_mss else "") + ")")
+                + ("·MSS" if is_mss else ""))
 
     for label in ordered:
-        lines.append(f"\n{SIGNAL_EMOJI.get(label, '▪')} <b>{label}</b>")
+        lines.append("")
+        lines.append(DIVIDER)
+        lines.append(f"{SIGNAL_EMOJI.get(label, '▪')} <b>{label}</b>")
         for mtitle, new, hold, kind in markets:
             new_sel = sorted((e for e in new if label_of(e) == label),
                              key=lambda x: x.symbol)
@@ -107,7 +113,8 @@ def format_events(events_crypto: list, events_etf: list,
                               key=lambda x: x.bar_time, reverse=True)   # 최신 순
             if not new_sel and not hold_sel:
                 continue
-            lines.append(f"[{mtitle}]")
+            lines.append("")
+            lines.append(f"{MARKET_EMOJI.get(mtitle, '▪')} <b>{mtitle}</b>")
             for e in new_sel:
                 name = etf_names.get(e.symbol, "") if kind != "crypto" else ""
                 market = "KR" if (kind != "crypto" and e.symbol[:1].isdigit()) else "US"
@@ -115,8 +122,12 @@ def format_events(events_crypto: list, events_etf: list,
             if hold_sel:
                 shown = hold_sel[:ONGOING_MAX_PER_LABEL]
                 extra = len(hold_sel) - len(shown)
-                lines.append("↳ " + " · ".join(hold_item(e, kind) for e in shown)
-                             + (f" 외 {extra}종" if extra > 0 else ""))
+                items = ", ".join(hold_item(e, kind) for e in shown) \
+                    + (f" 외 {extra}종" if extra > 0 else "")
+                # 추적 리스트는 인용블록으로 신규 알림과 시각 분리 — 길면 접힘
+                tag = ("blockquote expandable" if len(shown) >= EXPANDABLE_FROM
+                       else "blockquote")
+                lines.append(f"<{tag}>↳ {items}</blockquote>")
 
     return "\n".join(lines)
 
