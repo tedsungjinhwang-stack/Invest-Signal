@@ -42,7 +42,6 @@ SIGNAL_ORDER = ["상승초입", "풀백", "하락전환"]
 DISPLAY_GROUP = {"MSS": "풀백", "눌림목": "풀백"}   # MSS는 풀백 칸에 태그로 표시
 MARKET_EMOJI = {"크립토": "🪙", "ETF": "📊", "주식": "🏛"}
 DIVIDER = "─" * 16
-EXPANDABLE_FROM = 7      # 추적 항목이 이 수 이상이면 접힌 인용블록으로
 
 
 def _short_symbol(symbol: str, kind: str, name: str) -> str:
@@ -122,12 +121,9 @@ def format_events(events_crypto: list, events_etf: list,
             if hold_sel:
                 shown = hold_sel[:ONGOING_MAX_PER_LABEL]
                 extra = len(hold_sel) - len(shown)
-                items = ", ".join(hold_item(e, kind) for e in shown) \
-                    + (f" 외 {extra}종" if extra > 0 else "")
-                # 추적 리스트는 인용블록으로 신규 알림과 시각 분리 — 길면 접힘
-                tag = ("blockquote expandable" if len(shown) >= EXPANDABLE_FROM
-                       else "blockquote")
-                lines.append(f"<{tag}>↳ {items}</blockquote>")
+                # 추적 리스트 — 접힘·들여쓰기 없이 전부 보이게 평문 한 줄
+                lines.append("↳ " + ", ".join(hold_item(e, kind) for e in shown)
+                             + (f" 외 {extra}종" if extra > 0 else ""))
 
     return "\n".join(lines)
 

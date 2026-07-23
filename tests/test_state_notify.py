@@ -69,7 +69,8 @@ def test_format_events_ongoing_section():
     ongoing = [_event("ETHUSDT", {"label": "상승초입"}),
                _event("SOLUSDT", {"label": "MSS", "broken_low": 70.0})]
     msg = format_events([_event("BTCUSDT")], [], {}, ongoing_crypto=ongoing)
-    assert "<blockquote>↳ ETH " in msg        # 추적 중 종목은 인용블록 ↳ 줄
+    assert "↳ ETH " in msg                    # 추적 중 종목은 같은 칸 아래 ↳ 줄
+    assert "blockquote" not in msg            # 접힘·들여쓰기 없이 전부 표시
     assert "풀백" in msg and "SOL " in msg    # MSS는 풀백 칸에 태그로 병합
     assert "·MSS" in msg
     # 추적 목록이 없으면 ↳ 줄도 없다
@@ -80,7 +81,7 @@ def test_ongoing_list_caps_per_label():
     evs = [_event(f"C{i:02d}USDT", {"label": "풀백"}) for i in range(20)]
     msg = format_events([_event("BTCUSDT")], [], {}, ongoing_crypto=evs)
     assert "외 5종" in msg
-    assert "<blockquote expandable>" in msg   # 긴 추적 리스트는 접힌 인용블록
+    assert "blockquote" not in msg            # 긴 리스트도 접지 않고 그대로
 
 
 def test_downtrend_section_for_etf_and_stocks():
