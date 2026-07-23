@@ -89,16 +89,24 @@ def test_detect_all_show_choch_displays_downtrend_events():
     assert ongoing == []
 
 
-def test_filter_ranked_covers_pullback_and_mss_only():
-    """랭크 필터는 풀백 칸 표시분(풀백+MSS)만 거르고 상승초입은 통과."""
-    from invest_signal.scanner import _filter_ranked
+def test_filter_ranked_scopes():
+    """풀백 스코프는 풀백+MSS만 거르고, 상승초입 스코프는 상승초입만 —
+    서로 다른 eligible 집합(완화 기준)을 독립 적용할 수 있다."""
+    from invest_signal.scanner import RANK_FILTER_SCOPE, _filter_ranked
 
     evs = [_ev("BIGVOL", "pullback", 0), _ev("THIN", "pullback", 0),
            _ev("BIGVOL", "mss", 4), _ev("THIN", "mss", 4),
-           _ev("THIN", "uptrend_onset", 8)]
-    out = _filter_ranked(evs, {"BIGVOL"})
+           _ev("BIGVOL", "uptrend_onset", 8), _ev("THIN", "uptrend_onset", 8)]
+    out = _filter_ranked(evs, {"BIGVOL"}, RANK_FILTER_SCOPE["pullback"])
     assert {(e.symbol, e.signal) for e in out} == {
-        ("BIGVOL", "pullback"), ("BIGVOL", "mss"), ("THIN", "uptrend_onset")}
+        ("BIGVOL", "pullback"), ("BIGVOL", "mss"),
+        ("BIGVOL", "uptrend_onset"), ("THIN", "uptrend_onset")}
+    # 상승초입은 자체(더 넓은) eligible 집합으로 거른다 — 풀백·MSS는 건드리지 않음
+    out = _filter_ranked(out, {"BIGVOL", "THIN"}, RANK_FILTER_SCOPE["uptrend_onset"])
+    assert ("THIN", "uptrend_onset") in {(e.symbol, e.signal) for e in out}
+    out = _filter_ranked(out, {"BIGVOL"}, RANK_FILTER_SCOPE["uptrend_onset"])
+    assert {(e.symbol, e.signal) for e in out} == {
+        ("BIGVOL", "pullback"), ("BIGVOL", "mss"), ("BIGVOL", "uptrend_onset")}
 
 
 def test_crypto_rank_eligible_union_of_volume_and_gain():

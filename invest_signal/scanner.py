@@ -20,7 +20,13 @@ ONGOING_LOOKBACK_BARS = 42      # '유지 중' 판정 시 트리거를 찾아볼
 
 CHOCH_EVICTS = {"pullback"}     # CHoCH 발생 시 리스트에서 걷어낼 셋업 (상승초입은 240선 재이탈로만 제거)
 
-RANK_FILTERED = {"pullback", "mss"}     # 크립토 랭크 필터 대상 — 풀백 칸에 표시되는 것 전부 (MSS 줄 포함)
+# 크립토 랭크 필터 적용 범위 — signal.<키>.crypto_rank_filter 설정별로 걸러낼
+# 시그널 집합. 풀백 칸은 MSS 줄까지 함께 거르고, 상승초입은 자체(완화) 기준을 쓴다.
+RANK_FILTER_SCOPE = {
+    "pullback": frozenset({"pullback", "mss"}),
+    "uptrend_onset": frozenset({"uptrend_onset"}),
+}
+RANK_FILTER_LABEL = {"pullback": "풀백·MSS", "uptrend_onset": "상승초입"}
 
 
 def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[list, list]:
@@ -87,9 +93,9 @@ def _crypto_rank_eligible(frames: dict, rcfg: dict) -> set:
     return eligible
 
 
-def _filter_ranked(items: list, eligible: set) -> list:
-    """풀백 칸에 표시되는 시그널(풀백·MSS)은 랭크 필터 통과 종목만 남긴다."""
-    return [e for e in items if e.signal not in RANK_FILTERED or e.symbol in eligible]
+def _filter_ranked(items: list, eligible: set, signals: frozenset) -> list:
+    """대상 시그널은 랭크 필터 통과 종목만 남긴다 (나머지 시그널은 그대로)."""
+    return [e for e in items if e.signal not in signals or e.symbol in eligible]
 
 
 def scan_crypto(cfg: dict, detectors, log=print) -> tuple[list, list]:
@@ -105,16 +111,21 @@ def scan_crypto(cfg: dict, detectors, log=print) -> tuple[list, list]:
         frames = data_binance.fetch_all(s, symbols, source, limit=limit, log=log)
     events, ongoing = _detect_all(frames, detectors, log)
 
-    # 크립토 전용 풀백 랭크 필터 — 주도주(거래대금·상승률 상위)만 남긴다.
-    # 풀백 칸에 표시되는 건 전부 대상: 풀백 시그널 + MSS 줄
-    rcfg = ((cfg.get("signal") or {}).get("pullback") or {}).get("crypto_rank_filter") or {}
-    if rcfg.get("enabled", True):
+    # 크립토 전용 랭크 필터 — 주도주(거래대금·상승률 상위)만 남긴다.
+    # 풀백 칸(풀백+MSS 줄)과 상승초입이 각자 기준을 갖는다 —
+    # 상승초입은 3파 전 초입이라 기준을 낮게 잡는다.
+    scfg = cfg.get("signal") or {}
+    for key, signals in RANK_FILTER_SCOPE.items():
+        rcfg = (scfg.get(key) or {}).get("crypto_rank_filter") or {}
+        if not rcfg.get("enabled", True):
+            continue
         eligible = _crypto_rank_eligible(frames, rcfg)
-        before = sum(1 for e in events if e.signal in RANK_FILTERED)
-        events = _filter_ranked(events, eligible)
-        ongoing = _filter_ranked(ongoing, eligible)
-        after = sum(1 for e in events if e.signal in RANK_FILTERED)
-        log(f"[binance] 풀백 랭크 필터: 대상 {len(eligible)}종 — 신규 풀백·MSS {before}→{after}건")
+        before = sum(1 for e in events if e.signal in signals)
+        events = _filter_ranked(events, eligible, signals)
+        ongoing = _filter_ranked(ongoing, eligible, signals)
+        after = sum(1 for e in events if e.signal in signals)
+        log(f"[binance] {RANK_FILTER_LABEL[key]} 랭크 필터: "
+            f"대상 {len(eligible)}종 — 신규 {before}→{after}건")
 
     log(f"[binance] 시그널 {len(events)}건 · 유지 중 {len(ongoing)}건")
     return events, ongoing
