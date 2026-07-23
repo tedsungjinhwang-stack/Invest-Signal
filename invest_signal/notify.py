@@ -64,12 +64,14 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
             f"  <b>{_fmt_price(e.price)}</b>")
     tags = []
     if e.signal == "mss" or d.get("label") == "MSS":
+        # MSS는 MSS 태그만 — 배열 상태는 붙이지 않는다
         tags.append(f"⚠️MSS 저점 {_fmt_price(d['broken_low'])} 이탈"
                     if d.get("broken_low") else "⚠️MSS")
-    elif e.signal == "downtrend_reversal" and d.get("broken_low"):
-        tags.append(f"직전저점 {_fmt_price(d['broken_low'])} 이탈")
-    if d.get("align"):
-        tags.append(d["align"])
+    else:
+        if e.signal == "downtrend_reversal" and d.get("broken_low"):
+            tags.append(f"직전저점 {_fmt_price(d['broken_low'])} 이탈")
+        if d.get("align") and d["align"] != "혼조":    # 혼조는 표시 생략
+            tags.append(d["align"])
     return head + (" · " + " · ".join(tags) if tags else "")
 
 
@@ -97,10 +99,10 @@ def format_events(events_crypto: list, events_etf: list,
     def hold_line(e, kind):
         d = e.detail
         tags = [f"{_age_days(e.bar_time)}d"]
-        if d.get("align"):
-            tags.append(d["align"])
         if e.signal == "mss" or d.get("label") == "MSS":
-            tags.append("MSS")
+            tags.append("MSS")                          # MSS는 MSS만
+        elif d.get("align") and d["align"] != "혼조":   # 혼조는 표시 생략
+            tags.append(d["align"])
         price = d.get("last_price")
         return (f"↳ {_short_symbol(e.symbol, kind, '')}"
                 + (f"  {_fmt_price(price)}" if price else "")

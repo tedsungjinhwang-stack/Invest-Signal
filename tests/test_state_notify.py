@@ -100,7 +100,13 @@ def test_downtrend_section_for_etf_and_stocks():
 
 def test_align_tag_shown_in_lines_and_ongoing():
     new = _event("BTCUSDT", {"label": "상승초입", "align": "역배열"})
-    hold = _event("ETHUSDT", {"label": "풀백", "align": "혼조"})
-    msg = format_events([new], [], {}, ongoing_crypto=[hold])
+    hold = _event("ETHUSDT", {"label": "풀백", "align": "정배열", "last_price": 3400.0})
+    mixed = _event("SOLUSDT", {"label": "풀백", "align": "혼조", "last_price": 70.0})
+    mss = _event("XRPUSDT", {"label": "MSS", "align": "정배열", "last_price": 3.0})
+    msg = format_events([new], [], {}, ongoing_crypto=[hold, mixed, mss])
     assert "역배열" in msg
-    assert "ETH " in msg and "·혼조" in msg
+    assert "·정배열" in msg
+    assert "혼조" not in msg                          # 혼조는 표시하지 않는다
+    assert "↳ XRP  3 · " in msg and "MSS" in msg
+    xrp_line = next(l for l in msg.split("\n") if l.startswith("↳ XRP"))
+    assert "정배열" not in xrp_line                   # MSS 항목은 MSS만
