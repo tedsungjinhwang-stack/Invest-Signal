@@ -27,6 +27,50 @@ def test_parse_klines_drops_in_progress_bar():
     assert len(df2) == 2 and df2["Volume"].iloc[1] == 200
 
 
+def test_parse_s3_listing_symbols_and_pagination():
+    """S3 목록 XML에서 퍼프 심볼을 뽑고 페이지네이션 마커를 읽는다."""
+    from invest_signal.data_binance import UM_KLINES_PREFIX, _parse_s3_listing
+
+    p = UM_KLINES_PREFIX
+    xml = f"""<ListBucketResult>
+      <IsTruncated>true</IsTruncated>
+      <NextMarker>{p}ETHUSDT/</NextMarker>
+      <CommonPrefixes><Prefix>{p}ADAUSDT/</Prefix></CommonPrefixes>
+      <CommonPrefixes><Prefix>{p}BTCUSDT/</Prefix></CommonPrefixes>
+      <CommonPrefixes><Prefix>{p}BTCUSDT_210625/</Prefix></CommonPrefixes>
+    </ListBucketResult>"""
+    syms, truncated, marker = _parse_s3_listing(xml)
+    assert syms == ["ADAUSDT", "BTCUSDT", "BTCUSDT_210625"]
+    assert truncated and marker == f"{p}ETHUSDT/"
+
+    xml2 = f"""<ListBucketResult>
+      <IsTruncated>false</IsTruncated>
+      <CommonPrefixes><Prefix>{p}ETHUSDT/</Prefix></CommonPrefixes>
+    </ListBucketResult>"""
+    syms2, truncated2, marker2 = _parse_s3_listing(xml2)
+    assert syms2 == ["ETHUSDT"] and not truncated2 and marker2 is None
+
+
+def test_spot_fallback_drops_symbols_without_perp(monkeypatch):
+    """현물 미러 폴백 시 퍼프 미상장 심볼(ADX 등)은 스캔 대상에서 빠진다."""
+    from invest_signal import data_binance as db
+
+    monkeypatch.setattr(db, "usdt_spot_symbols",
+                        lambda s, e: ["ADXUSDT", "BTCUSDT", "ETHUSDT"])
+    monkeypatch.setattr(db, "um_futures_symbols",
+                        lambda s: {"BTCUSDT", "ETHUSDT", "SOLUSDT"})
+    source, syms = db.resolve_source(None, "spot_mirror", set(), log=lambda *a: None)
+    assert source == "spot_mirror"
+    assert syms == ["BTCUSDT", "ETHUSDT"]      # ADXUSDT 제외
+
+    # 목록 조회 실패는 스캔을 막지 않고 현물 전체로 진행
+    def boom(s):
+        raise RuntimeError("s3 down")
+    monkeypatch.setattr(db, "um_futures_symbols", boom)
+    _, syms = db.resolve_source(None, "spot_mirror", set(), log=lambda *a: None)
+    assert syms == ["ADXUSDT", "BTCUSDT", "ETHUSDT"]
+
+
 def test_resample_4h_aggregates_and_converts_tz():
     idx = pd.date_range("2025-06-02 09:30", periods=6, freq="1h",
                         tz="America/New_York")

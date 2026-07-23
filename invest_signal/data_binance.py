@@ -9,6 +9,7 @@ HTTP 451로 차단된다. 공식 현물 데이터 미러 data-api.binance.vision
 """
 
 import os
+import re
 import time
 
 import pandas as pd
@@ -16,6 +17,10 @@ import requests
 
 FAPI_BASE = "https://fapi.binance.com"
 SPOT_MIRROR_BASE = "https://data-api.binance.vision"
+# 바이낸스 공식 과거 데이터 저장소(S3) — 미국 IP에서도 접근 가능.
+# USDT-M 선물 심볼 폴더 목록으로 '퍼프 상장 여부'를 판별하는 데 쓴다.
+DATA_VISION_S3 = "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision"
+UM_KLINES_PREFIX = "data/futures/um/monthly/klines/"
 KLINE_INTERVAL = "4h"
 
 # 분당 요청 가중치 한도(선물 2400)에 여유를 두고 이 값을 넘으면 잠시 쉰다.
@@ -98,6 +103,40 @@ def usdt_spot_symbols(session: requests.Session,
     return sorted(out)
 
 
+def _parse_s3_listing(text: str) -> tuple[list[str], bool, str | None]:
+    """S3 ListObjects XML → (심볼 목록, 다음 페이지 여부, NextMarker)."""
+    syms = re.findall(
+        r"<Prefix>" + re.escape(UM_KLINES_PREFIX) + r"([^/<]+)/</Prefix>", text)
+    truncated = "<IsTruncated>true</IsTruncated>" in text
+    m = re.search(r"<NextMarker>([^<]+)</NextMarker>", text)
+    return syms, truncated, m.group(1) if m else None
+
+
+def um_futures_symbols(session: requests.Session) -> set[str]:
+    """USDT-M 선물로 상장된 적 있는 심볼 집합 (공식 데이터 저장소 S3 목록).
+
+    fapi가 막힌 미국 IP에서도 접근된다. 상장폐지된 퍼프도 포함되므로
+    'ADX처럼 현물 전용인 코인'을 걸러내는 용도로만 쓴다.
+    """
+    out: set[str] = set()
+    marker = None
+    for _ in range(20):                 # 안전 상한 — 실제로는 1~2페이지
+        params = {"prefix": UM_KLINES_PREFIX, "delimiter": "/"}
+        if marker:
+            params["marker"] = marker
+        rsp = session.get(DATA_VISION_S3, params=params, timeout=20)
+        rsp.raise_for_status()
+        syms, truncated, marker = _parse_s3_listing(rsp.text)
+        out.update(s for s in syms if "_" not in s)   # BTCUSDT_210625 분기물 제외
+        if not truncated or not syms:
+            break
+        if marker is None:              # 델리미터 응답엔 NextMarker가 있지만 방어
+            marker = UM_KLINES_PREFIX + syms[-1] + "/"
+    if not out:
+        raise RuntimeError("퍼프 심볼 목록이 비어 있음")
+    return out
+
+
 def parse_klines(rows: list, now_ms: int | None = None) -> pd.DataFrame:
     """kline 배열 → OHLCV DataFrame(UTC 인덱스). 진행 중인 마지막 봉은 버린다."""
     if now_ms is None:
@@ -138,7 +177,16 @@ def resolve_source(session: requests.Session, requested: str,
             if requested == "fapi":
                 raise
             log(f"[binance] fapi 실패({e}) — 현물 미러로 폴백")
-    return "spot_mirror", usdt_spot_symbols(session, exclude)
+    syms = usdt_spot_symbols(session, exclude)
+    try:
+        # 퍼프 상장 이력 없는 현물 전용 코인(ADX 등)은 스캔에서 제외
+        perps = um_futures_symbols(session)
+        before = len(syms)
+        syms = [s for s in syms if s in perps]
+        log(f"[binance] 퍼프 미상장 제외: 현물 {before}종 → {len(syms)}종")
+    except Exception as e:                  # noqa: BLE001 — 목록 조회 실패가 스캔을 막지 않게
+        log(f"[binance] 퍼프 심볼 목록 조회 실패({e}) — 현물 전체 스캔")
+    return "spot_mirror", syms
 
 
 def klines_4h(session: requests.Session, symbol: str, source: str,
