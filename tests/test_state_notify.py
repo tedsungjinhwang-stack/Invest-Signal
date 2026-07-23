@@ -71,9 +71,10 @@ def test_format_events_ongoing_section():
                                   "last_price": 68.2})]
     msg = format_events([_event("BTCUSDT")], [], {}, ongoing_crypto=ongoing)
     assert "↳ ETH  3,420.5" in msg            # 종목마다 한 줄 + 현재가
-    assert "↳ SOL  68.2" in msg
+    assert "↳ SOL  68.2 · " in msg
+    assert "⚠️MSS 저점 70 이탈" in msg        # 추적 MSS도 신규와 같은 형식
     assert "blockquote" not in msg            # 접힘·들여쓰기 없이 전부 표시
-    assert "풀백" in msg and "·MSS" in msg    # MSS는 풀백 칸에 태그로 병합
+    assert "풀백" in msg and "·⚠️MSS" in msg  # MSS는 풀백 칸에 태그로 병합
     # 추적 목록이 없으면 ↳ 줄도 없다
     assert "↳" not in format_events([_event("BTCUSDT")], [], {})
 
@@ -106,7 +107,7 @@ def test_align_tag_shown_in_lines_and_ongoing():
     msg = format_events([new], [], {}, ongoing_crypto=[hold, mixed, mss])
     assert "역배열" in msg
     assert "·정배열" in msg
-    assert "혼조" not in msg                          # 혼조는 표시하지 않는다
+    assert "·혼조" in msg                             # 혼조도 배열 태그로 표시
     assert "↳ XRP  3 · " in msg and "MSS" in msg
     xrp_line = next(l for l in msg.split("\n") if l.startswith("↳ XRP"))
     assert "정배열" not in xrp_line                   # MSS 항목은 MSS만

@@ -70,7 +70,7 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     else:
         if e.signal == "downtrend_reversal" and d.get("broken_low"):
             tags.append(f"직전저점 {_fmt_price(d['broken_low'])} 이탈")
-        if d.get("align") and d["align"] != "혼조":    # 혼조는 표시 생략
+        if d.get("align"):
             tags.append(d["align"])
     return head + (" · " + " · ".join(tags) if tags else "")
 
@@ -100,8 +100,10 @@ def format_events(events_crypto: list, events_etf: list,
         d = e.detail
         tags = [f"{_age_days(e.bar_time)}d"]
         if e.signal == "mss" or d.get("label") == "MSS":
-            tags.append("MSS")                          # MSS는 MSS만
-        elif d.get("align") and d["align"] != "혼조":   # 혼조는 표시 생략
+            # MSS는 신규 줄과 같은 형식으로 — 깨진 저점 레벨 포함
+            tags.append(f"⚠️MSS 저점 {_fmt_price(d['broken_low'])} 이탈"
+                        if d.get("broken_low") else "⚠️MSS")
+        elif d.get("align"):
             tags.append(d["align"])
         price = d.get("last_price")
         return (f"↳ {_short_symbol(e.symbol, kind, '')}"
