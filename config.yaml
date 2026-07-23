@@ -16,6 +16,7 @@ signal:
     enabled: true
     ma_entry: 120           # 하회 판정 기준선 — 60으로 바꾸면 얕은 눌림도 잡음
     grace_bars: 1
+    qvwap_condition: true   # 트리거 봉 종가가 분기 앵커드 VWAP 위여야 알림 (아래면 위로 올 때까지 대기)
     crypto_rank_filter:     # 크립토 전용 — 풀백 칸 전체(풀백+MSS 줄)에 주도주 필터 (ETF·주식엔 미적용)
       enabled: true
       volume_top: 100       # 24h 거래대금 상위 N위 이내, 또는

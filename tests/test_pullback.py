@@ -10,10 +10,13 @@ from invest_signal.signals import SignalEvent
 P = Params()
 
 
-def make_df(closes, start="2025-01-01"):
+def make_df(closes, start="2025-01-01", volumes=None):
     idx = pd.date_range(start, periods=len(closes), freq="4h", tz="UTC")
     c = pd.Series([float(x) for x in closes], index=idx)
-    return pd.DataFrame({"Open": c, "High": c, "Low": c, "Close": c})
+    data = {"Open": c, "High": c, "Low": c, "Close": c}
+    if volumes is not None:
+        data["Volume"] = [float(v) for v in volumes]
+    return pd.DataFrame(data)
 
 
 def uptrend_regime(bars=600):
@@ -67,6 +70,32 @@ def test_consecutive_dip_bars_alert_once():
     df = make_df(closes)
     evs = pullback.detect(df, "TEST", Params(grace_bars=1))
     assert len(evs) == 1 and evs[0].bar_time == df.index[-2]
+
+
+def test_qvwap_condition_gates_pullback():
+    """딥 봉 종가가 분기 VWAP 아래면 대기 — 조건 끄면 120선 하회만으로 발화."""
+    closes = uptrend_regime()                # 600봉 — 끝부분은 2분기(Q2)
+    closes.append(dip_below_ma120(closes))   # 딥 ≈ 365, Q2 QVWAP ≈ 385
+    vols = [1.0] * len(closes)
+    df = make_df(closes, volumes=vols)
+    assert pullback.detect(df, "TEST", P) == []
+    evs = pullback.detect(df, "TEST", Params(qvwap_condition=False))
+    assert len(evs) == 1 and evs[0].detail["above_qvwap"] is False
+
+
+def test_pullback_fires_when_qvwap_drops_below_price():
+    """QVWAP 아래서 대기하다가, 선이 내려와 종가가 그 위가 되는 봉에서 발화."""
+    closes = uptrend_regime()
+    dip = dip_below_ma120(closes)
+    closes.append(dip)
+    vols = [1.0] * len(closes)
+    vols[-1] = 1_000_000.0        # 딥 봉 대량 거래 → QVWAP이 딥 가격 근처로 내려옴
+    closes.append(dip + 2.0)      # 여전히 120선 아래·이제 QVWAP 위 → 이 봉에서 발화
+    vols.append(1.0)
+    df = make_df(closes, volumes=vols)
+    evs = pullback.detect(df, "TEST", P)
+    assert len(evs) == 1 and evs[0].bar_time == df.index[-1]
+    assert evs[0].detail["above_qvwap"] is True
 
 
 def test_still_active_persists_after_recovery():

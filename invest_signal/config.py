@@ -30,6 +30,7 @@ def pullback_params(cfg: dict) -> pullback.Params:
     return pullback.Params(
         ma_entry=int(s.get("ma_entry", 120)),
         grace_bars=int(s.get("grace_bars", 1)),
+        qvwap_condition=bool(s.get("qvwap_condition", True)),
     )
 
 
