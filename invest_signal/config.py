@@ -48,6 +48,7 @@ def mss_params(cfg: dict) -> mss.Params:
     return mss.Params(
         pivot_k=int(s.get("pivot_k", 6)),
         grace_bars=int(s.get("grace_bars", 1)),
+        qvwap_condition=bool(s.get("qvwap_condition", True)),
     )
 
 

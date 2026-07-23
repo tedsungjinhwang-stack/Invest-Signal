@@ -1,9 +1,10 @@
 """MSS 시그널 (4h봉) — 직전 스윙저점 하향돌파.
 
-하락전환(60선 눌림 저점 CHoCH)과 달리 조건 없이, 가장 최근에 확정된
-스윙저점(좌우 pivot_k봉보다 낮은 저가)을 종가가 하향돌파하면 알린다:
+풀백 칸에 함께 표시되는 경고 마커라서 풀백과 같은 QVWAP 조건을 태운다:
   ① 저가가 좌우 pivot_k봉(기본 6봉 = 24시간)의 저가보다 낮아 스윙저점으로 확정되고
-  ② 이후 종가가 그 저점 아래로 "처음" 마감하면 → MSS 알림.
+  ② 이후 종가가 그 저점 아래로 "처음" 마감하면서
+  ③ 그 봉의 종가가 분기 앵커드 VWAP(QVWAP) 위에 있으면 → MSS 알림.
+     QVWAP 아래로 무너진 상태의 저점 이탈은 풀백 후보가 아니므로 알리지 않는다.
 
 돌파 후 봉들이 계속 그 아래 머물러도 첫 돌파 봉에서만 알리고,
 가격이 저점 위로 복귀했다가 다시 깨면 다시 알린다.
@@ -13,6 +14,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from ..indicators import quarterly_vwap
 from . import SignalEvent
 
 NAME = "mss"
@@ -23,6 +25,7 @@ LABEL = "MSS"
 class Params:
     pivot_k: int = 6            # 스윙저점 판정 — 좌우 k봉(6봉=24h)보다 낮아야 함
     grace_bars: int = 1         # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
+    qvwap_condition: bool = True  # ③ 돌파 봉 종가 > 분기VWAP 요구 (Volume 없으면 자동 통과)
 
 
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
@@ -38,6 +41,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
 
     close = df["Close"]
     lv = df["Low"].values
+    qv = quarterly_vwap(df)
 
     events = []
     for t in range(max(2 * k + 2, n - 1 - params.grace_bars), n):
@@ -52,6 +56,9 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
         level = float(lv[piv])
         if not (close.iloc[t] < level and close.iloc[t - 1] >= level):
             continue            # 첫 하향돌파 봉만
+        if (params.qvwap_condition and qv is not None
+                and not pd.isna(qv.iloc[t]) and not close.iloc[t] > qv.iloc[t]):
+            continue            # ③ QVWAP 아래에서의 저점 이탈은 표시하지 않는다
         events.append(SignalEvent(
             symbol=symbol,
             signal=NAME,

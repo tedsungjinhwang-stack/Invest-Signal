@@ -35,6 +35,7 @@ signal:
     enabled: true
     pivot_k: 6              # 스윙저점 판정 — 좌우 k봉보다 낮은 저가 (6봉 = 24시간)
     grace_bars: 1
+    qvwap_condition: true   # 돌파 봉 종가가 분기 앵커드 VWAP 위여야 알림 (풀백 칸 조건과 동일)
 
 crypto:
   enabled: true

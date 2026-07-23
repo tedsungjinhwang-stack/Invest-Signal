@@ -9,12 +9,15 @@ from invest_signal.signals.mss import Params
 P = Params(pivot_k=3)          # 픽스처가 k=3 기준으로 구성됨
 
 
-def make_df(closes, lows=None, start="2025-01-01"):
+def make_df(closes, lows=None, start="2025-01-01", volumes=None):
     idx = pd.date_range(start, periods=len(closes), freq="4h", tz="UTC")
     c = pd.Series([float(x) for x in closes], index=idx)
     lo = pd.Series([float(x) for x in (lows or closes)], index=idx)
-    return pd.DataFrame({"Open": c, "High": np.maximum(c, lo),
-                         "Low": np.minimum(c, lo), "Close": c})
+    data = {"Open": c, "High": np.maximum(c, lo),
+            "Low": np.minimum(c, lo), "Close": c}
+    if volumes is not None:
+        data["Volume"] = [float(v) for v in volumes]
+    return pd.DataFrame(data)
 
 
 def swing_low_setup():
@@ -36,6 +39,22 @@ def test_fires_on_first_close_below_swing_low():
     assert ev.bar_time == df.index[-1]
     assert ev.detail["broken_low"] == level
     assert ev.detail["low_time"] == df.index[piv_idx].isoformat()
+
+
+def test_qvwap_condition_gates_mss():
+    """돌파 봉 종가가 분기 VWAP 아래면 MSS도 표시하지 않는다 (풀백 칸 조건 동일)."""
+    closes, _, level = swing_low_setup()
+    closes.append(level - 1)                     # 돌파 봉 종가 104
+    # 균등 거래량 → QVWAP ≈ 107 > 104 → 미발화
+    df = make_df(closes, volumes=[1.0] * len(closes))
+    assert mss.detect(df, "TEST", P) == []
+    # 조건 끄면 발화
+    assert len(mss.detect(df, "TEST", Params(pivot_k=3, qvwap_condition=False))) == 1
+    # 초반 저가(100)에 거래량 몰빵 → QVWAP ≈ 100 < 104 → 발화
+    vols = [1.0] * len(closes)
+    vols[0] = 1_000_000.0
+    df2 = make_df(closes, volumes=vols)
+    assert len(mss.detect(df2, "TEST", P)) == 1
 
 
 def test_no_fire_above_swing_low():
