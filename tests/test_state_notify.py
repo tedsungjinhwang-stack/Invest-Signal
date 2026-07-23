@@ -66,13 +66,14 @@ def test_split_chunks_preserves_content():
 
 
 def test_format_events_ongoing_section():
-    ongoing = [_event("ETHUSDT", {"label": "상승초입"}),
-               _event("SOLUSDT", {"label": "MSS", "broken_low": 70.0})]
+    ongoing = [_event("ETHUSDT", {"label": "상승초입", "last_price": 3420.5}),
+               _event("SOLUSDT", {"label": "MSS", "broken_low": 70.0,
+                                  "last_price": 68.2})]
     msg = format_events([_event("BTCUSDT")], [], {}, ongoing_crypto=ongoing)
-    assert "↳ ETH " in msg                    # 추적 중 종목은 같은 칸 아래 ↳ 줄
+    assert "↳ ETH  3,420.5" in msg            # 종목마다 한 줄 + 현재가
+    assert "↳ SOL  68.2" in msg
     assert "blockquote" not in msg            # 접힘·들여쓰기 없이 전부 표시
-    assert "풀백" in msg and "SOL " in msg    # MSS는 풀백 칸에 태그로 병합
-    assert "·MSS" in msg
+    assert "풀백" in msg and "·MSS" in msg    # MSS는 풀백 칸에 태그로 병합
     # 추적 목록이 없으면 ↳ 줄도 없다
     assert "↳" not in format_events([_event("BTCUSDT")], [], {})
 
@@ -80,8 +81,8 @@ def test_format_events_ongoing_section():
 def test_ongoing_list_caps_per_label():
     evs = [_event(f"C{i:02d}USDT", {"label": "풀백"}) for i in range(20)]
     msg = format_events([_event("BTCUSDT")], [], {}, ongoing_crypto=evs)
-    assert "외 5종" in msg
-    assert "blockquote" not in msg            # 긴 리스트도 접지 않고 그대로
+    assert "↳ 외 5종" in msg
+    assert msg.count("↳") == 16               # 15종 각 한 줄 + '외 N종' 줄
 
 
 def test_downtrend_section_for_etf_and_stocks():

@@ -50,6 +50,7 @@ def test_detect_all_choch_evicts_prior_long_holds():
             (mod("downtrend_reversal", [ev2("downtrend_reversal", "하락전환", 5)]), Params())]
     _, ongoing = _detect_all({"X": df}, dets)
     assert [e.signal for e in ongoing] == ["uptrend_onset", "mss"]
+    assert all(e.detail["last_price"] == 1.0 for e in ongoing)   # 현재가 주석
     # CHoCH(1봉)가 눌림목(3봉)보다 과거 → 눌림목 유지
     dets = [(mod("pullback", [pb]), Params()),
             (mod("downtrend_reversal", [ev2("downtrend_reversal", "하락전환", 1)]), Params())]

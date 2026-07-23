@@ -94,12 +94,17 @@ def format_events(events_crypto: list, events_etf: list,
     ordered = [k for k in SIGNAL_ORDER if k in present] + \
               sorted(k for k in present if k not in SIGNAL_ORDER)
 
-    def hold_item(e, kind):
-        align = e.detail.get("align")
-        is_mss = e.signal == "mss" or e.detail.get("label") == "MSS"
-        return (f"{_short_symbol(e.symbol, kind, '')} {_age_days(e.bar_time)}d"
-                + (f"·{align}" if align else "")
-                + ("·MSS" if is_mss else ""))
+    def hold_line(e, kind):
+        d = e.detail
+        tags = [f"{_age_days(e.bar_time)}d"]
+        if d.get("align"):
+            tags.append(d["align"])
+        if e.signal == "mss" or d.get("label") == "MSS":
+            tags.append("MSS")
+        price = d.get("last_price")
+        return (f"↳ {_short_symbol(e.symbol, kind, '')}"
+                + (f"  {_fmt_price(price)}" if price else "")
+                + " · " + "·".join(tags))
 
     for label in ordered:
         lines.append("")
@@ -121,9 +126,10 @@ def format_events(events_crypto: list, events_etf: list,
             if hold_sel:
                 shown = hold_sel[:ONGOING_MAX_PER_LABEL]
                 extra = len(hold_sel) - len(shown)
-                # 추적 리스트 — 접힘·들여쓰기 없이 전부 보이게 평문 한 줄
-                lines.append("↳ " + ", ".join(hold_item(e, kind) for e in shown)
-                             + (f" 외 {extra}종" if extra > 0 else ""))
+                # 추적 리스트 — 종목마다 한 줄, 현재가(최근 4h 종가) 포함
+                lines.extend(hold_line(e, kind) for e in shown)
+                if extra > 0:
+                    lines.append(f"↳ 외 {extra}종")
 
     return "\n".join(lines)
 

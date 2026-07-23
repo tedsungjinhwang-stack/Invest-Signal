@@ -62,6 +62,10 @@ def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[l
             if align:
                 for e in sym_events + sym_ongoing:
                     e.detail["align"] = align
+            if len(df):
+                last = float(df["Close"].iloc[-1])
+                for e in sym_ongoing:       # 추적 리스트에 현재가(최근 4h 종가) 표시용
+                    e.detail["last_price"] = last
         events.extend(sym_events)
         ongoing.extend(sym_ongoing)
     return events, ongoing
