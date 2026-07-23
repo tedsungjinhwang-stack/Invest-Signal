@@ -5,7 +5,7 @@ signal:
     enabled: true
     touch_window_bars: 60   # 240선 터치 후 60선 이탈을 기다리는 기간 — 60봉 = 10일
     grace_bars: 1           # 직전 스캔을 놓쳤을 때 소급 허용할 봉 수
-    qvwap_condition: true   # 트리거 봉 종가가 분기 앵커드 VWAP를 깨고 내려와야 알림 (위→아래 플러시)
+    qvwap_condition: true   # 트리거 봉 종가가 분기 앵커드 VWAP 위여야 알림 (아래면 위로 올 때까지 대기)
     crypto_rank_filter:     # 크립토 전용 — 3파 전 초입이라 풀백보다 낮은 기준
       enabled: true
       volume_top: 200       # 24h 거래대금 상위 N위 이내, 또는

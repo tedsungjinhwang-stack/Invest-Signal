@@ -146,44 +146,50 @@ def test_missed_bar_trigger_found_even_if_it_touches():
 
 
 def test_qvwap_condition_gates_signal():
-    """트리거 종가가 분기 VWAP를 깨고 내려와 있어야 발화 — 위에서 버티면 대기."""
+    """트리거 봉 종가가 분기 VWAP 위여야 발화 — 아래면 대기."""
     # 520봉(≈87일) — 2025-01-01 시작이라 전 구간이 1분기 안
     closes, highs = base_decline(bars=520)
     add_touch(closes, highs)
     # 트리거 후보: 직전 저점(100)보다 위지만 60선(≈116)보다는 아래로 마감
     add_drop(closes, highs, 110.0)
-    # 균등 거래량 → QVWAP ≈ 분기 전체 평균(≈250) » 종가 110 → 하향 이탈 상태 → 발화
+    # 균등 거래량 → QVWAP ≈ 분기 전체 평균(≈250) » 종가 110 → 아직 QVWAP 아래 → 대기
     vols_eq = [1.0] * len(closes)
     df_below = make_df(closes, highs, volumes=vols_eq)
-    evs = uptrend_onset.detect(df_below, "TEST", Params(qvwap_condition=True))
+    assert uptrend_onset.detect(df_below, "TEST", Params(qvwap_condition=True)) == []
+    # 같은 데이터라도 조건을 끄면 60선 이탈만으로 발화
+    evs = uptrend_onset.detect(df_below, "TEST", Params(qvwap_condition=False))
     assert len(evs) == 1 and evs[0].detail["above_qvwap"] is False
-    # 최근 저가 구간(~100)에 거래량 몰빵 → QVWAP이 종가(110) 아래 → 아직 위에서 버팀 → 대기
+    # 최근 저가 구간(~100)에 거래량 몰빵 → QVWAP이 종가(110) 아래로 → 발화
     vols_late = [1.0] * len(closes)
     for i in range(len(closes) - 30, len(closes)):
         vols_late[i] = 5000.0
     df_above = make_df(closes, highs, volumes=vols_late)
-    assert uptrend_onset.detect(df_above, "TEST", Params(qvwap_condition=True)) == []
-    # 같은 데이터라도 조건을 끄면 60선 이탈만으로 발화
-    evs = uptrend_onset.detect(df_above, "TEST", Params(qvwap_condition=False))
+    evs = uptrend_onset.detect(df_above, "TEST", Params(qvwap_condition=True))
     assert len(evs) == 1 and evs[0].detail["above_qvwap"] is True
 
 
-def test_qvwap_flush_fires_on_later_break():
-    """60선만 깨고 QVWAP 위에서 버티는 동안은 대기, QVWAP까지 깨는 봉에서 발화."""
+def test_fires_when_qvwap_line_drops_below_price():
+    """60선 이탈 봉이 QVWAP 아래면 대기 — QVWAP 선이 내려와 종가가 그 위가
+    되는 첫 봉에서 발화한다 (선이 위에 있다가 확 내려오는 케이스)."""
     closes, highs = base_decline(bars=520)
     add_touch(closes, highs)
-    add_drop(closes, highs, 110.0)          # 60선 아래·QVWAP(≈105) 위 → 대기
+    add_drop(closes, highs, 102.0)          # 60선 아래·QVWAP(≈105) 아래 → 대기
     vols = [1.0] * len(closes)
     for i, c in enumerate(closes):
         if 104.0 <= c <= 106.0:             # 저가 구간 몰빵 → QVWAP ≈ 105
             vols[i] = 100000.0
     df_wait = make_df(closes, highs, volumes=vols)
     assert uptrend_onset.detect(df_wait, "TEST", Params(qvwap_condition=True)) == []
-    add_drop(closes, highs, 102.0)          # QVWAP도 하향 이탈 → 이 봉에서 발화
+    # 대량 저가 거래로 QVWAP 선이 ~101로 확 내려옴 (이 봉 자체는 98 < QVWAP → 여전히 대기)
+    add_drop(closes, highs, 98.0)
+    vols.append(500000.0)
+    # 다음 봉 종가 101.5 > QVWAP(≈101) — 선이 캔들 아래로 온 첫 봉 → 발화
+    add_drop(closes, highs, 101.5)
     vols.append(1.0)
     df_fire = make_df(closes, highs, volumes=vols)
     evs = uptrend_onset.detect(df_fire, "TEST", Params(qvwap_condition=True))
     assert len(evs) == 1 and evs[0].bar_time == df_fire.index[-1]
+    assert evs[0].detail["above_qvwap"] is True
 
 
 def test_insufficient_data_returns_empty():
