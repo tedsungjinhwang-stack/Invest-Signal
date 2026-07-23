@@ -57,6 +57,32 @@ def _detect_all(frames: dict, detectors, log=print) -> tuple[list, list]:
     return events, ongoing
 
 
+def _crypto_rank_eligible(frames: dict, rcfg: dict) -> set:
+    """풀백 랭크 필터 대상.
+
+    (24h 거래대금 상위 N ∪ 최근 상승률 상위 N) 중에서
+    24h 거래대금이 min_turnover_usd 이상인 종목만 남긴다.
+    """
+    vol_top = int(rcfg.get("volume_top", 100))
+    gain_top = int(rcfg.get("gain_top", 50))
+    lookback = int(rcfg.get("gain_lookback_bars", 42))
+    min_turnover = float(rcfg.get("min_turnover_usd", 0))
+    turnover, gain = {}, {}
+    for sym, df in frames.items():
+        if len(df) >= 6 and "Volume" in df.columns:
+            turnover[sym] = float((df["Close"].iloc[-6:] * df["Volume"].iloc[-6:]).sum())
+        if len(df) > lookback:
+            base = float(df["Close"].iloc[-1 - lookback])
+            if base > 0:
+                gain[sym] = float(df["Close"].iloc[-1]) / base - 1
+    top_vol = set(sorted(turnover, key=turnover.get, reverse=True)[:vol_top])
+    top_gain = set(sorted(gain, key=gain.get, reverse=True)[:gain_top])
+    eligible = top_vol | top_gain
+    if min_turnover > 0:
+        eligible = {s for s in eligible if turnover.get(s, 0.0) >= min_turnover}
+    return eligible
+
+
 def scan_crypto(cfg: dict, detectors, log=print) -> tuple[list, list]:
     c = cfg.get("crypto") or {}
     if not c.get("enabled", True):
@@ -69,6 +95,17 @@ def scan_crypto(cfg: dict, detectors, log=print) -> tuple[list, list]:
         log(f"[binance] {source} · USDT {len(symbols)}종 스캔 시작")
         frames = data_binance.fetch_all(s, symbols, source, limit=limit, log=log)
     events, ongoing = _detect_all(frames, detectors, log)
+
+    # 크립토 전용 풀백 랭크 필터 — 주도주(거래대금·상승률 상위)의 눌림만 남긴다
+    rcfg = ((cfg.get("signal") or {}).get("pullback") or {}).get("crypto_rank_filter") or {}
+    if rcfg.get("enabled", True):
+        eligible = _crypto_rank_eligible(frames, rcfg)
+        before = sum(1 for e in events if e.signal == "pullback")
+        events = [e for e in events if e.signal != "pullback" or e.symbol in eligible]
+        ongoing = [e for e in ongoing if e.signal != "pullback" or e.symbol in eligible]
+        after = sum(1 for e in events if e.signal == "pullback")
+        log(f"[binance] 풀백 랭크 필터: 대상 {len(eligible)}종 — 신규 풀백 {before}→{after}건")
+
     log(f"[binance] 시그널 {len(events)}건 · 유지 중 {len(ongoing)}건")
     return events, ongoing
 

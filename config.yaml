@@ -6,10 +6,16 @@ signal:
     touch_window_bars: 60   # 240선 터치 후 60선 이탈을 기다리는 기간 — 60봉 = 10일
     grace_bars: 1           # 직전 스캔을 놓쳤을 때 소급 허용할 봉 수
     qvwap_condition: true   # 트리거 봉 종가가 분기 앵커드 VWAP 위여야 알림
-  pullback:                 # 눌림목 (4h봉): 240선>480선 구간에서 120선 하회
+  pullback:                 # 풀백 (4h봉): 240선>480선 구간에서 120선 하회
     enabled: true
     ma_entry: 120           # 하회 판정 기준선 — 60으로 바꾸면 얕은 눌림도 잡음
     grace_bars: 1
+    crypto_rank_filter:     # 크립토 전용 — 주도주 눌림만 (ETF·주식엔 미적용)
+      enabled: true
+      volume_top: 100       # 24h 거래대금 상위 N위 이내, 또는
+      gain_top: 50          # 최근 7일 상승률 상위 N위 이내면 통과하되
+      gain_lookback_bars: 42  # 상승률 계산 구간 — 42봉 = 7일
+      min_turnover_usd: 5000000  # 24h 거래대금 $5M 미만은 무조건 제외 (유동성 하한)
   downtrend_reversal:       # 하락전환 (4h봉): 60선 아래 눌림의 직전저점 하향돌파(CHoCH)
     # 알림·리스트에 표시하지 않음 — 하락전환 활성 종목의 상승초입·눌림목을
     # '유지 중' 리스트에서 제거하는 용도로만 사용 (enabled: false면 제거도 안 함)

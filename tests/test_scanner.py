@@ -55,3 +55,47 @@ def test_detect_all_choch_evicts_prior_long_holds():
             (mod("downtrend_reversal", [ev2("downtrend_reversal", "하락전환", 1)]), Params())]
     _, ongoing = _detect_all({"X": df}, dets)
     assert [e.signal for e in ongoing] == ["pullback"]
+
+
+def test_crypto_rank_eligible_union_of_volume_and_gain():
+    from invest_signal.scanner import _crypto_rank_eligible
+
+    idx = pd.date_range("2025-01-01", periods=50, freq="4h", tz="UTC")
+
+    def frame(price, vol, rising=False):
+        import numpy as np
+        c = pd.Series(np.linspace(price * (0.5 if rising else 1.0), price, 50), index=idx)
+        return pd.DataFrame({"Open": c, "High": c, "Low": c, "Close": c,
+                             "Volume": float(vol)})
+
+    frames = {
+        "BIGVOL": frame(1.0, 1_000_000),          # 거래대금 1위, 상승률 없음
+        "PUMP": frame(2.0, 10, rising=True),      # 상승률 1위, 거래대금 미미
+        "SLEEPY": frame(1.0, 1),                  # 둘 다 하위
+    }
+    eligible = _crypto_rank_eligible(frames, {"volume_top": 1, "gain_top": 1,
+                                              "gain_lookback_bars": 42})
+    assert "BIGVOL" in eligible          # 거래대금 통과
+    assert "PUMP" in eligible            # 상승률 통과
+    assert "SLEEPY" not in eligible      # 어느 쪽도 아님
+
+
+def test_crypto_rank_filter_min_turnover_floor():
+    """상승률 상위라도 거래대금 하한($) 미달이면 제외."""
+    from invest_signal.scanner import _crypto_rank_eligible
+    import numpy as np
+
+    idx = pd.date_range("2025-01-01", periods=50, freq="4h", tz="UTC")
+
+    def frame(price, vol, rising=False):
+        c = pd.Series(np.linspace(price * (0.5 if rising else 1.0), price, 50), index=idx)
+        return pd.DataFrame({"Open": c, "High": c, "Low": c, "Close": c,
+                             "Volume": float(vol)})
+
+    frames = {"BIGVOL": frame(1.0, 10_000_000),        # 24h 거래대금 ≈ 6천만 달러
+              "THINPUMP": frame(2.0, 10, rising=True)}  # 상승률 1위지만 유동성 없음
+    rcfg = {"volume_top": 1, "gain_top": 1, "gain_lookback_bars": 42,
+            "min_turnover_usd": 5_000_000}
+    eligible = _crypto_rank_eligible(frames, rcfg)
+    assert "BIGVOL" in eligible
+    assert "THINPUMP" not in eligible
