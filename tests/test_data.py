@@ -27,6 +27,33 @@ def test_parse_klines_drops_in_progress_bar():
     assert len(df2) == 2 and df2["Volume"].iloc[1] == 200
 
 
+def test_fill_missing_kr_names(monkeypatch):
+    """이름 빈 한국 종목만 야후에서 보충 — 실패·미국 종목은 그대로."""
+    import yfinance
+
+    from invest_signal import data_etf
+
+    class FakeTicker:
+        def __init__(self, sym):
+            self.sym = sym
+
+        def get_info(self):
+            if self.sym == "010120.KS":
+                return {"shortName": "LS ELECTRIC"}
+            raise RuntimeError("no data")
+
+    monkeypatch.setattr(yfinance, "Ticker", FakeTicker)
+    ticks = [{"code": "010120", "market": "KR", "name": ""},
+             {"code": "005930", "market": "KR", "name": "삼성전자"},
+             {"code": "319660", "market": "KQ", "name": ""},   # .KS/.KQ 둘 다 실패 → 코드 유지
+             {"code": "OVV", "market": "US", "name": ""}]
+    data_etf.fill_missing_kr_names(ticks, log=lambda *a: None)
+    assert ticks[0]["name"] == "LS ELECTRIC"
+    assert ticks[1]["name"] == "삼성전자"     # 이미 있으면 안 건드림
+    assert ticks[2]["name"] == ""             # 조회 실패는 무시(코드 표시 폴백)
+    assert ticks[3]["name"] == ""             # 미국은 티커로 충분 — 보충 대상 아님
+
+
 def test_parse_s3_listing_symbols_and_pagination():
     """S3 목록 XML에서 퍼프 심볼을 뽑고 페이지네이션 마커를 읽는다."""
     from invest_signal.data_binance import UM_KLINES_PREFIX, _parse_s3_listing

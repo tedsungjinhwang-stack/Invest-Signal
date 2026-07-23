@@ -32,6 +32,7 @@ SAMPLE = """# 2트랙 모멘텀 리포트 — 2026-07-21
 |---|---|---|---|
 | 1 | 주성엔지니어링(036930) | 169,200.0 | +0.77 |
 | 2 | 삼성전기(009150) | 1,310,000.0 | +2.75 |
+| 4 | 010120(010120) | 220,500.0 | +15.69 |
 | 6 | 기가비스(420770) | 142,600.0 | -0.28 |
 """
 
@@ -54,6 +55,9 @@ def test_parse_report_extracts_sector_and_rs_picks():
     assert by["000660"]["name"] == "SK하이닉스"
     # 섹터 라벨(CIBR 등 괄호 티커)이 종목으로 섞이면 안 됨
     assert "CIBR" not in codes and "SMH" not in codes and "XOP" not in codes
+    # 리포트가 이름을 못 찾아 '코드(코드)'로 쓴 경우 → 이름 없음으로 정규화
+    assert by["OVV"]["name"] == ""
+    assert "010120" in codes and by["010120"]["name"] == ""
 
 
 def test_parse_report_empty_or_garbage():

@@ -50,8 +50,10 @@ def parse_report(md: str) -> list[dict]:
             return
         seen.add(code)
         market = "KR" if code.isdigit() else "US"
-        out.append({"code": code, "market": market,
-                    "name": re.sub(r"[*🟢🔵]|풀백", "", name).strip()})
+        name = re.sub(r"[*🟢🔵]|풀백", "", name).strip()
+        if name.upper() == code.upper():
+            name = ""       # 리포트가 이름을 못 찾으면 '코드(코드)'로 쓴다 — 이름 없음 처리
+        out.append({"code": code, "market": market, "name": name})
 
     in_section = False
     for line in md.splitlines():

@@ -173,6 +173,7 @@ def scan_yfinance(cfg: dict, detectors, log=print) -> tuple[list, list, dict, di
             groups[t["code"]] = "stock"
     if not tickers:
         return [], [], {}, {}
+    data_etf.fill_missing_kr_names(tickers, log)    # 리포트가 이름을 빠뜨린 국장 종목 보충
     names = {t["code"]: t.get("name", "") for t in tickers}
     log(f"[yfinance] ETF·주식 {len(tickers)}종 스캔 시작")
     frames = data_etf.fetch_all(tickers, log=log)

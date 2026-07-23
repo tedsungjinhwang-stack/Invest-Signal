@@ -17,6 +17,29 @@ def yahoo_symbol(code: str, market: str) -> str:
     return code
 
 
+def fill_missing_kr_names(tickers: list[dict], log=print) -> None:
+    """이름이 빈 한국 종목의 종목명을 야후에서 보충한다 (제자리 수정).
+
+    퀀트포트폴리오 리포트가 이름을 못 찾으면 '코드(코드)'로 내보내는
+    경우가 있어(예: 010120(010120)), 알림에 코드만 찍히는 것을 막는다.
+    조회 실패는 무시 — 코드 표시로 폴백.
+    """
+    import yfinance as yf
+    for t in tickers:
+        if t.get("name") or not str(t.get("code", ""))[:1].isdigit():
+            continue
+        for suffix in (".KS", ".KQ"):
+            try:
+                info = yf.Ticker(f"{t['code']}{suffix}").get_info()
+                name = (info.get("shortName") or info.get("longName") or "").strip()
+            except Exception:       # noqa: BLE001 — 이름 보충 실패가 스캔을 막지 않게
+                continue
+            if name:
+                t["name"] = name
+                log(f"[stocks] {t['code']} 종목명 보충: {name}")
+                break
+
+
 def resample_4h(df1h: pd.DataFrame, now: pd.Timestamp | None = None) -> pd.DataFrame | None:
     """1h OHLC → UTC 4h봉. 미확정 데이터가 섞일 수 있는 마지막 버킷은 버린다.
 
