@@ -4,10 +4,12 @@
   ① 120·240·480 이동평균이 역배열(MA120 < MA240 < MA480)인 상태에서
   ② 캔들 고가가 240선에 닿음(터치)
   ③ 터치 후 touch_window_bars(기본 60봉 = 10일) 이내에
-     종가가 60선 아래로 마감하는 "첫" 봉 → 그 봉에서 시그널 발생
-  ④ 트리거 봉이 분기 앵커드 VWAP 위에 있어야 함(종가 > QVWAP).
+  ④ 종가가 60선 아래이면서 분기 앵커드 VWAP(QVWAP)도 깨고 내려온
+     "첫" 봉 → 그 봉에서 시그널 발생. QVWAP 위에 있다가 아래로 확
+     내려오는 플러시를 잡는다 — 60선만 깨고 QVWAP 위에서 버티는 동안은
+     대기하고, QVWAP까지 깨는 봉에서 알린다.
 
-같은 터치에 대해 종가가 60선 아래에 계속 머물러도 첫 이탈 봉에서만
+같은 터치에 대해 종가가 그 아래에 계속 머물러도 첫 이탈 봉에서만
 발생한다. 새로운 240 터치가 나오면 다시 발생할 수 있다.
 """
 
@@ -29,7 +31,7 @@ class Params:
     ma_touch: int = 240         # 터치 판정 기준선
     touch_window_bars: int = 60  # 터치 유효기간(봉 수). 4h×60 = 10일
     grace_bars: int = 1         # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
-    qvwap_condition: bool = True  # ④ 트리거 종가 > 분기VWAP 요구 (Volume 없으면 자동 통과)
+    qvwap_condition: bool = True  # ④ 트리거 종가 < 분기VWAP(하향 이탈) 요구 (Volume 없으면 자동 통과)
 
 
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
@@ -60,9 +62,17 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     def below_entry(i: int) -> bool:
         return not pd.isna(m_entry.iloc[i]) and close.iloc[i] < m_entry.iloc[i]
 
+    def is_trigger_state(i: int) -> bool:
+        """60선 아래 + (qvwap_condition이면) 분기 VWAP도 깨고 내려온 상태."""
+        if not below_entry(i):
+            return False
+        if not params.qvwap_condition or qv is None or pd.isna(qv.iloc[i]):
+            return True
+        return bool(close.iloc[i] < qv.iloc[i])
+
     events = []
     for t in range(max(need, last - params.grace_bars), last + 1):
-        if not below_entry(t):
+        if not is_trigger_state(t):
             continue
         # 240선이 480선 위면 이미 '눌림목 구간' — 상승초입은 발동하지 않는다
         if not pd.isna(a3.iloc[t]) and a2.iloc[t] > a3.iloc[t]:
@@ -74,14 +84,12 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
                 break
         if touch_idx is None:
             continue
-        if any(below_entry(j) for j in range(touch_idx + 1, t)):
+        if any(is_trigger_state(j) for j in range(touch_idx + 1, t)):
             continue            # t가 터치 이후 "첫" 이탈 봉이 아님
         qv_val = qv_above = None
         if qv is not None and not pd.isna(qv.iloc[t]):
             qv_val = float(qv.iloc[t])
             qv_above = bool(close.iloc[t] > qv.iloc[t])
-        if params.qvwap_condition and qv_val is not None and not qv_above:
-            continue            # 트리거 봉이 분기 VWAP 아래 → 조건 ④ 탈락
         events.append(SignalEvent(
             symbol=symbol,
             signal=NAME,
