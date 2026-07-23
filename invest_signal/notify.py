@@ -37,8 +37,8 @@ def chart_url(symbol: str, kind: str, market: str = "US") -> str:
     return f"https://www.tradingview.com/symbols/{symbol}/"
 
 
-SIGNAL_EMOJI = {"상승초입": "🟢", "풀백": "🔵"}
-SIGNAL_ORDER = ["상승초입", "풀백"]
+SIGNAL_EMOJI = {"상승초입": "🟢", "풀백": "🔵", "하락전환": "🔻"}
+SIGNAL_ORDER = ["상승초입", "풀백", "하락전환"]
 DISPLAY_GROUP = {"MSS": "풀백", "눌림목": "풀백"}   # MSS는 풀백 칸에 태그로 표시
 
 
@@ -63,6 +63,8 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     if e.signal == "mss" or d.get("label") == "MSS":
         tags.append(f"MSS(저점 {_fmt_price(d['broken_low'])} 이탈)"
                     if d.get("broken_low") else "MSS")
+    elif e.signal == "downtrend_reversal" and d.get("broken_low"):
+        tags.append(f"직전저점 {_fmt_price(d['broken_low'])} 이탈")
     if d.get("align"):
         tags.append(d["align"])
     return " · ".join([head] + tags)

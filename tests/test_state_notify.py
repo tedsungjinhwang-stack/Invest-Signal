@@ -82,6 +82,19 @@ def test_ongoing_list_caps_per_label():
     assert "외 5종" in msg
 
 
+def test_downtrend_section_for_etf_and_stocks():
+    """하락전환은 🔻 칸에 ETF·주식만 — 직전저점 태그 포함."""
+    ch = SignalEvent(symbol="SOXL", signal="downtrend_reversal",
+                     bar_time=pd.Timestamp("2026-07-21 04:00", tz="UTC"),
+                     price=20.5, detail={"label": "하락전환", "broken_low": 21.0})
+    msg = format_events([], [ch], {"SOXL": "반도체 3x"})
+    assert "🔻 <b>하락전환</b>" in msg
+    assert "직전저점 21 이탈" in msg
+    # 추적(ongoing)도 같은 칸 아래 ↳ 줄
+    msg2 = format_events([_event("BTCUSDT")], [], {}, ongoing_etf=[ch])
+    assert "하락전환" in msg2 and "↳ SOXL" in msg2
+
+
 def test_align_tag_shown_in_lines_and_ongoing():
     new = _event("BTCUSDT", {"label": "상승초입", "align": "역배열"})
     hold = _event("ETHUSDT", {"label": "풀백", "align": "혼조"})

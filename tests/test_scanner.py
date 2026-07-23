@@ -57,6 +57,50 @@ def test_detect_all_choch_evicts_prior_long_holds():
     assert [e.signal for e in ongoing] == ["pullback"]
 
 
+def test_detect_all_show_choch_displays_downtrend_events():
+    """show_choch=True(ETF·주식)면 하락전환이 알림·추적에 잡히고,
+    기본값(크립토)이면 제거 용도로만 쓰이고 표시되지 않는다."""
+    from types import SimpleNamespace
+    from invest_signal.scanner import _detect_all
+    from invest_signal.signals.pullback import Params
+
+    idx = pd.date_range("2025-01-01", periods=10, freq="4h", tz="UTC")
+    df = pd.DataFrame({"Open": 1.0, "High": 1.0, "Low": 1.0, "Close": 1.0},
+                      index=idx)
+
+    def ev2(sig, label, i):
+        return SignalEvent(symbol="X", signal=sig, bar_time=idx[i],
+                           price=1.0, detail={"label": label})
+
+    def mod(name, events):
+        return SimpleNamespace(NAME=name,
+                               detect=lambda d, s, p: list(events),
+                               still_active=lambda d, e, p: True)
+
+    dets = [(mod("pullback", [ev2("pullback", "눌림목", 3)]), Params()),
+            (mod("downtrend_reversal", [ev2("downtrend_reversal", "하락전환", 5)]), Params())]
+
+    events, ongoing = _detect_all({"X": df}, dets, show_choch=True)
+    assert "downtrend_reversal" in {e.signal for e in events}
+    assert [e.signal for e in ongoing] == ["downtrend_reversal"]   # 풀백은 CHoCH로 제거
+
+    events, ongoing = _detect_all({"X": df}, dets)                 # 크립토 기본 동작
+    assert "downtrend_reversal" not in {e.signal for e in events}
+    assert ongoing == []
+
+
+def test_filter_ranked_covers_pullback_and_mss_only():
+    """랭크 필터는 풀백 칸 표시분(풀백+MSS)만 거르고 상승초입은 통과."""
+    from invest_signal.scanner import _filter_ranked
+
+    evs = [_ev("BIGVOL", "pullback", 0), _ev("THIN", "pullback", 0),
+           _ev("BIGVOL", "mss", 4), _ev("THIN", "mss", 4),
+           _ev("THIN", "uptrend_onset", 8)]
+    out = _filter_ranked(evs, {"BIGVOL"})
+    assert {(e.symbol, e.signal) for e in out} == {
+        ("BIGVOL", "pullback"), ("BIGVOL", "mss"), ("THIN", "uptrend_onset")}
+
+
 def test_crypto_rank_eligible_union_of_volume_and_gain():
     from invest_signal.scanner import _crypto_rank_eligible
 

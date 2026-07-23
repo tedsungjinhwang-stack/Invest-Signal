@@ -20,13 +20,16 @@ ONGOING_LOOKBACK_BARS = 42      # '유지 중' 판정 시 트리거를 찾아볼
 
 CHOCH_EVICTS = {"pullback"}     # CHoCH 발생 시 리스트에서 걷어낼 셋업 (상승초입은 240선 재이탈로만 제거)
 
+RANK_FILTERED = {"pullback", "mss"}     # 크립토 랭크 필터 대상 — 풀백 칸에 표시되는 것 전부 (MSS 줄 포함)
 
-def _detect_all(frames: dict, detectors, log=print) -> tuple[list, list]:
+
+def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[list, list]:
     """전 종목 시그널 검출 + '유지 중' 목록.
 
-    하락전환(downtrend_reversal)은 알림·리스트에 표시하지 않는다 — 대신
-    눌림목 셋업 이후에 하락전환이 발생했으면 그 항목을 유지 중 리스트에서
-    영구 제거하는 청소 역할만 한다(상승초입은 240선 재이탈로만 제거).
+    하락전환(downtrend_reversal)은 눌림목 셋업 이후에 발생했으면 그 항목을
+    유지 중 리스트에서 영구 제거하는 청소 역할을 한다(상승초입은 240선
+    재이탈로만 제거). 크립토(show_choch=False)는 그 용도로만 쓰고 표시하지
+    않지만, ETF·주식(show_choch=True)은 하락전환 칸에 알림·추적도 한다.
     각 이벤트에 현재 이평선 배열 상태(역배열→혼조→정배열 전환 추적)를 붙인다.
     """
     events, ongoing = [], []
@@ -40,7 +43,8 @@ def _detect_all(frames: dict, detectors, log=print) -> tuple[list, list]:
             if mod.NAME == "downtrend_reversal":
                 if latest is not None:
                     choch_time = latest.bar_time
-                continue
+                if not show_choch:
+                    continue
             sym_events.extend(mod.detect(df, sym, params))
             if latest is not None and mod.still_active(df, latest, params):
                 sym_ongoing.append(latest)
@@ -83,6 +87,11 @@ def _crypto_rank_eligible(frames: dict, rcfg: dict) -> set:
     return eligible
 
 
+def _filter_ranked(items: list, eligible: set) -> list:
+    """풀백 칸에 표시되는 시그널(풀백·MSS)은 랭크 필터 통과 종목만 남긴다."""
+    return [e for e in items if e.signal not in RANK_FILTERED or e.symbol in eligible]
+
+
 def scan_crypto(cfg: dict, detectors, log=print) -> tuple[list, list]:
     c = cfg.get("crypto") or {}
     if not c.get("enabled", True):
@@ -96,15 +105,16 @@ def scan_crypto(cfg: dict, detectors, log=print) -> tuple[list, list]:
         frames = data_binance.fetch_all(s, symbols, source, limit=limit, log=log)
     events, ongoing = _detect_all(frames, detectors, log)
 
-    # 크립토 전용 풀백 랭크 필터 — 주도주(거래대금·상승률 상위)의 눌림만 남긴다
+    # 크립토 전용 풀백 랭크 필터 — 주도주(거래대금·상승률 상위)만 남긴다.
+    # 풀백 칸에 표시되는 건 전부 대상: 풀백 시그널 + MSS 줄
     rcfg = ((cfg.get("signal") or {}).get("pullback") or {}).get("crypto_rank_filter") or {}
     if rcfg.get("enabled", True):
         eligible = _crypto_rank_eligible(frames, rcfg)
-        before = sum(1 for e in events if e.signal == "pullback")
-        events = [e for e in events if e.signal != "pullback" or e.symbol in eligible]
-        ongoing = [e for e in ongoing if e.signal != "pullback" or e.symbol in eligible]
-        after = sum(1 for e in events if e.signal == "pullback")
-        log(f"[binance] 풀백 랭크 필터: 대상 {len(eligible)}종 — 신규 풀백 {before}→{after}건")
+        before = sum(1 for e in events if e.signal in RANK_FILTERED)
+        events = _filter_ranked(events, eligible)
+        ongoing = _filter_ranked(ongoing, eligible)
+        after = sum(1 for e in events if e.signal in RANK_FILTERED)
+        log(f"[binance] 풀백 랭크 필터: 대상 {len(eligible)}종 — 신규 풀백·MSS {before}→{after}건")
 
     log(f"[binance] 시그널 {len(events)}건 · 유지 중 {len(ongoing)}건")
     return events, ongoing
@@ -151,7 +161,7 @@ def scan_yfinance(cfg: dict, detectors, log=print) -> tuple[list, list, dict, di
     names = {t["code"]: t.get("name", "") for t in tickers}
     log(f"[yfinance] ETF·주식 {len(tickers)}종 스캔 시작")
     frames = data_etf.fetch_all(tickers, log=log)
-    events, ongoing = _detect_all(frames, detectors, log)
+    events, ongoing = _detect_all(frames, detectors, log, show_choch=True)
     log(f"[yfinance] 시그널 {len(events)}건 · 유지 중 {len(ongoing)}건")
     return events, ongoing, names, groups
 
