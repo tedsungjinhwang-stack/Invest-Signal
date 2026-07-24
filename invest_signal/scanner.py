@@ -108,11 +108,13 @@ def scan_crypto(cfg: dict, detectors, log=print) -> tuple[list, list]:
         return [], []
     exclude = set(c.get("exclude") or [])
     limit = int(c.get("kline_limit", 750))
+    workers = int(c.get("fetch_workers", 6))
     requested = c.get("source", "auto")
     with requests.Session() as s:
         source, symbols = data_binance.resolve_source(s, requested, exclude, log)
-        log(f"[binance] {source} · USDT {len(symbols)}종 스캔 시작")
-        frames = data_binance.fetch_all(s, symbols, source, limit=limit, log=log)
+        log(f"[binance] {source} · USDT {len(symbols)}종 스캔 시작 (워커 {workers})")
+        frames = data_binance.fetch_all(s, symbols, source, limit=limit, log=log,
+                                        workers=workers)
     events, ongoing = _detect_all(frames, detectors, log)
 
     # 크립토 전용 랭크 필터 — 주도주(거래대금·상승률 상위)만 남긴다.

@@ -10,7 +10,9 @@ HTTP 451로 차단된다. 공식 현물 데이터 미러 data-api.binance.vision
 
 import os
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 import requests
@@ -218,22 +220,60 @@ def klines_4h(session: requests.Session, symbol: str, source: str,
 
 def fetch_all(session: requests.Session, symbols: list[str], source: str,
               limit: int = 600, pause: float = 0.1,
-              log=print) -> dict[str, pd.DataFrame]:
-    """전 심볼 4h 캔들 수집. 개별 실패는 건너뛰고, 451은 즉시 중단."""
+              log=print, workers: int = 6) -> dict[str, pd.DataFrame]:
+    """전 심볼 4h 캔들 병렬 수집. 개별 실패는 건너뛰고, 451은 즉시 중단.
+
+    requests.Session은 스레드 간 공유가 안전하지 않아 워커 스레드마다
+    세션을 하나씩 만든다(인자로 받은 session은 단일 워커일 때만 사용).
+    페이싱: 워커당 요청 뒤 pause씩 쉬므로 워커 6 × klines 가중치 5 기준
+    분당 ~1500으로 fapi 한도(2400)에 여유가 있고, 초과 조짐이 보이면
+    _throttle이 해당 워커를 재운다.
+    """
     out: dict[str, pd.DataFrame] = {}
     failed = []
-    for i, sym in enumerate(symbols):
-        try:
-            out[sym] = klines_4h(session, sym, source, limit)
-        except GeoBlockedError:
-            raise
-        except Exception as e:                     # noqa: BLE001 — 종목별 실패는 스캔 전체를 막지 않는다
-            failed.append(sym)
-            log(f"[binance] {sym} 수집 실패: {e}")
+    workers = max(1, int(workers))
+    tls = threading.local()
+    sessions, sess_lock = [], threading.Lock()
+
+    def get_session() -> requests.Session:
+        if workers == 1:
+            return session
+        if getattr(tls, "s", None) is None:
+            tls.s = requests.Session()
+            with sess_lock:
+                sessions.append(tls.s)
+        return tls.s
+
+    def one(sym: str) -> pd.DataFrame:
+        df = klines_4h(get_session(), sym, source, limit)
         if pause:
             time.sleep(pause)
-        if (i + 1) % 100 == 0:
-            log(f"[binance] {i + 1}/{len(symbols)} 수집")
+        return df
+
+    geo_err = None
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {ex.submit(one, sym): sym for sym in symbols}
+            done = 0
+            for fut in as_completed(futs):
+                sym = futs[fut]
+                try:
+                    out[sym] = fut.result()
+                except GeoBlockedError as e:
+                    geo_err = e
+                    ex.shutdown(cancel_futures=True)
+                    break
+                except Exception as e:             # noqa: BLE001 — 종목별 실패는 스캔 전체를 막지 않는다
+                    failed.append(sym)
+                    log(f"[binance] {sym} 수집 실패: {e}")
+                done += 1
+                if done % 100 == 0:
+                    log(f"[binance] {done}/{len(symbols)} 수집")
+    finally:
+        for s in sessions:
+            s.close()
+    if geo_err is not None:
+        raise geo_err
     if failed:
         log(f"[binance] 실패 {len(failed)}종: {', '.join(failed[:10])}"
             + (" ..." if len(failed) > 10 else ""))

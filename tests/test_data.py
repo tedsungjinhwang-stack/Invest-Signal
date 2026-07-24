@@ -27,6 +27,31 @@ def test_parse_klines_drops_in_progress_bar():
     assert len(df2) == 2 and df2["Volume"].iloc[1] == 200
 
 
+def test_fetch_all_parallel_collects_and_skips_failures(monkeypatch):
+    """병렬 수집 — 전 종목 수집, 개별 실패는 건너뛰고, 451은 전파."""
+    from invest_signal import data_binance as db
+
+    def fake_klines(session, sym, source, limit):
+        if sym == "BADUSDT":
+            raise RuntimeError("boom")
+        return pd.DataFrame({"Close": [1.0]})
+
+    monkeypatch.setattr(db, "klines_4h", fake_klines)
+    syms = [f"C{i:03d}USDT" for i in range(25)] + ["BADUSDT"]
+    out = db.fetch_all(None, syms, "spot_mirror", pause=0, log=lambda *a: None,
+                       workers=6)
+    assert len(out) == 25 and "BADUSDT" not in out
+
+    def geo_klines(session, sym, source, limit):
+        raise db.GeoBlockedError("451")
+
+    monkeypatch.setattr(db, "klines_4h", geo_klines)
+    import pytest
+    with pytest.raises(db.GeoBlockedError):
+        db.fetch_all(None, ["AUSDT", "BUSDT"], "fapi", pause=0,
+                     log=lambda *a: None, workers=4)
+
+
 def test_binance_proxy_applies_to_fapi_only(monkeypatch):
     """BINANCE_PROXY는 fapi 요청에만 붙는다 — 미러/S3 폴백 경로는 직결."""
     from invest_signal.data_binance import FAPI_BASE, SPOT_MIRROR_BASE, _proxies_for

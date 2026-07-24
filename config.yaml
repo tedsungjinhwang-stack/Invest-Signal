@@ -44,6 +44,7 @@ crypto:
   source: auto
   exclude: []               # 제외할 심볼. 예: [BTCDOMUSDT]
   kline_limit: 750          # 480MA·분기VWAP(최대 552봉) + 터치윈도우 + 여유
+  fetch_workers: 6          # 캔들 수집 병렬 워커 수 — 6이면 fapi 가중치 한도의 ~60%
 
 etf:
   enabled: true
