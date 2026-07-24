@@ -47,7 +47,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     if n < need + 2:            # 최장 MA가 유효한 봉이 최소 2개는 있어야 터치→이탈이 가능
         return []
 
-    close, high = df["Close"], df["High"]
+    close, high, low = df["Close"], df["High"], df["Low"]
     m_entry = sma(close, params.ma_entry)
     a1, a2, a3 = (sma(close, k) for k in params.ma_align)
     m_touch = sma(close, params.ma_touch)
@@ -56,9 +56,15 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     last = n - 1
 
     def is_touch(i: int) -> bool:
+        """역배열 + 240선이 캔들 범위 안 (아래에서 윗꼬리로 닿는 터치).
+
+        고가만 보면 캔들 전체가 240선 위로 올라탄 봉도 매봉 '터치'가 되어
+        터치 시점이 계속 갱신된다 — 저가가 240선 이하인지도 본다.
+        """
         if pd.isna(a3.iloc[i]) or pd.isna(m_touch.iloc[i]):
             return False
-        return a1.iloc[i] < a2.iloc[i] < a3.iloc[i] and high.iloc[i] >= m_touch.iloc[i]
+        return (a1.iloc[i] < a2.iloc[i] < a3.iloc[i]
+                and high.iloc[i] >= m_touch.iloc[i] >= low.iloc[i])
 
     def below_entry(i: int) -> bool:
         return not pd.isna(m_entry.iloc[i]) and close.iloc[i] < m_entry.iloc[i]

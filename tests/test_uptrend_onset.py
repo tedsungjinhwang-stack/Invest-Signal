@@ -145,6 +145,23 @@ def test_missed_bar_trigger_found_even_if_it_touches():
     assert len(evs) == 1 and evs[0].bar_time == df.index[-2]
 
 
+def test_ride_above_ma240_does_not_refresh_touch():
+    """캔들 전체가 240선 위인 봉은 터치가 아니다 — 터치 시점은 진짜
+    윗꼬리 터치 봉으로 남아야 한다 (매봉 갱신 버그 방지)."""
+    closes, highs = base_decline()
+    t_idx = add_touch(closes, highs)          # 진짜 터치 봉 (윗꼬리)
+    df0 = make_df(closes, highs)
+    m240 = float(df0["Close"].rolling(240).mean().iloc[-1])
+    for _ in range(8):                        # 240선 위 올라탄 봉들 — 터치 아님
+        closes.append(m240 + 20.0)
+        highs.append(m240 + 25.0)
+    add_drop(closes, highs, 110.0)            # 60선 아래 붕괴 → 발화
+    df = make_df(closes, highs)
+    evs = uptrend_onset.detect(df, "TEST", P)
+    assert len(evs) == 1
+    assert evs[0].detail["touch_time"] == df.index[t_idx].isoformat()
+
+
 def test_qvwap_condition_gates_signal():
     """트리거 봉 종가가 분기 VWAP 위여야 발화 — 아래면 대기."""
     # 520봉(≈87일) — 2025-01-01 시작이라 전 구간이 1분기 안
