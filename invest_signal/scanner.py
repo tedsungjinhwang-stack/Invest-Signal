@@ -23,10 +23,10 @@ CHOCH_EVICTS = {"pullback"}     # CHoCH 발생 시 리스트에서 걷어낼 셋
 # 크립토 랭크 필터 적용 범위 — signal.<키>.crypto_rank_filter 설정별로 걸러낼
 # 시그널 집합. 눌림목 칸은 MSS 줄까지 함께 거르고, 상승초입은 자체(완화) 기준을 쓴다.
 RANK_FILTER_SCOPE = {
-    "pullback": frozenset({"pullback", "mss"}),
+    "pullback": frozenset({"pullback", "mss", "pump_dip"}),
     "uptrend_onset": frozenset({"uptrend_onset"}),
 }
-RANK_FILTER_LABEL = {"pullback": "눌림목·MSS", "uptrend_onset": "상승초입"}
+RANK_FILTER_LABEL = {"pullback": "눌림목·MSS·펌핑", "uptrend_onset": "상승초입"}
 
 
 def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[list, list]:
@@ -202,7 +202,9 @@ def scan_yfinance(cfg: dict, detectors, log=print) -> tuple[list, list, dict, di
     names = {t["code"]: t.get("name", "") for t in tickers}
     log(f"[yfinance] ETF·주식 {len(tickers)}종 스캔 시작")
     frames = data_etf.fetch_all(tickers, log=log)
-    events, ongoing = _detect_all(frames, detectors, log, show_choch=True)
+    dets = [(m, p) for m, p in detectors
+            if not getattr(m, "CRYPTO_ONLY", False)]   # 펌핑 등 크립토 전용 제외
+    events, ongoing = _detect_all(frames, dets, log, show_choch=True)
     log(f"[yfinance] 시그널 {len(events)}건 · 유지 중 {len(ongoing)}건")
     return events, ongoing, names, groups
 

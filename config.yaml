@@ -32,6 +32,11 @@ signal:
     lookback_bars: 180      # 직전저점 유효기간 — 180봉 = 30일
     grace_bars: 1
     qvwap_condition: true   # 돌파 봉 종가가 분기 앵커드 VWAP 아래여야 알림 (상승초입의 거울)
+  pump_dip:                 # 펌핑 (4h봉, 크립토 전용): 급등 후 주간 VWAP 첫 터치
+    enabled: true
+    lookback_bars: 42       # 펌핑 판정 구간 — 42봉 = 7일
+    min_gain: 1.0           # 구간 내 저점→고점 상승률 하한 (1.0 = +100%)
+    grace_bars: 1
   mss:                      # MSS (4h봉): 직전 스윙저점(좌우 6봉=24h) 하향돌파
     enabled: true
     pivot_k: 6              # 스윙저점 판정 — 좌우 k봉보다 낮은 저가 (6봉 = 24시간)

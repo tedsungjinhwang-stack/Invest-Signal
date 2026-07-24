@@ -53,3 +53,8 @@ def quarterly_vwap(df: pd.DataFrame) -> pd.Series | None:
 def monthly_vwap(df: pd.DataFrame) -> pd.Series | None:
     """월간 앵커드 VWAP (매월 1일 리셋)."""
     return anchored_vwap(df, "M")
+
+
+def weekly_vwap(df: pd.DataFrame) -> pd.Series | None:
+    """주간 앵커드 VWAP (매주 월요일 00:00 UTC 리셋)."""
+    return anchored_vwap(df, "W")

@@ -37,8 +37,8 @@ def chart_url(symbol: str, kind: str, market: str = "US") -> str:
     return f"https://www.tradingview.com/symbols/{symbol}/"
 
 
-SIGNAL_EMOJI = {"상승초입": "🟢", "눌림목": "🔵", "하락전환": "🔻"}
-SIGNAL_ORDER = ["상승초입", "눌림목", "하락전환"]
+SIGNAL_EMOJI = {"상승초입": "🟢", "눌림목": "🔵", "펌핑": "🚀", "하락전환": "🔻"}
+SIGNAL_ORDER = ["상승초입", "눌림목", "펌핑", "하락전환"]
 DISPLAY_GROUP = {"MSS": "눌림목", "풀백": "눌림목"}   # MSS는 눌림목 칸에 태그로 표시
 MARKET_EMOJI = {"크립토": "🪙", "ETF": "📊", "주식": "🏛"}
 DIVIDER = "─" * 16
@@ -73,6 +73,8 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     else:
         if e.signal == "downtrend_reversal" and d.get("broken_low"):
             tags.append(f"직전저점 {_fmt_price(d['broken_low'])} 이탈")
+        if e.signal == "pump_dip" and d.get("pump_gain") is not None:
+            tags.append(f"저점대비 +{d['pump_gain'] * 100:.0f}% · 주간VWAP 터치")
         if d.get("align"):
             tags.append(d["align"])
     return head + (" · " + " · ".join(tags) if tags else "")

@@ -86,6 +86,17 @@ def test_ongoing_list_caps_per_label():
     assert msg.count("↳") == 16               # 15종 각 한 줄 + '외 N종' 줄
 
 
+def test_pump_section_with_gain_tag():
+    """펌핑은 🚀 칸에 크립토만 — 저점대비 상승률·주간VWAP 태그 포함."""
+    ev = SignalEvent(symbol="AKEUSDT", signal="pump_dip",
+                     bar_time=pd.Timestamp("2026-07-21 04:00", tz="UTC"),
+                     price=0.0015, detail={"label": "펌핑", "pump_gain": 2.0})
+    msg = format_events([ev], [], {})
+    assert "🚀 <b>펌핑</b>" in msg
+    assert "저점대비 +200% · 주간VWAP 터치" in msg
+    assert ">AKE</a>" in msg
+
+
 def test_downtrend_section_for_etf_and_stocks():
     """하락전환은 🔻 칸에 ETF·주식만 — 직전저점 태그 포함."""
     ch = SignalEvent(symbol="SOXL", signal="downtrend_reversal",
