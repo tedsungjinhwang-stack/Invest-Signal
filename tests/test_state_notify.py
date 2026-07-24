@@ -74,13 +74,13 @@ def test_format_events_ongoing_section():
     assert "↳ SOL  68.2 · " in msg
     assert "⚠️MSS 저점 70 이탈" in msg        # 추적 MSS도 신규와 같은 형식
     assert "blockquote" not in msg            # 접힘·들여쓰기 없이 전부 표시
-    assert "풀백" in msg and "·⚠️MSS" in msg  # MSS는 풀백 칸에 태그로 병합
+    assert "눌림목" in msg and "·⚠️MSS" in msg  # MSS는 눌림목 칸에 태그로 병합
     # 추적 목록이 없으면 ↳ 줄도 없다
     assert "↳" not in format_events([_event("BTCUSDT")], [], {})
 
 
 def test_ongoing_list_caps_per_label():
-    evs = [_event(f"C{i:02d}USDT", {"label": "풀백"}) for i in range(20)]
+    evs = [_event(f"C{i:02d}USDT", {"label": "눌림목"}) for i in range(20)]
     msg = format_events([_event("BTCUSDT")], [], {}, ongoing_crypto=evs)
     assert "↳ 외 5종" in msg
     assert msg.count("↳") == 16               # 15종 각 한 줄 + '외 N종' 줄
@@ -101,8 +101,8 @@ def test_downtrend_section_for_etf_and_stocks():
 
 def test_align_tag_shown_in_lines_and_ongoing():
     new = _event("BTCUSDT", {"label": "상승초입", "align": "역배열"})
-    hold = _event("ETHUSDT", {"label": "풀백", "align": "정배열", "last_price": 3400.0})
-    mixed = _event("SOLUSDT", {"label": "풀백", "align": "혼조", "last_price": 70.0})
+    hold = _event("ETHUSDT", {"label": "눌림목", "align": "정배열", "last_price": 3400.0})
+    mixed = _event("SOLUSDT", {"label": "눌림목", "align": "혼조", "last_price": 70.0})
     mss = _event("XRPUSDT", {"label": "MSS", "align": "정배열", "last_price": 3.0})
     msg = format_events([new], [], {}, ongoing_crypto=[hold, mixed, mss])
     assert "역배열" in msg

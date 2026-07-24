@@ -21,12 +21,12 @@ ONGOING_LOOKBACK_BARS = 42      # '유지 중' 판정 시 트리거를 찾아볼
 CHOCH_EVICTS = {"pullback"}     # CHoCH 발생 시 리스트에서 걷어낼 셋업 (상승초입은 240선 재이탈로만 제거)
 
 # 크립토 랭크 필터 적용 범위 — signal.<키>.crypto_rank_filter 설정별로 걸러낼
-# 시그널 집합. 풀백 칸은 MSS 줄까지 함께 거르고, 상승초입은 자체(완화) 기준을 쓴다.
+# 시그널 집합. 눌림목 칸은 MSS 줄까지 함께 거르고, 상승초입은 자체(완화) 기준을 쓴다.
 RANK_FILTER_SCOPE = {
     "pullback": frozenset({"pullback", "mss"}),
     "uptrend_onset": frozenset({"uptrend_onset"}),
 }
-RANK_FILTER_LABEL = {"pullback": "풀백·MSS", "uptrend_onset": "상승초입"}
+RANK_FILTER_LABEL = {"pullback": "눌림목·MSS", "uptrend_onset": "상승초입"}
 
 
 def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[list, list]:
@@ -72,7 +72,7 @@ def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[l
 
 
 def _crypto_rank_eligible(frames: dict, rcfg: dict) -> set:
-    """풀백 랭크 필터 대상.
+    """눌림목 랭크 필터 대상.
 
     (24h 거래대금 상위 N ∪ 최근 상승률 상위 N) 중에서
     24h 거래대금이 min_turnover_usd 이상인 종목만 남긴다.
@@ -118,7 +118,7 @@ def scan_crypto(cfg: dict, detectors, log=print) -> tuple[list, list]:
     events, ongoing = _detect_all(frames, detectors, log)
 
     # 크립토 전용 랭크 필터 — 주도주(거래대금·상승률 상위)만 남긴다.
-    # 풀백 칸(풀백+MSS 줄)과 상승초입이 각자 기준을 갖는다 —
+    # 눌림목 칸(눌림목+MSS 줄)과 상승초입이 각자 기준을 갖는다 —
     # 상승초입은 3파 전 초입이라 기준을 낮게 잡는다.
     scfg = cfg.get("signal") or {}
     for key, signals in RANK_FILTER_SCOPE.items():

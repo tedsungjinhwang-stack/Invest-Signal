@@ -37,9 +37,9 @@ def chart_url(symbol: str, kind: str, market: str = "US") -> str:
     return f"https://www.tradingview.com/symbols/{symbol}/"
 
 
-SIGNAL_EMOJI = {"상승초입": "🟢", "풀백": "🔵", "하락전환": "🔻"}
-SIGNAL_ORDER = ["상승초입", "풀백", "하락전환"]
-DISPLAY_GROUP = {"MSS": "풀백", "눌림목": "풀백"}   # MSS는 풀백 칸에 태그로 표시
+SIGNAL_EMOJI = {"상승초입": "🟢", "눌림목": "🔵", "하락전환": "🔻"}
+SIGNAL_ORDER = ["상승초입", "눌림목", "하락전환"]
+DISPLAY_GROUP = {"MSS": "눌림목", "풀백": "눌림목"}   # MSS는 눌림목 칸에 태그로 표시
 MARKET_EMOJI = {"크립토": "🪙", "ETF": "📊", "주식": "🏛"}
 DIVIDER = "─" * 16
 

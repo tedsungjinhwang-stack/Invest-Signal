@@ -20,7 +20,7 @@ from ..indicators import quarterly_vwap, sma
 from . import SignalEvent
 
 NAME = "pullback"
-LABEL = "풀백"
+LABEL = "눌림목"
 
 
 @dataclass(frozen=True)
