@@ -63,3 +63,23 @@ def test_parse_report_extracts_sector_and_rs_picks():
 def test_parse_report_empty_or_garbage():
     assert parse_report("") == []
     assert parse_report("# 아무 내용 없음\n그냥 텍스트") == []
+
+
+def test_parse_etfmom_holdings():
+    """테마포착 TOP10 — 로스컷 제외, 숫자 코드는 KR·티커는 US."""
+    from invest_signal.data_qp import parse_etfmom
+
+    book = {"holdings": [
+        {"code": "XLE", "name": "에너지 섹터", "market": "US",
+         "theme": "석유·가스", "losscut": False},
+        {"code": "290080", "name": "RISE 200고배당커버드콜ATM", "market": "KR",
+         "theme": "배당·인컴", "losscut": False},
+        {"code": "FXI", "name": "중국 대형", "market": "US",
+         "theme": "중국", "losscut": True},          # 로스컷 → 제외
+    ], "last_reb": "2026-07-23"}
+    out = parse_etfmom(book)
+    assert [t["code"] for t in out] == ["XLE", "290080"]
+    by = {t["code"]: t for t in out}
+    assert by["XLE"]["market"] == "US"
+    assert by["290080"]["market"] == "KR" and by["290080"]["name"].startswith("RISE")
+    assert parse_etfmom({}) == []

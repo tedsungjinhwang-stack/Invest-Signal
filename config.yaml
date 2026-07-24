@@ -47,6 +47,9 @@ crypto:
 
 etf:
   enabled: true
+  # 퀀트포트폴리오 'ETF 모멘텀 TOP10(테마포착)' 보유 ETF를 매 스캔 동적 추가
+  # (reports/etfmom_book.json — 리밸런싱마다 바뀜, 로스컷 종목 제외)
+  theme_from_qp: true
   tickers:
     # 미국 섹터·지수
     - {code: SOXL,   market: US, name: "반도체 3x"}

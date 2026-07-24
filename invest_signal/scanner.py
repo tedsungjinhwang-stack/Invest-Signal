@@ -159,14 +159,37 @@ def _load_stock_tickers(cfg: dict, log=print) -> list[dict]:
     return static
 
 
+def _load_theme_etfs(cfg: dict, log=print) -> list[dict]:
+    """퀀트포트폴리오 'ETF 모멘텀 TOP10(테마포착)' 보유 ETF — 매 스캔 동적 로드.
+
+    조회 실패는 스캔을 막지 않는다(테마 ETF만 빠진 채 진행).
+    """
+    e = cfg.get("etf") or {}
+    if not e.get("theme_from_qp", True):
+        return []
+    token = os.environ.get("QP_GITHUB_TOKEN") or None
+    try:
+        etfs = data_qp.theme_etfs(token)
+        if etfs:
+            log(f"[etf] 퀀트포트폴리오 테마포착 TOP10에서 {len(etfs)}종 로드")
+        return etfs
+    except Exception as e:                          # noqa: BLE001 — 동적 로드 실패는 건너뜀
+        log(f"[etf] 테마 ETF 로드 실패({e}) — 정적 목록만 사용")
+        return []
+
+
 def scan_yfinance(cfg: dict, detectors, log=print) -> tuple[list, list, dict, dict]:
-    """레버리지 ETF + 퀀트포트폴리오 주식을 한 번에 수집·검출."""
+    """레버리지 ETF + 테마 ETF + 퀀트포트폴리오 주식을 한 번에 수집·검출."""
     tickers, groups = [], {}
     e = cfg.get("etf") or {}
     if e.get("enabled", True):
         for t in e.get("tickers") or []:
             tickers.append(t)
             groups[t["code"]] = "etf"
+        for t in _load_theme_etfs(cfg, log):
+            if t["code"] not in groups:
+                tickers.append(t)
+                groups[t["code"]] = "etf"
     for t in _load_stock_tickers(cfg, log):
         if t["code"] not in groups:
             tickers.append(t)

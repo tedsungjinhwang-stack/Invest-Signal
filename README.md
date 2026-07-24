@@ -87,6 +87,9 @@
 - **레버리지 ETF**: `config.yaml`의 18종 — 미국 섹터·지수 불/베어
   (SOXL/SOXS, TQQQ/SQQQ, FAS, LABU, ERX, NUGT, YINN, RETL, TMF, DFEN,
   BITU, ETHU) + 한국 (KODEX 레버리지/코스닥150레버리지 및 인버스2X 쌍)
+- **테마 ETF (자동 갱신)**: Quant-Portfolio의 `reports/etfmom_book.json`
+  — 'ETF 모멘텀 TOP10(테마포착)' 현재 보유 ETF를 매 스캔 동적 로드
+  (리밸런싱마다 바뀜, 로스컷 종목 제외, `etf.theme_from_qp: false`로 끔)
 - **주식 (매일 자동 갱신)**: Quant-Portfolio 레포의 `reports/latest.md`에서
   매 스캔마다 로드 — 미국·한국 각각 강한 섹터 대장주(2×3)와 개별 RS Top5,
   약 20종. 코스피/코스닥은 `.KS` 실패 시 `.KQ`로 자동 재시도.
