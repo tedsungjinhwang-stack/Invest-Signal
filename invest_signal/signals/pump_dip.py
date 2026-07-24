@@ -2,9 +2,10 @@
 
 수직 펌핑은 60/120선 눌림을 주지 않아 기존 상승초입·눌림목이 못 잡는다.
 펌핑 코인의 첫 눌림 진입 자리를 주간 VWAP로 잡는다:
-  ① 최근 lookback_bars(기본 42봉 = 7일) 안에서 저점 대비 고점이
-     min_gain(기본 +100%) 이상 펌핑했고
-  ② 펌핑 고점 이후 캔들(저가)이 주간 앵커드 VWAP(WVWAP) 라인에
+  ① 최근 peak_lookback_bars(기본 42봉 = 7일) 안의 고점이, 고점 직전
+     pump_window_bars(기본 6봉 = 하루) 내 저점 대비 min_gain(기본 +30%)
+     이상 급등한 고점이고 (= 하루 만에 확 오르는 펌핑)
+  ② 그 고점 이후 캔들(저가)이 주간 앵커드 VWAP(WVWAP) 라인에
      "처음" 닿는 봉 → 🚀 알림.
 
 고점 이후 첫 터치 봉에서만 알리고, 새 고점을 만든 뒤 다시 닿으면 새
@@ -25,9 +26,10 @@ CRYPTO_ONLY = True          # ETF·주식 스캔에서는 이 시그널을 돌�
 
 @dataclass(frozen=True)
 class Params:
-    lookback_bars: int = 42     # 펌핑 판정 구간 — 42봉 = 7일
-    min_gain: float = 1.0       # 구간 내 저점→고점 상승률 하한 (1.0 = +100%)
-    grace_bars: int = 1         # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
+    peak_lookback_bars: int = 42  # 터치 시점 기준 고점 유효기간 — 42봉 = 7일
+    pump_window_bars: int = 6     # 급등 속도 판정 — 고점 직전 N봉(6봉 = 하루)
+    min_gain: float = 0.3         # 하루 내 저점→고점 상승률 하한 (0.3 = +30%)
+    grace_bars: int = 1           # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
 
 
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
@@ -37,7 +39,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     중복 발송 방지는 호출 측(state)이 dedup_key로 처리한다.
     """
     n = len(df)
-    if n < params.lookback_bars + 2:
+    if n < params.peak_lookback_bars + 2:
         return []
     wv = weekly_vwap(df)
     if wv is None:
@@ -49,21 +51,22 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
         return not pd.isna(wv.iloc[i]) and low.iloc[i] <= wv.iloc[i]
 
     events = []
-    for t in range(max(params.lookback_bars, n - 1 - params.grace_bars), n):
+    for t in range(max(params.peak_lookback_bars, n - 1 - params.grace_bars), n):
         if not touches(t):
             continue
-        # 터치 봉 직전 lookback 구간에서 펌핑 고점과 그 앞 저점을 찾는다
-        w0 = t - params.lookback_bars
+        # 터치 봉 직전 구간에서 고점을 찾고, 고점 직전 하루의 저점과 비교
+        w0 = t - params.peak_lookback_bars
         hi = high.iloc[w0:t]
         peak_off = int(hi.values.argmax())
         peak_idx = w0 + peak_off
         peak = float(hi.iloc[peak_off])
-        trough = float(low.iloc[w0:peak_idx + 1].min())
+        p0 = max(0, peak_idx - params.pump_window_bars)
+        trough = float(low.iloc[p0:peak_idx + 1].min())
         if trough <= 0:
             continue
         gain = peak / trough - 1
         if gain < params.min_gain:
-            continue            # ① 펌핑 아님
+            continue            # ① 하루 내 급등이 아님
         if any(touches(j) for j in range(peak_idx + 1, t)):
             continue            # ② 고점 이후 "첫" 터치 봉만
         events.append(SignalEvent(

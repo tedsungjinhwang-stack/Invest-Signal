@@ -23,8 +23,8 @@ def make_df(closes, highs=None, lows=None, volumes=None, start="2025-01-06"):
 
 
 def pump_fixture():
-    """베이스 100 횡보 → 10봉 만에 300까지 펌핑 (저점 대비 +200%)."""
-    closes = [100.0] * 50 + list(np.linspace(110.0, 300.0, 10))
+    """베이스 100 횡보 → 5봉(하루 이내) 만에 300까지 수직 펌핑."""
+    closes = [100.0] * 55 + list(np.linspace(150.0, 300.0, 5))
     vols = [1.0] * len(closes)
     return closes, vols
 
@@ -41,7 +41,7 @@ def test_fires_on_first_wvwap_touch_after_pump():
     ev = evs[0]
     assert ev.signal == "pump_dip"
     assert ev.bar_time == df.index[-1]
-    assert ev.detail["pump_gain"] == 2.0     # 100 → 300
+    assert ev.detail["pump_gain"] == 2.0     # 고점 직전 하루 저점 100 → 고점 300
     assert ev.detail["wvwap"] >= 100.0
 
     # 다음 봉이 또 닿아도 첫 터치 봉에서만 (grace로 두 봉 다 후보일 때)
@@ -51,6 +51,18 @@ def test_fires_on_first_wvwap_touch_after_pump():
     df2 = make_df(closes, lows=lows, volumes=vols)
     evs2 = pump_dip.detect(df2, "TEST", Params(grace_bars=1))
     assert len(evs2) == 1 and evs2[0].bar_time == df2.index[-2]
+
+
+def test_slow_rise_is_not_a_pump():
+    """일주일에 걸쳐 완만히 +200% 오른 건 펌핑이 아니다 (하루 내 +30% 미달)."""
+    closes = [100.0] * 20 + list(np.linspace(100.0, 300.0, 42))
+    vols = [1.0] * len(closes)
+    closes.append(290.0)
+    lows = closes.copy()
+    lows[-1] = 100.0                         # 터치는 함
+    vols.append(1.0)
+    df = make_df(closes, lows=lows, volumes=vols)
+    assert pump_dip.detect(df, "TEST", P) == []
 
 
 def test_no_fire_without_pump():

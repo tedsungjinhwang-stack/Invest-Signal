@@ -9,8 +9,8 @@ signal:
     crypto_rank_filter:     # 크립토 전용 — 3파 전 초입이라 눌림목보다 낮은 기준
       enabled: true
       volume_top: 200       # 24h 거래대금 상위 N위 이내, 또는
-      gain_top: 100         # 최근 7일 상승률 상위 N위 이내면 통과하되
-      gain_lookback_bars: 42  # 상승률 계산 구간 — 42봉 = 7일
+      gain_top: 100         # 최근 3일 상승률 상위 N위 이내면 통과하되
+      gain_lookback_bars: 18  # 상승률 계산 구간 — 18봉 = 3일
       min_turnover_usd: 1000000  # 24h 거래대금 $1M 미만은 무조건 제외
   pullback:                 # 눌림목 (4h봉): 240선>480선 구간에서 120선 하회
     enabled: true
@@ -32,10 +32,11 @@ signal:
     lookback_bars: 180      # 직전저점 유효기간 — 180봉 = 30일
     grace_bars: 1
     qvwap_condition: true   # 돌파 봉 종가가 분기 앵커드 VWAP 아래여야 알림 (상승초입의 거울)
-  pump_dip:                 # 펌핑 (4h봉, 크립토 전용): 급등 후 주간 VWAP 첫 터치
+  pump_dip:                 # 펌핑 (4h봉, 크립토 전용): 하루 내 급등 후 주간 VWAP 첫 터치
     enabled: true
-    lookback_bars: 42       # 펌핑 판정 구간 — 42봉 = 7일
-    min_gain: 1.0           # 구간 내 저점→고점 상승률 하한 (1.0 = +100%)
+    peak_lookback_bars: 42  # 터치 시점 기준 고점 유효기간 — 42봉 = 7일
+    pump_window_bars: 6     # 급등 속도 판정 — 고점 직전 6봉 = 하루
+    min_gain: 0.3           # 하루 내 저점→고점 상승률 하한 (0.3 = +30%)
     grace_bars: 1
   mss:                      # MSS (4h봉): 직전 스윙저점(좌우 6봉=24h) 하향돌파
     enabled: true
