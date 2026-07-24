@@ -27,6 +27,20 @@ def test_parse_klines_drops_in_progress_bar():
     assert len(df2) == 2 and df2["Volume"].iloc[1] == 200
 
 
+def test_binance_proxy_applies_to_fapi_only(monkeypatch):
+    """BINANCE_PROXY는 fapi 요청에만 붙는다 — 미러/S3 폴백 경로는 직결."""
+    from invest_signal.data_binance import FAPI_BASE, SPOT_MIRROR_BASE, _proxies_for
+
+    monkeypatch.delenv("BINANCE_PROXY", raising=False)
+    assert _proxies_for(FAPI_BASE) is None
+    monkeypatch.setenv("BINANCE_PROXY", "")          # Actions의 미설정 시크릿 = 빈 문자열
+    assert _proxies_for(FAPI_BASE) is None
+    monkeypatch.setenv("BINANCE_PROXY", "http://u:p@1.2.3.4:8080")
+    assert _proxies_for(FAPI_BASE) == {"http": "http://u:p@1.2.3.4:8080",
+                                       "https": "http://u:p@1.2.3.4:8080"}
+    assert _proxies_for(SPOT_MIRROR_BASE) is None    # 미러는 프록시 안 탐
+
+
 def test_fill_missing_kr_names(monkeypatch):
     """이름 빈 한국 종목만 야후에서 보충 — 실패·미국 종목은 그대로."""
     import yfinance

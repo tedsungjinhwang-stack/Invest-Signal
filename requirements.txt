@@ -4,3 +4,4 @@ pandas==3.0.3
 requests==2.34.2
 PyYAML==6.0.3
 yfinance==1.5.1
+PySocks==1.7.1          # BINANCE_PROXY에 socks5:// 프록시를 쓸 때 필요

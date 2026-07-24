@@ -115,7 +115,12 @@ GitHub Actions 러너(미국 IP) 실측 결과:
 — 나머지는 토큰화 주식 퍼프, 퍼프 전용 밈코인, 현물 상폐 코인 등.
 BTC·ETH·SOL 등 주요 코인은 전부 커버된다. 진짜 무기한 데이터로 돌리려면:
 
-- `BINANCE_FAPI_BASE` 시크릿에 비미국 프록시 주소를 넣거나
+- `BINANCE_PROXY` 시크릿에 **비미국 HTTP/SOCKS 프록시**를 넣거나
+  (`http://user:pass@ip:port` 또는 `socks5h://user:pass@ip:port` —
+  ISP 프록시 등. fapi 요청만 프록시로 나가고 현물 미러·S3 폴백 경로는
+  직결 유지라 프록시가 죽어도 스캔은 계속 돈다), 또는
+- `BINANCE_FAPI_BASE` 시크릿에 fapi로 포워딩하는 비미국 리버스프록시
+  주소를 넣거나
 - 한국 PC/서버에서 crontab으로 실행 (`--only crypto`)
 
 ## 설정

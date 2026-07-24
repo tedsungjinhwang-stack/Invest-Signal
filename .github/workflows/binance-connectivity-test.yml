@@ -54,4 +54,7 @@ jobs:
         run: python -m invest_signal --only etf --dry-run
 
       - name: Crypto scan dry-run
+        env:
+          BINANCE_PROXY: ${{ secrets.BINANCE_PROXY }}
+          BINANCE_FAPI_BASE: ${{ secrets.BINANCE_FAPI_BASE }}
         run: python -m invest_signal --only crypto --dry-run

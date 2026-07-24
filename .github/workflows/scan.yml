@@ -54,7 +54,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           # 미국 러너에서 fapi가 막히면 자동으로 현물 미러 폴백.
-          # 진짜 퍼프 데이터가 필요하면 비미국 프록시 주소를 시크릿으로 지정.
+          # 진짜 퍼프 데이터가 필요하면 둘 중 하나를 시크릿으로 지정:
+          #  - BINANCE_PROXY: 비미국 HTTP/SOCKS 프록시 (http://user:pass@ip:port)
+          #  - BINANCE_FAPI_BASE: fapi로 포워딩하는 비미국 리버스프록시 주소
+          BINANCE_PROXY: ${{ secrets.BINANCE_PROXY }}
           BINANCE_FAPI_BASE: ${{ secrets.BINANCE_FAPI_BASE }}
           # Quant-Portfolio(퍼블릭) 리포트에서 주식 감시 목록 자동 로드.
           # 기본 GITHUB_TOKEN으로 충분 — 프라이빗으로 되돌리면 PAT를 등록.

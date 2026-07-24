@@ -40,13 +40,27 @@ def fapi_base() -> str:
     return (os.environ.get("BINANCE_FAPI_BASE") or FAPI_BASE).rstrip("/")
 
 
+def _proxies_for(base: str) -> dict | None:
+    """fapi 요청만 BINANCE_PROXY(비미국 프록시)로 보낸다.
+
+    현물 미러·S3는 미국에서도 열려 있으므로 직결 유지 — 프록시가 죽어도
+    폴백 경로는 영향을 받지 않는다. 형식: http://user:pass@ip:port 또는
+    socks5h://user:pass@ip:port.
+    """
+    p = os.environ.get("BINANCE_PROXY") or None
+    if p and base == fapi_base():
+        return {"http": p, "https": p}
+    return None
+
+
 def _get(session: requests.Session, base: str, path: str,
          params: dict | None = None, tries: int = 3) -> requests.Response:
     url = f"{base}{path}"
     delay = 1.0
+    proxies = _proxies_for(base)
     for attempt in range(1, tries + 1):
         try:
-            rsp = session.get(url, params=params, timeout=20)
+            rsp = session.get(url, params=params, timeout=20, proxies=proxies)
         except requests.RequestException:
             if attempt == tries:
                 raise
@@ -168,6 +182,8 @@ def resolve_source(session: requests.Session, requested: str,
     if requested in ("auto", "fapi"):
         try:
             syms = usdt_perp_symbols(session, exclude)
+            if os.environ.get("BINANCE_PROXY"):
+                log("[binance] BINANCE_PROXY 경유로 fapi(선물) 접속 성공")
             return "fapi", syms
         except GeoBlockedError:
             if requested == "fapi":
