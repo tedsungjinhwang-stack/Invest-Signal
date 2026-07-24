@@ -17,11 +17,11 @@ signal:
     ma_entry: 120           # 하회 판정 기준선 — 60으로 바꾸면 얕은 눌림도 잡음
     grace_bars: 1
     qvwap_condition: true   # 트리거 봉 종가가 분기 앵커드 VWAP 위여야 알림 (아래면 위로 올 때까지 대기)
-    crypto_rank_filter:     # 크립토 전용 — 눌림목 칸 전체(눌림목+MSS 줄)에 주도주 필터 (ETF·주식엔 미적용)
+    crypto_rank_filter:     # 크립토 전용 — 눌림목 칸 전체(눌림목+MSS+펌핑)에 주도주 필터 (ETF·주식엔 미적용)
       enabled: true
       volume_top: 100       # 24h 거래대금 상위 N위 이내, 또는
-      gain_top: 50          # 최근 7일 상승률 상위 N위 이내면 통과하되
-      gain_lookback_bars: 42  # 상승률 계산 구간 — 42봉 = 7일
+      gain_top: 50          # 최근 3일 상승률 상위 N위 이내면 통과하되
+      gain_lookback_bars: 18  # 상승률 계산 구간 — 18봉 = 3일
       min_turnover_usd: 5000000  # 24h 거래대금 $5M 미만은 무조건 제외 (유동성 하한)
   downtrend_reversal:       # 하락전환 (4h봉): 60선 아래 눌림의 직전저점 하향돌파(CHoCH)
     # ETF·주식은 🔻하락전환 칸에 알림·추적 표시. 크립토는 표시하지 않고
