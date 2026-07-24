@@ -65,6 +65,26 @@ def test_slow_rise_is_not_a_pump():
     assert pump_dip.detect(df, "TEST", P) == []
 
 
+def test_no_fire_when_price_entirely_below_mvwap():
+    """라인보다 한참 아래에 있는 코인의 반등은 터치가 아니다 (BILL 사례).
+
+    고점(80)이 월간 VWAP(≈195)에 못 미치고, 캔들 전체가 라인 아래라
+    low ≤ MVWAP만으로는 '항상 닿은' 상태가 되는 케이스 — 발화하면 안 됨.
+    """
+    closes = [200.0] * 30                    # 고가권에서 대량 거래 → MVWAP ≈ 195+
+    vols = [1000.0] * 30
+    closes += [50.0] * 25                    # 폭락 후 저가권 (소량 거래)
+    vols += [1.0] * 25
+    closes += list(np.linspace(55.0, 80.0, 5))   # 하루 내 +60% 반등 — 라인 아래
+    vols += [1.0] * 5
+    closes.append(70.0)                      # 눌림 봉 (전체가 라인 아래)
+    lows = closes.copy()
+    lows[-1] = 60.0
+    vols.append(1.0)
+    df = make_df(closes, lows=lows, volumes=vols)
+    assert pump_dip.detect(df, "TEST", P) == []
+
+
 def test_no_fire_without_pump():
     closes = [100.0] * 60
     vols = [1.0] * 60

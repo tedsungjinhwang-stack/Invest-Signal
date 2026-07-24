@@ -5,8 +5,9 @@
   ① 최근 peak_lookback_bars(기본 42봉 = 7일) 안의 고점이, 고점 직전
      pump_window_bars(기본 6봉 = 하루) 내 저점 대비 min_gain(기본 +30%)
      이상 급등한 고점이고 (= 하루 만에 확 오르는 펌핑)
-  ② 그 고점 이후 캔들(저가)이 월간 앵커드 VWAP(MVWAP) 라인에
-     "처음" 닿는 봉 → 🚀 알림.
+  ② 그 고점이 월간 앵커드 VWAP(MVWAP) 위에 있으며 (라인 아래 반등 제외)
+  ③ 고점 이후 캔들이 위에서 내려와 MVWAP 라인에 "처음" 닿는 봉
+     (저가 ≤ MVWAP ≤ 고가) → 🚀 알림.
 
 고점 이후 첫 터치 봉에서만 알리고, 새 고점을 만든 뒤 다시 닿으면 새
 셋업으로 다시 알린다. Volume이 없으면(MVWAP 계산 불가) 발화하지 않는다.
@@ -48,7 +49,14 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     close, high, low = df["Close"], df["High"], df["Low"]
 
     def touches(i: int) -> bool:
-        return not pd.isna(wv.iloc[i]) and low.iloc[i] <= wv.iloc[i]
+        """월간 VWAP 라인이 캔들 범위 안에 들어온 봉 — 위에서 내려와 닿는 터치.
+
+        low만 보면 라인보다 한참 아래에 있는 코인도 '항상 닿은' 것이 되므로
+        고가가 라인 이상인지도 본다 (캔들이 라인을 걸치고 있어야 터치).
+        """
+        if pd.isna(wv.iloc[i]):
+            return False
+        return low.iloc[i] <= wv.iloc[i] <= high.iloc[i]
 
     events = []
     for t in range(max(params.peak_lookback_bars, n - 1 - params.grace_bars), n):
@@ -67,6 +75,8 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
         gain = peak / trough - 1
         if gain < params.min_gain:
             continue            # ① 하루 내 급등이 아님
+        if pd.isna(wv.iloc[peak_idx]) or peak <= float(wv.iloc[peak_idx]):
+            continue            # 펌핑 고점이 월간 VWAP 위로 못 올라감 — 라인 아래 반등은 제외
         if any(touches(j) for j in range(peak_idx + 1, t)):
             continue            # ② 고점 이후 "첫" 터치 봉만
         events.append(SignalEvent(
