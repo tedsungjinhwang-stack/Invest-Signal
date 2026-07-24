@@ -82,6 +82,22 @@ def test_fires_once_then_silent():
     assert downtrend_reversal.detect(df, "TEST", Params(grace_bars=0)) == []
 
 
+def test_boundary_wick_sets_the_level():
+    """복귀 봉이 종가는 60선 위인데 꼬리를 더 낮게 꽂으면 그 꼬리가 직전저점."""
+    closes, lows, seg_level = uptrend_with_completed_dip()
+    deep = seg_level - 4.0
+    lows[len(lows) - 5] = deep            # 복귀 첫 봉의 꼬리가 진짜 최저가
+    closes.append(seg_level - 1.0)        # 눌림 구간 저점 아래지만 deep 위 → 미돌파
+    lows.append(closes[-1])
+    df = make_df(closes, lows)
+    assert downtrend_reversal.detect(df, "TEST", P) == []
+    closes[-1] = deep - 1.0               # 진짜 최저가(deep) 아래 마감 → 발화
+    lows[-1] = closes[-1]
+    df = make_df(closes, lows)
+    evs = downtrend_reversal.detect(df, "TEST", P)
+    assert len(evs) == 1 and evs[0].detail["broken_low"] == deep
+
+
 def test_qvwap_condition_gates_choch():
     """돌파 봉 종가가 QVWAP 위면 대기 — 아래로 내려오는 봉에서 발화."""
     closes, lows, level = uptrend_with_completed_dip()
