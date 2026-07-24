@@ -9,12 +9,15 @@ from invest_signal.signals.downtrend_reversal import Params
 P = Params()
 
 
-def make_df(closes, lows=None, start="2025-01-01"):
+def make_df(closes, lows=None, start="2025-01-01", volumes=None):
     idx = pd.date_range(start, periods=len(closes), freq="4h", tz="UTC")
     c = pd.Series([float(x) for x in closes], index=idx)
     lo = pd.Series([float(x) for x in (lows or closes)], index=idx)
-    return pd.DataFrame({"Open": c, "High": np.maximum(c, lo),
-                         "Low": np.minimum(c, lo), "Close": c})
+    data = {"Open": c, "High": np.maximum(c, lo),
+            "Low": np.minimum(c, lo), "Close": c}
+    if volumes is not None:
+        data["Volume"] = [float(v) for v in volumes]
+    return pd.DataFrame(data)
 
 
 def uptrend_with_completed_dip(dip_wick=None, recover_bars=5):
@@ -77,6 +80,41 @@ def test_fires_once_then_silent():
     evs = downtrend_reversal.detect(df, "TEST", Params(grace_bars=1))
     assert len(evs) == 1 and evs[0].bar_time == df.index[-2]
     assert downtrend_reversal.detect(df, "TEST", Params(grace_bars=0)) == []
+
+
+def test_qvwap_condition_gates_choch():
+    """돌파 봉 종가가 QVWAP 위면 대기 — 아래로 내려오는 봉에서 발화."""
+    closes, lows, level = uptrend_with_completed_dip()
+    closes.append(level - 1.0)      # 돌파 봉 ≈169 — 균등 거래량 QVWAP(≈151) 위 → 대기
+    lows.append(level - 1.0)
+    vols = [1.0] * len(closes)
+    df_wait = make_df(closes, lows, volumes=vols)
+    assert downtrend_reversal.detect(df_wait, "TEST", P) == []
+    # 조건 끄면 저점 이탈만으로 발화
+    assert len(downtrend_reversal.detect(df_wait, "TEST",
+                                         Params(qvwap_condition=False))) == 1
+    # 종가가 QVWAP 아래로 내려오는 봉에서 발화 — 위에서 대기하던 돌파 봉은
+    # '첫 봉' 판정을 막지 않는다
+    closes.append(145.0)
+    lows.append(145.0)
+    vols.append(1.0)
+    df_fire = make_df(closes, lows, volumes=vols)
+    evs = downtrend_reversal.detect(df_fire, "TEST", Params(grace_bars=1))
+    assert len(evs) == 1 and evs[0].bar_time == df_fire.index[-1]
+
+
+def test_qvwap_line_above_candle_fires_immediately():
+    """복귀 구간(고가)에 거래량 몰빵 → QVWAP 선이 캔들 위 → 돌파 봉 즉시 발화."""
+    closes, lows, level = uptrend_with_completed_dip()
+    vols = [1.0] * len(closes)
+    for i in range(len(closes) - 5, len(closes)):     # 복귀 5봉(≈200)에 몰빵 → QVWAP ≈ 200
+        vols[i] = 100000.0
+    closes.append(level - 1.0)
+    lows.append(level - 1.0)
+    vols.append(1.0)
+    df = make_df(closes, lows, volumes=vols)
+    evs = downtrend_reversal.detect(df, "TEST", P)
+    assert len(evs) == 1 and evs[0].bar_time == df.index[-1]
 
 
 def test_lookback_expiry():

@@ -5,18 +5,23 @@
      (종가가 60선 위로 복귀해서 구간이 끝남)
   ② 그 구간의 최저 저가(꼬리 포함)를 직전저점으로 삼아
   ③ 이후 lookback_bars(기본 180봉 = 30일) 안에 종가가 그 직전저점
-     아래로 "처음" 마감하면 → 하락전환 알림.
+     아래로 마감하면서
+  ④ 그 봉의 종가가 분기 앵커드 VWAP(QVWAP) "아래"에 있으면 → 하락전환.
+     상승초입의 거울 대칭 — QVWAP 선이 캔들 아래에 있다가 (분기 리셋
+     등으로) 위로 확 올라와 종가가 그 아래가 된 상태의 구조 붕괴만
+     인정한다. 저점을 깼는데 아직 QVWAP 위면 대기하고, 종가가 QVWAP
+     아래가 되는 봉에서 알린다.
 
 진행 중인 눌림 안에서 저점을 계속 갱신하는 것은 돌파로 치지 않는다 —
-완성된 직전저점의 하향돌파(CHoCH)만 잡는다. 돌파 후 봉들이 계속 그
-아래 머물러도 첫 돌파 봉에서만 알린다.
+완성된 직전저점의 하향돌파(CHoCH)만 잡는다. 같은 돌파 구간에서는
+조건을 처음 충족한 봉에서만 알린다.
 """
 
 from dataclasses import dataclass
 
 import pandas as pd
 
-from ..indicators import sma
+from ..indicators import quarterly_vwap, sma
 from . import SignalEvent
 
 NAME = "downtrend_reversal"
@@ -28,6 +33,7 @@ class Params:
     ma_ref: int = 60            # 눌림 판정 기준선
     lookback_bars: int = 180    # 직전저점 유효기간(봉 수). 4h×180 = 30일
     grace_bars: int = 1         # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
+    qvwap_condition: bool = True  # ④ 돌파 봉 종가 < 분기VWAP 요구 (Volume 없으면 자동 통과)
 
 
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
@@ -43,10 +49,17 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
 
     close, low = df["Close"], df["Low"]
     m = sma(close, params.ma_ref)
+    qv = quarterly_vwap(df)
     first = params.ma_ref - 1    # m이 유효한 첫 인덱스
 
     def is_below(i: int) -> bool:
         return not pd.isna(m.iloc[i]) and close.iloc[i] < m.iloc[i]
+
+    def below_qvwap(i: int) -> bool:
+        """④ 종가가 QVWAP 아래 (조건 꺼짐/데이터 없음이면 자동 통과)."""
+        if not params.qvwap_condition or qv is None or pd.isna(qv.iloc[i]):
+            return True
+        return bool(close.iloc[i] < qv.iloc[i])
 
     events = []
     for t in range(max(need, n - 1 - params.grace_bars), n):
@@ -67,8 +80,15 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
             e_start -= 1
         seg_low = low.iloc[e_start:e_end + 1]
         level = float(seg_low.min())
-        if not (close.iloc[t] < level and close.iloc[t - 1] >= level):
-            continue            # 첫 하향돌파 봉만
+        if not (close.iloc[t] < level and below_qvwap(t)):
+            continue
+        # 같은 '레벨 아래' 구간에서 이미 조건을 충족한 봉이 있으면 첫 봉이
+        # 아니다 — QVWAP 위에서 대기하던 돌파 봉들은 세지 않는다
+        j = t - 1
+        while j >= first and close.iloc[j] < level and not below_qvwap(j):
+            j -= 1
+        if j >= first and close.iloc[j] < level:
+            continue
         low_idx = e_start + int(seg_low.values.argmin())
         events.append(SignalEvent(
             symbol=symbol,

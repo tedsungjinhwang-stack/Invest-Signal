@@ -37,6 +37,7 @@ def pullback_params(cfg: dict) -> pullback.Params:
 def downtrend_params(cfg: dict) -> downtrend_reversal.Params:
     s = (cfg.get("signal") or {}).get("downtrend_reversal") or {}
     return downtrend_reversal.Params(
+        qvwap_condition=bool(s.get("qvwap_condition", True)),
         ma_ref=int(s.get("ma_ref", 60)),
         lookback_bars=int(s.get("lookback_bars", 180)),
         grace_bars=int(s.get("grace_bars", 1)),
