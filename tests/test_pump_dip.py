@@ -10,7 +10,7 @@ P = Params()
 
 
 def make_df(closes, highs=None, lows=None, volumes=None, start="2025-01-06"):
-    """start 기본값은 월요일 — 주간 VWAP 앵커가 인덱스 0에서 시작."""
+    """start 기본값은 월요일 — 월간 VWAP 앵커가 인덱스 0에서 시작."""
     idx = pd.date_range(start, periods=len(closes), freq="4h", tz="UTC")
     c = pd.Series([float(x) for x in closes], index=idx)
     h = pd.Series([float(x) for x in (highs or closes)], index=idx)
@@ -33,7 +33,7 @@ def test_fires_on_first_wvwap_touch_after_pump():
     closes, vols = pump_fixture()
     closes.append(290.0)                     # 눌림 봉 — 종가는 고점 부근
     lows = closes.copy()
-    lows[-1] = 100.0                         # 꼬리가 주간 VWAP까지 깊게 터치
+    lows[-1] = 100.0                         # 꼬리가 월간 VWAP까지 깊게 터치
     vols.append(1.0)
     df = make_df(closes, lows=lows, volumes=vols)
     evs = pump_dip.detect(df, "TEST", P)
@@ -42,7 +42,7 @@ def test_fires_on_first_wvwap_touch_after_pump():
     assert ev.signal == "pump_dip"
     assert ev.bar_time == df.index[-1]
     assert ev.detail["pump_gain"] == 2.0     # 고점 직전 하루 저점 100 → 고점 300
-    assert ev.detail["wvwap"] >= 100.0
+    assert ev.detail["mvwap"] >= 100.0
 
     # 다음 봉이 또 닿아도 첫 터치 봉에서만 (grace로 두 봉 다 후보일 때)
     closes.append(280.0)
@@ -94,7 +94,7 @@ def test_still_active_while_close_holds_above_wvwap():
     df = make_df(closes, lows=lows, volumes=vols)
     ev = pump_dip.detect(df, "TEST", P)[0]
     assert pump_dip.still_active(df, ev, P)          # 종가 290 — WVWAP 위
-    closes.append(50.0)                              # 주간 VWAP 아래로 붕괴
+    closes.append(50.0)                              # 월간 VWAP 아래로 붕괴
     lows.append(50.0)
     vols.append(1.0)
     assert not pump_dip.still_active(make_df(closes, lows=lows, volumes=vols), ev, P)

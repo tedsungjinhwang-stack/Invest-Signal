@@ -1,22 +1,22 @@
 """펌핑 눌림 시그널 (4h봉) — 크립토 전용.
 
 수직 펌핑은 60/120선 눌림을 주지 않아 기존 상승초입·눌림목이 못 잡는다.
-펌핑 코인의 첫 눌림 진입 자리를 주간 VWAP로 잡는다:
+펌핑 코인의 첫 눌림 진입 자리를 월간 VWAP로 잡는다:
   ① 최근 peak_lookback_bars(기본 42봉 = 7일) 안의 고점이, 고점 직전
      pump_window_bars(기본 6봉 = 하루) 내 저점 대비 min_gain(기본 +30%)
      이상 급등한 고점이고 (= 하루 만에 확 오르는 펌핑)
-  ② 그 고점 이후 캔들(저가)이 주간 앵커드 VWAP(WVWAP) 라인에
+  ② 그 고점 이후 캔들(저가)이 월간 앵커드 VWAP(MVWAP) 라인에
      "처음" 닿는 봉 → 🚀 알림.
 
 고점 이후 첫 터치 봉에서만 알리고, 새 고점을 만든 뒤 다시 닿으면 새
-셋업으로 다시 알린다. Volume이 없으면(WVWAP 계산 불가) 발화하지 않는다.
+셋업으로 다시 알린다. Volume이 없으면(MVWAP 계산 불가) 발화하지 않는다.
 """
 
 from dataclasses import dataclass
 
 import pandas as pd
 
-from ..indicators import weekly_vwap
+from ..indicators import monthly_vwap
 from . import SignalEvent
 
 NAME = "pump_dip"
@@ -41,7 +41,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     n = len(df)
     if n < params.peak_lookback_bars + 2:
         return []
-    wv = weekly_vwap(df)
+    wv = monthly_vwap(df)
     if wv is None:
         return []
 
@@ -80,18 +80,18 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
                 "peak": peak,
                 "trough": trough,
                 "peak_time": df.index[peak_idx].isoformat(),
-                "wvwap": float(wv.iloc[t]),
+                "mvwap": float(wv.iloc[t]),
             },
         ))
     return events
 
 
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:
-    """터치 후 종가가 주간 VWAP 위에서 버티는 동안 '유지 중' — 아래로
+    """터치 후 종가가 월간 VWAP 위에서 버티는 동안 '유지 중' — 아래로
     무너지면 셋업 실패로 리스트에서 뺀다."""
     if event.bar_time not in df.index:
         return False
-    wv = weekly_vwap(df)
+    wv = monthly_vwap(df)
     if wv is None or pd.isna(wv.iloc[-1]):
         return False
     return bool(df["Close"].iloc[-1] > wv.iloc[-1])

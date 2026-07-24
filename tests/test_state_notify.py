@@ -93,7 +93,7 @@ def test_pump_section_with_gain_tag():
                      price=0.0015, detail={"label": "펌핑", "pump_gain": 2.0})
     msg = format_events([ev], [], {})
     assert "🚀 <b>펌핑</b>" in msg
-    assert "저점대비 +200% · 주간VWAP 터치" in msg
+    assert "저점대비 +200% · 월간VWAP 터치" in msg
     assert ">AKE</a>" in msg
 
 
