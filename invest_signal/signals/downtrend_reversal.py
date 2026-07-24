@@ -3,9 +3,7 @@
 상승 구조가 깨지는 순간을 잡는다:
   ① 종가가 60선 아래로 내려갔던 직전 눌림 구간이 완성되고
      (종가가 60선 위로 복귀해서 구간이 끝남)
-  ② 그 구간(양옆 한 봉의 꼬리 포함)의 최저 저가를 직전저점으로 삼아 —
-     눌림 직전 봉이나 복귀 봉이 종가는 60선을 지키면서 꼬리만 더 낮게
-     꽂는 경우(망치형 등)까지 실제 최저가로 잡는다
+  ② 그 구간의 최저 저가(꼬리 포함)를 직전저점으로 삼아
   ③ 이후 lookback_bars(기본 180봉 = 30일) 안에 종가가 그 직전저점
      아래로 마감하면서
   ④ 그 봉의 종가가 분기 앵커드 VWAP(QVWAP) "아래"에 있으면 → 하락전환.
@@ -80,10 +78,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
         e_start = e_end
         while e_start - 1 >= first and is_below(e_start - 1):
             e_start -= 1
-        # 저점 탐색 범위 — 눌림 구간 + 양옆 한 봉(경계 봉의 꼬리 저점 포함)
-        lo_start = max(first, e_start - 1)
-        lo_end = min(t - 1, e_end + 1)
-        seg_low = low.iloc[lo_start:lo_end + 1]
+        seg_low = low.iloc[e_start:e_end + 1]
         level = float(seg_low.min())
         if not (close.iloc[t] < level and below_qvwap(t)):
             continue
@@ -94,7 +89,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
             j -= 1
         if j >= first and close.iloc[j] < level:
             continue
-        low_idx = lo_start + int(seg_low.values.argmin())
+        low_idx = e_start + int(seg_low.values.argmin())
         events.append(SignalEvent(
             symbol=symbol,
             signal=NAME,
