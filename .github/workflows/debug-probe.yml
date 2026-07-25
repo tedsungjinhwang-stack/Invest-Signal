@@ -1,0 +1,33 @@
+# 심볼 진단 프로브 — 아래 PROBE_SYMBOLS를 바꿔 푸시하면 러너(프록시 경유
+# 선물 데이터)에서 해당 코인의 봉/VWAP/펌핑 판정을 출력한다.
+# 알림 미발송, 상태 파일 미변경 — 순수 조회용.
+name: Debug Probe
+
+on:
+  push:
+    branches: [claude/signal-alarm-feature-yo698c, main]
+    paths:
+      - ".github/workflows/debug-probe.yml"
+      - "scripts/debug_probe.py"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Probe
+        env:
+          BINANCE_PROXY: ${{ secrets.BINANCE_PROXY }}
+          BINANCE_FAPI_BASE: ${{ secrets.BINANCE_FAPI_BASE }}
+          PROBE_SYMBOLS: "CHILLGUYUSDT"
+        run: python scripts/debug_probe.py
