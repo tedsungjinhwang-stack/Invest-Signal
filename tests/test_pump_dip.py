@@ -53,6 +53,22 @@ def test_fires_on_first_wvwap_touch_after_pump():
     assert len(evs2) == 1 and evs2[0].bar_time == df2.index[-2]
 
 
+def test_touch_tolerance_catches_hairline_miss():
+    """저가가 라인보다 살짝(0.3% 이내) 위에서 멈춰도 터치로 인정 (EUL 사례)."""
+    from invest_signal.indicators import monthly_vwap
+
+    closes, vols = pump_fixture()
+    hist = make_df(closes, volumes=vols)
+    line = float(monthly_vwap(hist).iloc[-1])
+    closes.append(290.0)
+    lows = closes.copy()
+    lows[-1] = line * 1.002                  # 라인 위 0.2%에서 멈춘 꼬리
+    vols.append(1e-9)                        # 이 봉이 라인을 거의 안 움직이게
+    df = make_df(closes, lows=lows, volumes=vols)
+    assert len(pump_dip.detect(df, "TEST", P)) == 1          # 기본 오차 0.3% → 터치
+    assert pump_dip.detect(df, "TEST", Params(touch_tolerance=0.0)) == []
+
+
 def test_slow_rise_is_not_a_pump():
     """일주일에 걸쳐 완만히 +200% 오른 건 펌핑이 아니다 (하루 내 +30% 미달)."""
     closes = [100.0] * 20 + list(np.linspace(100.0, 300.0, 42))

@@ -30,6 +30,7 @@ class Params:
     peak_lookback_bars: int = 42  # 터치 시점 기준 고점 유효기간 — 42봉 = 7일
     pump_window_bars: int = 6     # 급등 속도 판정 — 고점 직전 N봉(6봉 = 하루)
     min_gain: float = 0.3         # 하루 내 저점→고점 상승률 하한 (0.3 = +30%)
+    touch_tolerance: float = 0.003  # 저가가 라인 위 0.3% 이내 접근도 터치 인정 (헤어라인 미스 방지)
     grace_bars: int = 1           # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
 
 
@@ -49,14 +50,18 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     close, high, low = df["Close"], df["High"], df["Low"]
 
     def touches(i: int) -> bool:
-        """월간 VWAP 라인이 캔들 범위 안에 들어온 봉 — 위에서 내려와 닿는 터치.
+        """월간 VWAP 라인에 위에서 내려와 닿는(또는 거의 닿는) 봉.
 
-        low만 보면 라인보다 한참 아래에 있는 코인도 '항상 닿은' 것이 되므로
-        고가가 라인 이상인지도 본다 (캔들이 라인을 걸치고 있어야 터치).
+        low만 보면 라인보다 한참 아래인 코인도 '항상 닿은' 것이 되므로
+        고가가 라인 이상인지도 본다. 저가는 라인 위 touch_tolerance(기본
+        0.3%) 이내까지 접근하면 터치로 인정 — 실측(EUL) 0.01% 차이로
+        빗나가는 헤어라인 미스를 막는다.
         """
         if pd.isna(wv.iloc[i]):
             return False
-        return low.iloc[i] <= wv.iloc[i] <= high.iloc[i]
+        line = float(wv.iloc[i])
+        return (low.iloc[i] <= line * (1 + params.touch_tolerance)
+                and high.iloc[i] >= line)
 
     events = []
     for t in range(max(params.peak_lookback_bars, n - 1 - params.grace_bars), n):

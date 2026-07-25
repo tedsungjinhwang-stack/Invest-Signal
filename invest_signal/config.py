@@ -59,6 +59,7 @@ def pump_params(cfg: dict) -> pump_dip.Params:
         peak_lookback_bars=int(s.get("peak_lookback_bars", 42)),
         pump_window_bars=int(s.get("pump_window_bars", 6)),
         min_gain=float(s.get("min_gain", 0.3)),
+        touch_tolerance=float(s.get("touch_tolerance", 0.003)),
         grace_bars=int(s.get("grace_bars", 1)),
     )
 
