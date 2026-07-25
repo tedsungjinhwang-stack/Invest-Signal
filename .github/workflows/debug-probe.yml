@@ -29,5 +29,5 @@ jobs:
         env:
           BINANCE_PROXY: ${{ secrets.BINANCE_PROXY }}
           BINANCE_FAPI_BASE: ${{ secrets.BINANCE_FAPI_BASE }}
-          PROBE_SYMBOLS: "CHILLGUYUSDT"
+          PROBE_SYMBOLS: "EULUSDT"
         run: python scripts/debug_probe.py
