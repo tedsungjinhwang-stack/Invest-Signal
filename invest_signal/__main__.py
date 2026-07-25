@@ -14,8 +14,11 @@ def main(argv=None) -> int:
                    help="한쪽만 스캔 (기본: 둘 다)")
     p.add_argument("--dry-run", action="store_true",
                    help="알림 발송·상태 저장 없이 결과만 출력")
+    p.add_argument("--intrabar", action="store_true",
+                   help="진행 중 봉 포함 펌핑 터치만 스캔 (크립토 전용, 봉 중간용)")
     args = p.parse_args(argv)
-    return scanner.run(args.config, args.state, only=args.only, dry_run=args.dry_run)
+    return scanner.run(args.config, args.state, only=args.only,
+                       dry_run=args.dry_run, intrabar=args.intrabar)
 
 
 if __name__ == "__main__":

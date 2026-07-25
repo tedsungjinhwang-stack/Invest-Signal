@@ -147,3 +147,14 @@ def test_crypto_only_flag_and_registration():
     yf_mods = [m.NAME for m, p in cfg_mod.detectors(cfg)
                if not getattr(m, "CRYPTO_ONLY", False)]
     assert "pump_dip" not in yf_mods
+
+
+def test_intrabar_scan_runs_pump_only():
+    """인트라바 스캔은 터치형(INTRABAR_OK) 시그널만 — 종가 조건 시그널 제외."""
+    from invest_signal import config as cfg_mod
+
+    assert pump_dip.INTRABAR_OK is True
+    cfg = {"signal": {}, "crypto": {}, "etf": {}}
+    intrabar_mods = [m.NAME for m, p in cfg_mod.detectors(cfg)
+                     if getattr(m, "INTRABAR_OK", False)]
+    assert intrabar_mods == ["pump_dip"]

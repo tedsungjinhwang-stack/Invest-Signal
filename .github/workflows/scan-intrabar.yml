@@ -1,0 +1,84 @@
+# 인트라바 펌핑 터치 스캔 — 4h봉 '중간'(마감 2시간 뒤)에 돌며, 진행 중인
+# 봉의 저가가 이미 월간 VWAP에 닿았으면 봉 마감을 기다리지 않고 알린다.
+# 마감 스캔(scan.yml, 마감+10분)과 번갈아 사실상 2시간 간격이 된다.
+# UTC 02:10/06:10/10:10/14:10/18:10/22:10 = KST 11:10/15:10/19:10/23:10/03:10/07:10.
+# 터치는 일어나면 취소되지 않는 사실이라 인트라바 판정이 안전하다 —
+# 종가 조건 시그널(상승초입·눌림목 등)은 여기서 돌리지 않는다.
+name: Intrabar Pump Scan
+
+on:
+  schedule:
+    - cron: "10 2,6,10,14,18,22 * * *"
+  workflow_dispatch: {}
+  push:
+    branches: [claude/signal-alarm-feature-yo698c]
+    paths: [".github/workflows/scan-intrabar.yml"]
+
+permissions:
+  contents: write            # 알림 상태 파일 커밋용
+
+concurrency:
+  group: signal-scan         # 마감 스캔과 직렬화 — 상태 커밋 경쟁 방지
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Telegram secrets
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 시크릿이 비어 있습니다." >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run intrabar scan
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BINANCE_PROXY: ${{ secrets.BINANCE_PROXY }}
+          BINANCE_FAPI_BASE: ${{ secrets.BINANCE_FAPI_BASE }}
+        run: python -m invest_signal --state state/alerts_state.json --intrabar
+
+      - name: Commit alert state
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state/
+          if git diff --cached --quiet; then
+            echo "상태 변화 없음"
+            exit 0
+          fi
+          cp state/alerts_state.json /tmp/alerts_state.json
+          git commit -m "chore: update alert state [skip ci]"
+          BRANCH="${GITHUB_REF_NAME}"
+          for i in 1 2 3 4; do
+            git push origin "HEAD:${BRANCH}" && exit 0
+            git rebase --abort 2>/dev/null || true
+            git fetch origin "${BRANCH}"
+            git reset --hard "origin/${BRANCH}"
+            cp /tmp/alerts_state.json state/alerts_state.json
+            git add state/
+            git commit -m "chore: update alert state [skip ci]" || true
+            sleep 3
+          done
+          echo "::error::상태 파일 푸시 실패 — 다음 실행에서 중복 알림 가능" >&2
+          exit 1

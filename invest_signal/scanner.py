@@ -102,20 +102,30 @@ def _filter_ranked(items: list, eligible: set, signals: frozenset) -> list:
     return [e for e in items if e.signal not in signals or e.symbol in eligible]
 
 
-def scan_crypto(cfg: dict, detectors, log=print) -> tuple[list, list]:
+def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False) -> tuple[list, list]:
+    """intrabar=True: 진행 중인 4h봉을 포함해 인트라바 판정이 안전한
+    시그널(펌핑 터치)만 돌린다 — 종가 조건 시그널은 마감 스캔에서만."""
     c = cfg.get("crypto") or {}
     if not c.get("enabled", True):
         return [], []
+    if intrabar:
+        detectors = [(m, p) for m, p in detectors
+                     if getattr(m, "INTRABAR_OK", False)]
+        if not detectors:
+            return [], []
     exclude = set(c.get("exclude") or [])
     limit = int(c.get("kline_limit", 750))
     workers = int(c.get("fetch_workers", 6))
     requested = c.get("source", "auto")
     with requests.Session() as s:
         source, symbols = data_binance.resolve_source(s, requested, exclude, log)
-        log(f"[binance] {source} · USDT {len(symbols)}종 스캔 시작 (워커 {workers})")
+        log(f"[binance] {source} · USDT {len(symbols)}종 스캔 시작 (워커 {workers}"
+            + (" · 인트라바" if intrabar else "") + ")")
         frames = data_binance.fetch_all(s, symbols, source, limit=limit, log=log,
-                                        workers=workers)
+                                        workers=workers, include_live=intrabar)
     events, ongoing = _detect_all(frames, detectors, log)
+    if intrabar:
+        ongoing = []                        # 인트라바 스캔은 신규 터치 알림만
 
     # 크립토 전용 랭크 필터 — 주도주(거래대금·상승률 상위)만 남긴다.
     # 눌림목 칸(눌림목+MSS 줄)과 상승초입이 각자 기준을 갖는다 —
@@ -220,17 +230,20 @@ def _collapse(events: list) -> list:
 
 
 def run(config_path: str, state_path: str, only: str | None = None,
-        dry_run: bool = False, log=print) -> int:
+        dry_run: bool = False, intrabar: bool = False, log=print) -> int:
     cfg = cfg_mod.load(config_path)
     detectors = cfg_mod.detectors(cfg)
     state = AlertState(state_path)
     errors = []
+    if intrabar:
+        only = "crypto"                     # 인트라바는 크립토 펌핑 터치 전용
 
     crypto_events, crypto_ongoing = [], []
     yf_events, yf_ongoing, yf_names, yf_groups = [], [], {}, {}
     if only in (None, "crypto"):
         try:
-            crypto_events, crypto_ongoing = scan_crypto(cfg, detectors, log)
+            crypto_events, crypto_ongoing = scan_crypto(cfg, detectors, log,
+                                                        intrabar=intrabar)
         except Exception as e:                      # noqa: BLE001 — 한쪽 실패가 다른 쪽을 막지 않게
             errors.append(f"crypto: {e}")
             log(f"[binance] 크립토 스캔 실패: {e}")

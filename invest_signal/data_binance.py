@@ -153,11 +153,16 @@ def um_futures_symbols(session: requests.Session) -> set[str]:
     return out
 
 
-def parse_klines(rows: list, now_ms: int | None = None) -> pd.DataFrame:
-    """kline 배열 → OHLCV DataFrame(UTC 인덱스). 진행 중인 마지막 봉은 버린다."""
+def parse_klines(rows: list, now_ms: int | None = None,
+                 include_live: bool = False) -> pd.DataFrame:
+    """kline 배열 → OHLCV DataFrame(UTC 인덱스).
+
+    기본은 진행 중인 마지막 봉을 버린다(마감 확정 봉만 판정).
+    include_live=True면 진행 중 봉도 포함 — 펌핑 인트라바 터치 판정용.
+    """
     if now_ms is None:
         now_ms = int(time.time() * 1000)
-    keep = [r for r in rows if int(r[6]) <= now_ms]     # r[6] = closeTime(ms)
+    keep = rows if include_live else [r for r in rows if int(r[6]) <= now_ms]   # r[6] = closeTime(ms)
     if not keep:
         return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
     df = pd.DataFrame(
@@ -208,19 +213,20 @@ def resolve_source(session: requests.Session, requested: str,
 
 
 def klines_4h(session: requests.Session, symbol: str, source: str,
-              limit: int = 600) -> pd.DataFrame:
+              limit: int = 600, include_live: bool = False) -> pd.DataFrame:
     if source == "fapi":
         base, path = fapi_base(), "/fapi/v1/klines"
     else:
         base, path = SPOT_MIRROR_BASE, "/api/v3/klines"
     rows = _get(session, base, path,
                 {"symbol": symbol, "interval": KLINE_INTERVAL, "limit": limit}).json()
-    return parse_klines(rows)
+    return parse_klines(rows, include_live=include_live)
 
 
 def fetch_all(session: requests.Session, symbols: list[str], source: str,
               limit: int = 600, pause: float = 0.1,
-              log=print, workers: int = 6) -> dict[str, pd.DataFrame]:
+              log=print, workers: int = 6,
+              include_live: bool = False) -> dict[str, pd.DataFrame]:
     """전 심볼 4h 캔들 병렬 수집. 개별 실패는 건너뛰고, 451은 즉시 중단.
 
     requests.Session은 스레드 간 공유가 안전하지 않아 워커 스레드마다
@@ -245,7 +251,7 @@ def fetch_all(session: requests.Session, symbols: list[str], source: str,
         return tls.s
 
     def one(sym: str) -> pd.DataFrame:
-        df = klines_4h(get_session(), sym, source, limit)
+        df = klines_4h(get_session(), sym, source, limit, include_live=include_live)
         if pause:
             time.sleep(pause)
         return df

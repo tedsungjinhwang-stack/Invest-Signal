@@ -23,6 +23,7 @@ from . import SignalEvent
 NAME = "pump_dip"
 LABEL = "펌핑"
 CRYPTO_ONLY = True          # ETF·주식 스캔에서는 이 시그널을 돌리지 않는다
+INTRABAR_OK = True          # 터치는 봉 진행 중에도 확정 사실 — 인트라바 스캔 허용
 
 
 @dataclass(frozen=True)
