@@ -35,7 +35,7 @@ def test_fetch_all_parallel_collects_and_skips_failures(monkeypatch):
     """병렬 수집 — 전 종목 수집, 개별 실패는 건너뛰고, 451은 전파."""
     from invest_signal import data_binance as db
 
-    def fake_klines(session, sym, source, limit):
+    def fake_klines(session, sym, source, limit, include_live=False):
         if sym == "BADUSDT":
             raise RuntimeError("boom")
         return pd.DataFrame({"Close": [1.0]})
@@ -46,7 +46,7 @@ def test_fetch_all_parallel_collects_and_skips_failures(monkeypatch):
                        workers=6)
     assert len(out) == 25 and "BADUSDT" not in out
 
-    def geo_klines(session, sym, source, limit):
+    def geo_klines(session, sym, source, limit, include_live=False):
         raise db.GeoBlockedError("451")
 
     monkeypatch.setattr(db, "klines_4h", geo_klines)
