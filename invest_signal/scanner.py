@@ -9,6 +9,7 @@ GitHub Actions에서 런이 빨갛게 떠서 문제를 바로 알 수 있게 한
 import dataclasses
 import os
 
+import pandas as pd
 import requests
 
 from . import config as cfg_mod
@@ -125,7 +126,12 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False) -> tupl
                                         workers=workers, include_live=intrabar)
     events, ongoing = _detect_all(frames, detectors, log)
     if intrabar:
-        ongoing = []                        # 인트라바 스캔은 신규 터치 알림만
+        ongoing = []                        # 인트라바 스캔은 신규 알림만
+        # 진행 중인 봉에서 잡힌 이벤트는 '미확정' 표시 — 마감 때 되돌릴 수 있음
+        live_open = pd.Timestamp.now(tz="UTC").floor("4h")
+        for e in events:
+            if e.bar_time == live_open:
+                e.detail["intrabar"] = True
 
     # 크립토 전용 랭크 필터 — 주도주(거래대금·상승률 상위)만 남긴다.
     # 눌림목 칸(눌림목+MSS 줄)과 상승초입이 각자 기준을 갖는다 —

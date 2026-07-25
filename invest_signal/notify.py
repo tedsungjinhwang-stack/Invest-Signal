@@ -66,6 +66,8 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     head = (f"• <a href=\"{url}\">{_short_symbol(e.symbol, kind, name)}</a>"
             f"  <b>{_fmt_price(e.price)}</b>")
     tags = []
+    if d.get("intrabar"):
+        tags.append("⏳진행봉")     # 봉 미마감 잠정 판정 — 마감 때 되돌릴 수 있음
     if e.signal == "mss" or d.get("label") == "MSS":
         # MSS는 MSS 태그만 — 배열 상태는 붙이지 않는다
         tags.append(f"⚠️MSS 저점 {_fmt_price(d['broken_low'])} 이탈"

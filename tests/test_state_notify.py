@@ -86,6 +86,13 @@ def test_ongoing_list_caps_per_label():
     assert msg.count("↳") == 16               # 15종 각 한 줄 + '외 N종' 줄
 
 
+def test_intrabar_tag_shown():
+    """진행봉 잠정 판정 알림엔 ⏳진행봉 태그가 붙는다."""
+    ev = _event("BTCUSDT", {"label": "눌림목", "intrabar": True, "align": "정배열"})
+    msg = format_events([ev], [], {})
+    assert "⏳진행봉" in msg
+
+
 def test_pump_section_with_gain_tag():
     """펌핑은 🚀 칸에 크립토만 — 저점대비 상승률·주간VWAP 태그 포함."""
     ev = SignalEvent(symbol="AKEUSDT", signal="pump_dip",

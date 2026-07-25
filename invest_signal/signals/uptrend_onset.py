@@ -23,6 +23,7 @@ from . import SignalEvent
 
 NAME = "uptrend_onset"
 LABEL = "상승초입"
+INTRABAR_OK = True   # 진행봉 현재가를 잠정 종가로 판정 — 알림에 ⏳진행봉 표시
 
 
 @dataclass(frozen=True)
