@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import requests
 
 from invest_signal import data_binance, indicators
-from invest_signal.signals import pump_dip
+from invest_signal.signals import pullback, pump_dip
 
 symbols = [s.strip().upper() for s in
            os.environ.get("PROBE_SYMBOLS", "BTCUSDT").split(",") if s.strip()]
@@ -22,24 +22,39 @@ symbols = [s.strip().upper() for s in
 with requests.Session() as sess:
     for sym in symbols:
         try:
-            df = data_binance.klines_4h(sess, sym, "fapi", limit=750)
+            df = data_binance.klines_4h(sess, sym, "fapi", limit=750,
+                                        include_live=True)
         except Exception as e:                      # noqa: BLE001
             print(f"== {sym}: 수집 실패 {e}")
             continue
         mv = indicators.monthly_vwap(df)
         qv = indicators.quarterly_vwap(df)
-        print(f"== {sym} — 최근 10봉 (봉 오픈시각 KST, 마감봉만)")
+        m120 = indicators.sma(df["Close"], 120)
+        m240 = indicators.sma(df["Close"], 240)
+        m480 = indicators.sma(df["Close"], 480)
+        print(f"== {sym} — 최근 10봉 (봉 오픈시각 KST, 마지막 줄은 진행봉)")
         for i in range(max(0, len(df) - 10), len(df)):
             t = df.index[i].tz_convert("Asia/Seoul").strftime("%m-%d %H시")
             touch = bool(df["Low"].iloc[i] <= mv.iloc[i] <= df["High"].iloc[i])
+            c = df["Close"].iloc[i]
             print(f"  {t}: O {df['Open'].iloc[i]:.6g} H {df['High'].iloc[i]:.6g}"
-                  f" L {df['Low'].iloc[i]:.6g} C {df['Close'].iloc[i]:.6g}"
+                  f" L {df['Low'].iloc[i]:.6g} C {c:.6g}"
                   f" | MVWAP {mv.iloc[i]:.6g} 터치={touch}"
-                  f" | QVWAP {qv.iloc[i]:.6g}")
-        evs = pump_dip.detect(df, sym,
+                  f" | QVWAP {qv.iloc[i]:.6g} {'위' if c > qv.iloc[i] else '아래'}"
+                  f" | 120 {m120.iloc[i]:.6g} 240 {m240.iloc[i]:.6g}"
+                  f" 480 {m480.iloc[i]:.6g}")
+        closed = df.iloc[:-1]                       # 시그널 재현은 마감봉 기준
+        evs = pump_dip.detect(closed, sym,
                               dataclasses.replace(pump_dip.Params(), grace_bars=12))
         if not evs:
             print("  pump_dip: 최근 12봉 내 발화 없음")
         for e in evs:
             kst = e.bar_time.tz_convert("Asia/Seoul").strftime("%m-%d %H시")
             print(f"  pump_dip 발화: {kst} KST · {e.detail}")
+        evs = pullback.detect(closed, sym,
+                              dataclasses.replace(pullback.Params(), grace_bars=12))
+        if not evs:
+            print("  pullback: 최근 12봉 내 발화 없음")
+        for e in evs:
+            kst = e.bar_time.tz_convert("Asia/Seoul").strftime("%m-%d %H시")
+            print(f"  pullback 발화: {kst} KST · {e.detail}")
