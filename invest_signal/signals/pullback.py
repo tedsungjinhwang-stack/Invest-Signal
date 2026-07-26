@@ -102,7 +102,14 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
 
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:
     """눌림목은 발생 후 계속 리스트에 남는다 — 120선 위로 복귀해 정배열로
-    올라가는 동안에도 추적한다. 제거는 두 경로뿐:
-    ① 하락전환(CHoCH) 발생 시 스캐너가 걷어냄 ② 조회 범위(7일) 경과.
+    올라가는 동안에도 추적한다. 제거는 세 경로:
+    ① 하락전환(CHoCH) 발생 시 스캐너가 걷어냄 ② 조회 범위(7일) 경과
+    ③ 종가가 분기 VWAP 아래로 마감 (발화 조건이 깨진 상태 — DEXE 사례).
     """
-    return event.bar_time in df.index
+    if event.bar_time not in df.index:
+        return False
+    if params.qvwap_condition:
+        qv = quarterly_vwap(df)
+        if qv is not None and not pd.isna(qv.iloc[-1]):
+            return bool(df["Close"].iloc[-1] > qv.iloc[-1])
+    return True

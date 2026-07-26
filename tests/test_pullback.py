@@ -109,3 +109,21 @@ def test_still_active_persists_after_recovery():
     closes.append(float(m120) + 20)                  # 120선 위 복귀·상승
     closes.append(float(m120) + 30)
     assert pullback.still_active(make_df(closes), ev, P)
+
+
+def test_still_active_removed_when_close_below_qvwap():
+    """종가가 분기 VWAP 아래로 마감하면 추적 목록에서 빠진다 (DEXE 사례)."""
+    closes = uptrend_regime()
+    dip = dip_below_ma120(closes)
+    closes.append(dip)
+    vols = [1.0] * len(closes)
+    vols[-1] = 1_000_000.0        # 대량 거래로 QVWAP이 딥 가격 근처로
+    closes.append(dip + 2.0)      # QVWAP 위에서 발화
+    vols.append(1.0)
+    ev = pullback.detect(make_df(closes, volumes=vols), "TEST", P)[0]
+    closes.append(dip + 2.0)      # 여전히 QVWAP 위 → 계속 추적
+    vols.append(1.0)
+    assert pullback.still_active(make_df(closes, volumes=vols), ev, P)
+    closes.append(dip - 50.0)     # QVWAP 아래로 마감 → 제거
+    vols.append(1.0)
+    assert not pullback.still_active(make_df(closes, volumes=vols), ev, P)
