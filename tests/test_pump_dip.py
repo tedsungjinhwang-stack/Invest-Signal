@@ -150,7 +150,7 @@ def test_crypto_only_flag_and_registration():
 
 
 def test_intrabar_scan_signal_set():
-    """인트라바 스캔은 상승초입·눌림목(잠정 종가)·펌핑(터치)만 —
+    """인트라바 스캔은 상승초입·눌림목(잠정 종가)·펌핑(터치)·펌핑초기(급등)만 —
     하락전환·MSS는 마감 스캔 전용."""
     from invest_signal import config as cfg_mod
 
@@ -158,4 +158,4 @@ def test_intrabar_scan_signal_set():
     cfg = {"signal": {}, "crypto": {}, "etf": {}}
     intrabar_mods = {m.NAME for m, p in cfg_mod.detectors(cfg)
                      if getattr(m, "INTRABAR_OK", False)}
-    assert intrabar_mods == {"uptrend_onset", "pullback", "pump_dip"}
+    assert intrabar_mods == {"uptrend_onset", "pullback", "pump_dip", "pump_early"}

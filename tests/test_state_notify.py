@@ -104,6 +104,17 @@ def test_pump_section_with_gain_tag():
     assert ">AKE</a>" in msg
 
 
+def test_pump_early_section_with_rise_tag():
+    """펌핑초기는 🌱 칸에 — 급등 구간 시간·상승률과 저점대비 누적을 함께 표시."""
+    ev = SignalEvent(symbol="XYZUSDT", signal="pump_early",
+                     bar_time=pd.Timestamp("2026-07-21 04:00", tz="UTC"),
+                     price=1.05, detail={"label": "펌핑초기", "rise": 0.072,
+                                         "rise_bars": 1, "total_gain": 0.18})
+    msg = format_events([ev], [], {})
+    assert "🌱 <b>펌핑초기</b>" in msg
+    assert "4h +7.2% · 저점대비 +18%" in msg
+
+
 def test_downtrend_section_for_etf_and_stocks():
     """하락전환은 🔻 칸에 ETF·주식만 — 직전저점 태그 포함."""
     ch = SignalEvent(symbol="SOXL", signal="downtrend_reversal",

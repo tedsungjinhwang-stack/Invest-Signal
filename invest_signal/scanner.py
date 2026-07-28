@@ -26,8 +26,10 @@ CHOCH_EVICTS = {"pullback"}     # CHoCH 발생 시 리스트에서 걷어낼 셋
 RANK_FILTER_SCOPE = {
     "pullback": frozenset({"pullback", "mss", "pump_dip"}),
     "uptrend_onset": frozenset({"uptrend_onset"}),
+    "pump_early": frozenset({"pump_early"}),
 }
-RANK_FILTER_LABEL = {"pullback": "눌림목·MSS·펌핑", "uptrend_onset": "상승초입"}
+RANK_FILTER_LABEL = {"pullback": "눌림목·MSS·펌핑", "uptrend_onset": "상승초입",
+                     "pump_early": "펌핑초기"}
 
 
 def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[list, list]:
