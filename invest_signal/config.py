@@ -71,6 +71,8 @@ def pump_early_params(cfg: dict) -> pump_early.Params:
         rise_bars=int(s.get("rise_bars", 1)),
         min_gain=float(s.get("min_gain", 0.05)),
         lookback_bars=int(s.get("lookback_bars", 42)),
+        pump_window_bars=int(s.get("pump_window_bars", 6)),
+        max_pump_gain=float(s.get("max_pump_gain", 0.30)),
         max_gain=float(s.get("max_gain", 0.30)),
         grace_bars=int(s.get("grace_bars", 1)),
     )

@@ -5,9 +5,12 @@
 봉을 잡는다:
   ① 최근 rise_bars(기본 1봉 = 4시간) 동안 시가 대비 종가가
      min_gain(기본 +5%) 이상 오르고
-  ② 최근 lookback_bars(기본 42봉 = 7일) 저점 대비 종가 상승률이
-     max_gain(기본 +30%) 미만 → 이미 크게 간 코인은 '초기'가 아니다
-     (30% 이상 간 건 pump_dip이 눌림 자리에서 잡는다)
+  ② 최근 lookback_bars(기본 42봉 = 7일) 안에 **하루(pump_window_bars,
+     기본 6봉) 내 저점 → 고가가 max_pump_gain(기본 +30%) 이상 급등한
+     봉이 없어야** 한다 — pump_dip의 펌핑 판정과 같은 정의라,
+     이미 펌핑한 종목은 pump_dip이 눌림 자리에서 담당하고 여기선 빠진다
+  ③ 같은 구간 저점 대비 종가 상승률도 max_gain(기본 +30%) 미만 —
+     하루 급등은 없었어도 이미 누적으로 크게 간 종목을 거른다
 
 VWAP 조건은 없다 — 급등 시작 포착이라 라인 위/아래를 따지지 않는다.
 연속으로 급등하는 구간에서는 첫 봉에서만 알리고, 발생 후에는 종가가
@@ -31,7 +34,9 @@ class Params:
     rise_bars: int = 1          # 급등 판정 구간 — 1봉 = 4시간 (2면 8시간)
     min_gain: float = 0.05      # 구간 시가 대비 종가 상승률 하한 (0.05 = +5%)
     lookback_bars: int = 42     # '아직 초기' 판정 구간 — 42봉 = 7일
-    max_gain: float = 0.30      # 그 구간 저점 대비 상승률 상한 (0.30 = +30%)
+    pump_window_bars: int = 6   # 이미 펌핑했는지 볼 창 — 6봉 = 하루 (pump_dip과 동일)
+    max_pump_gain: float = 0.30  # 하루 내 저점→고가 상승률 상한 — 이상이면 제외
+    max_gain: float = 0.30      # 구간 저점 대비 종가 상승률 상한 (누적 기준)
     grace_bars: int = 1         # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
 
 
@@ -46,7 +51,12 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     if n < need + 2:
         return []
 
-    op, close, low = df["Open"], df["Close"], df["Low"]
+    op, high, close, low = df["Open"], df["High"], df["Close"], df["Low"]
+
+    # 각 봉의 '하루(pump_window_bars봉) 내 저점 → 고가' 상승률 —
+    # pump_dip의 펌핑 판정과 같은 창(저점 구간은 판정 봉 포함)
+    roll_low = low.rolling(params.pump_window_bars + 1, min_periods=1).min()
+    day_gain = high / roll_low.where(roll_low > 0) - 1
 
     def rise_of(t: int) -> float | None:
         """급등 구간(rise_bars봉) 시가 대비 종가 상승률."""
@@ -65,13 +75,21 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
         trough = float(low.iloc[w0:t + 1].min())
         return trough if trough > 0 else None
 
+    def had_pump(t: int) -> bool:
+        """② 조회 구간 안에 하루 만에 max_pump_gain 이상 급등한 봉이 있었나
+        — 있으면 이미 펌핑한 종목이라 '초기'가 아니다(pump_dip 담당)."""
+        w0 = max(0, t - params.lookback_bars)
+        return bool((day_gain.iloc[w0:t + 1] >= params.max_pump_gain).any())
+
     def is_trigger(t: int) -> bool:
-        """① 급등 + ② 아직 크게 안 감."""
+        """① 급등 + ② 하루 급등 이력 없음 + ③ 누적으로도 아직 안 감."""
         rise = rise_of(t)
         if rise is None or rise < params.min_gain:
             return False
         trough = trough_of(t)
         if trough is None:
+            return False
+        if had_pump(t):
             return False
         return float(close.iloc[t]) / trough - 1 < params.max_gain
 
