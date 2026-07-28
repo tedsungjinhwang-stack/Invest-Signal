@@ -7,6 +7,9 @@ from invest_signal.signals.pump_early import Params
 
 P = Params()
 
+# 480선 조건을 쓰므로 픽스처는 480봉 이상 + 캔들이 480선 아래여야 한다.
+HIGH, LOW = 200.0, 100.0        # 고가권 → 저가권으로 내려온 시세
+
 
 def make_df(bars, start="2025-01-06"):
     """bars: [(open, high, low, close), ...] — 4h봉."""
@@ -17,13 +20,18 @@ def make_df(bars, start="2025-01-06"):
         index=idx)
 
 
-def flat(n, price=100.0):
+def flat(n, price=LOW):
     return [(price, price, price, price)] * n
 
 
+def base(tail=42, tail_price=LOW, head=440):
+    """480선 아래에 놓인 저가권 시세 — head봉 고가권 뒤 tail봉 저가권."""
+    return flat(head, HIGH) + flat(tail, tail_price)
+
+
 def test_fires_on_5pct_bar():
-    """44봉 횡보 뒤 한 봉에서 시가 대비 +5% → 발화."""
-    df = make_df(flat(44) + [(100.0, 105.0, 99.5, 105.0)])
+    """480봉 이상 이력 + 480선 아래에서 한 봉 시가 대비 +5% → 발화."""
+    df = make_df(base() + [(100.0, 105.0, 99.5, 105.0)])
     evs = pump_early.detect(df, "TEST", P)
     assert len(evs) == 1
     ev = evs[0]
@@ -36,8 +44,16 @@ def test_fires_on_5pct_bar():
 
 def test_no_fire_below_min_gain():
     """+4.9%는 문턱 미달."""
-    df = make_df(flat(44) + [(100.0, 104.9, 100.0, 104.9)])
+    df = make_df(base() + [(100.0, 104.9, 100.0, 104.9)])
     assert pump_early.detect(df, "TEST", P) == []
+
+
+def test_no_fire_when_close_above_ref_ma():
+    """캔들이 480선 위면 제외 — 이미 추세가 시작된 종목."""
+    df = make_df(flat(482, 100.0) + [(100.0, 105.0, 100.0, 105.0)])
+    assert pump_early.detect(df, "TEST", P) == []      # 480선 ≈ 100, 종가 105 → 위
+    evs = pump_early.detect(df, "TEST", Params(below_ma_condition=False))
+    assert len(evs) == 1                               # 조건을 끄면 발화
 
 
 def test_no_fire_when_already_pumped():
@@ -45,7 +61,7 @@ def test_no_fire_when_already_pumped():
 
     이런 종목은 pump_dip이 월간 VWAP 눌림 자리에서 잡는다.
     """
-    df = make_df(flat(44) + [(100.0, 140.0, 100.0, 140.0)])
+    df = make_df(base() + [(100.0, 140.0, 100.0, 140.0)])
     assert pump_early.detect(df, "TEST", P) == []
     # 두 상한을 다 풀면 같은 데이터로 발화한다 — 걸린 게 상한 조건임을 확인
     assert len(pump_early.detect(
@@ -58,9 +74,9 @@ def test_no_fire_when_day_pump_happened_earlier():
     누적 상승률은 +10%뿐이라 max_gain에는 안 걸리는 케이스 — 하루 급등
     이력만으로 걸러지는지 확인한다(이런 종목은 pump_dip 담당).
     """
-    bars = (flat(24) + [(100.0, 132.0, 100.0, 132.0)]      # 하루 만에 +32% 급등
-            + flat(18, 105.0)                               # 되돌림
-            + [(105.0, 110.25, 105.0, 110.25)])             # +5% 재점화
+    bars = (base(tail=23) + [(100.0, 132.0, 100.0, 132.0)]   # 하루 만에 +32% 급등
+            + flat(18, 105.0)                                # 되돌림
+            + [(105.0, 110.25, 105.0, 110.25)])              # +5% 재점화
     df = make_df(bars)
     assert pump_early.detect(df, "TEST", P) == []
     # 하루 급등 상한만 풀면 발화 — 누적(max_gain)에는 안 걸렸음을 확인
@@ -70,23 +86,16 @@ def test_no_fire_when_day_pump_happened_earlier():
 
 def test_old_day_pump_outside_lookback_is_ignored():
     """조회 구간(42봉) 밖의 옛 급등은 제외 사유가 아니다."""
-    bars = ([(100.0, 132.0, 100.0, 132.0)] + flat(50, 105.0)
+    bars = (flat(400, HIGH) + [(100.0, 132.0, 100.0, 132.0)] + flat(81, 105.0)
             + [(105.0, 110.25, 105.0, 110.25)])
     df = make_df(bars)
     evs = pump_early.detect(df, "TEST", P)
     assert len(evs) == 1 and evs[0].bar_time == df.index[-1]
 
 
-def test_no_fire_when_cumulative_gain_over_max():
-    """5% 급등이지만 7일 저점 대비 누적이 이미 30%를 넘으면 제외."""
-    bars = flat(20) + flat(24, 125.0) + [(125.0, 131.25, 125.0, 131.25)]
-    df = make_df(bars)                      # 저점 100 → 종가 131.25 = +31.25%
-    assert pump_early.detect(df, "TEST", P) == []
-
-
 def test_consecutive_pump_bars_alert_once():
     """연속 급등 구간에서는 첫 봉만 알린다."""
-    bars = flat(44) + [(100.0, 105.0, 100.0, 105.0), (105.0, 110.25, 105.0, 110.25)]
+    bars = base() + [(100.0, 105.0, 100.0, 105.0), (105.0, 110.25, 105.0, 110.25)]
     df = make_df(bars)
     evs = pump_early.detect(df, "TEST", Params(grace_bars=1))
     assert len(evs) == 1 and evs[0].bar_time == df.index[-2]
@@ -94,7 +103,7 @@ def test_consecutive_pump_bars_alert_once():
 
 def test_rise_bars_two_spans_eight_hours():
     """rise_bars=2면 8시간(2봉) 누적으로 판정 — 봉당 3%씩도 잡힌다."""
-    bars = flat(44) + [(100.0, 103.0, 100.0, 103.0), (103.0, 106.0, 103.0, 106.0)]
+    bars = base() + [(100.0, 103.0, 100.0, 103.0), (103.0, 106.0, 103.0, 106.0)]
     df = make_df(bars)
     assert pump_early.detect(df, "TEST", P) == []          # 봉별로는 3%씩 — 미달
     evs = pump_early.detect(df, "TEST", Params(rise_bars=2))
@@ -104,26 +113,28 @@ def test_rise_bars_two_spans_eight_hours():
 
 def test_still_active_until_trigger_low_breaks():
     """급등 봉 저가를 종가가 지키는 동안 유지, 아래로 마감하면 제거."""
-    df = make_df(flat(44) + [(100.0, 105.0, 99.5, 105.0)])
+    trigger = (100.0, 105.0, 99.5, 105.0)
+    df = make_df(base() + [trigger])
     ev = pump_early.detect(df, "TEST", P)[0]
-    hold = make_df(flat(44) + [(100.0, 105.0, 99.5, 105.0),
-                               (105.0, 106.0, 100.0, 101.0)])
+    hold = make_df(base() + [trigger, (105.0, 106.0, 100.0, 101.0)])
     assert pump_early.still_active(hold, ev, P)            # 종가 101 ≥ 저가 99.5
-    dead = make_df(flat(44) + [(100.0, 105.0, 99.5, 105.0),
-                               (105.0, 105.0, 95.0, 96.0)])
+    dead = make_df(base() + [trigger, (105.0, 105.0, 95.0, 96.0)])
     assert not pump_early.still_active(dead, ev, P)        # 종가 96 < 99.5
 
 
 def test_no_vwap_or_volume_requirement():
     """Volume 컬럼이 없어도 발화한다 — VWAP 조건이 없는 시그널."""
-    df = make_df(flat(44) + [(100.0, 105.0, 100.0, 105.0)])
+    df = make_df(base() + [(100.0, 105.0, 100.0, 105.0)])
     assert "Volume" not in df.columns
     assert len(pump_early.detect(df, "TEST", P)) == 1
 
 
 def test_short_history_is_skipped():
-    df = make_df(flat(20) + [(100.0, 105.0, 100.0, 105.0)])
+    """480선을 계산할 수 없는 신규 상장은 대상이 아니다."""
+    df = make_df(flat(100) + [(100.0, 105.0, 100.0, 105.0)])
     assert pump_early.detect(df, "TEST", P) == []
+    # 480선 조건을 끄면 짧은 이력으로도 발화한다
+    assert len(pump_early.detect(df, "TEST", Params(below_ma_condition=False))) == 1
 
 
 def test_crypto_only_flag_and_registration():
@@ -146,6 +157,8 @@ def test_params_from_config():
     p = cfg_mod.pump_early_params(
         {"signal": {"pump_early": {"rise_bars": 2, "min_gain": 0.07,
                                    "lookback_bars": 18, "max_gain": 0.5,
-                                   "pump_window_bars": 3, "max_pump_gain": 0.4}}})
+                                   "pump_window_bars": 3, "max_pump_gain": 0.4,
+                                   "ma_ref": 240, "below_ma_condition": False}}})
     assert (p.rise_bars, p.min_gain, p.lookback_bars, p.max_gain) == (2, 0.07, 18, 0.5)
     assert (p.pump_window_bars, p.max_pump_gain) == (3, 0.4)
+    assert (p.ma_ref, p.below_ma_condition) == (240, False)

@@ -11,6 +11,9 @@
      이미 펌핑한 종목은 pump_dip이 눌림 자리에서 담당하고 여기선 빠진다
   ③ 같은 구간 저점 대비 종가 상승률도 max_gain(기본 +30%) 미만 —
      하루 급등은 없었어도 이미 누적으로 크게 간 종목을 거른다
+  ④ 종가가 ma_ref(기본 480)선 이하 — 장기선 위로 올라선 종목은 이미
+     추세가 시작된 것이라 '초기'가 아니다. 480선을 쓰므로 480봉
+     이상 이력이 있는 종목만 대상이 된다(신규 상장은 자동 제외)
 
 VWAP 조건은 없다 — 급등 시작 포착이라 라인 위/아래를 따지지 않는다.
 연속으로 급등하는 구간에서는 첫 봉에서만 알리고, 발생 후에는 종가가
@@ -21,6 +24,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from ..indicators import sma
 from . import SignalEvent
 
 NAME = "pump_early"
@@ -37,6 +41,8 @@ class Params:
     pump_window_bars: int = 6   # 이미 펌핑했는지 볼 창 — 6봉 = 하루 (pump_dip과 동일)
     max_pump_gain: float = 0.30  # 하루 내 저점→고가 상승률 상한 — 이상이면 제외
     max_gain: float = 0.30      # 구간 저점 대비 종가 상승률 상한 (누적 기준)
+    ma_ref: int = 480           # 이 선 이하에 캔들이 있어야 한다 (장기선)
+    below_ma_condition: bool = True   # ④ 종가 ≤ ma_ref선 요구 (끄면 위치 무관)
     grace_bars: int = 1         # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
 
 
@@ -47,11 +53,13 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     중복 발송 방지는 호출 측(state)이 dedup_key로 처리한다.
     """
     n = len(df)
-    need = max(params.lookback_bars, params.rise_bars)
+    need = max(params.lookback_bars, params.rise_bars,
+               params.ma_ref if params.below_ma_condition else 0)
     if n < need + 2:
         return []
 
     op, high, close, low = df["Open"], df["High"], df["Close"], df["Low"]
+    m_ref = sma(close, params.ma_ref) if params.below_ma_condition else None
 
     # 각 봉의 '하루(pump_window_bars봉) 내 저점 → 고가' 상승률 —
     # pump_dip의 펌핑 판정과 같은 창(저점 구간은 판정 봉 포함)
@@ -81,15 +89,22 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
         w0 = max(0, t - params.lookback_bars)
         return bool((day_gain.iloc[w0:t + 1] >= params.max_pump_gain).any())
 
+    def below_ref_ma(t: int) -> bool:
+        """④ 종가가 장기선(ma_ref) 이하 — 선 위로 올라선 건 이미 추세."""
+        if m_ref is None:
+            return True
+        v = m_ref.iloc[t]
+        return not pd.isna(v) and float(close.iloc[t]) <= float(v)
+
     def is_trigger(t: int) -> bool:
-        """① 급등 + ② 하루 급등 이력 없음 + ③ 누적으로도 아직 안 감."""
+        """① 급등 + ② 하루 급등 이력 없음 + ③ 누적도 안 감 + ④ 장기선 아래."""
         rise = rise_of(t)
         if rise is None or rise < params.min_gain:
             return False
         trough = trough_of(t)
         if trough is None:
             return False
-        if had_pump(t):
+        if had_pump(t) or not below_ref_ma(t):
             return False
         return float(close.iloc[t]) / trough - 1 < params.max_gain
 
