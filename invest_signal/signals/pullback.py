@@ -39,78 +39,95 @@ class Params:
     grace_bars: int = 1         # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
 
 
+class Gate:
+    """눌림목 진입 조건(①②③) 판정기 — MSS 등 같은 칸 시그널이 공유한다.
+
+    지표를 한 번만 계산해두고 봉 인덱스로 물어본다.
+    """
+
+    def __init__(self, df: pd.DataFrame, params: "Params"):
+        self.df, self.params = df, params
+        close = df["Close"]
+        self.m_entry = sma(close, params.ma_entry)
+        self.m_above = sma(close, params.ma_above)
+        bands = quarterly_vwap_bands(df, params.band_mult) if params.band_condition else None
+        self.vwap, self.lower = (bands[0], bands[1]) if bands is not None else (None, None)
+
+    @property
+    def need(self) -> int:
+        return max(self.params.ma_entry, self.params.ma_above)
+
+    def band_at(self, t: int) -> float | None:
+        if self.lower is None or pd.isna(self.lower.iloc[t]):
+            return None
+        return float(self.lower.iloc[t])
+
+    def below_entry(self, t: int) -> bool:      # ② 60선 하회
+        return (not pd.isna(self.m_entry.iloc[t])
+                and self.df["Close"].iloc[t] < self.m_entry.iloc[t])
+
+    def above_long(self, t: int) -> bool:       # ① 480선 위
+        return (not pd.isna(self.m_above.iloc[t])
+                and self.df["Close"].iloc[t] > self.m_above.iloc[t])
+
+    def qualifies(self, t: int) -> bool:
+        """①②③ — 밴드 위(또는 밴드에 닿은) 상태."""
+        if not self.below_entry(t) or not self.above_long(t):
+            return False
+        band = self.band_at(t)
+        return band is None or float(self.df["High"].iloc[t]) >= band
+
+    def is_entry(self, t: int) -> bool:
+        """③-타점 — 캔들이 하단 밴드에 닿았다."""
+        band = self.band_at(t)
+        return (self.qualifies(t) and band is not None
+                and float(self.df["Low"].iloc[t]) <= band)
+
+    def stage(self, t: int) -> str:
+        return STAGE_ENTRY if self.is_entry(t) else STAGE_WAIT
+
+    def first_in_dip(self, t: int, pred) -> bool:
+        """같은 하회 구간에서 pred를 만족한 앞선 봉이 없으면 True."""
+        j = t - 1
+        while j >= 0 and self.below_entry(j) and not pred(j):
+            j -= 1
+        return not (j >= 0 and self.below_entry(j))
+
+
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
     """4h OHLC(오름차순, UTC 인덱스)에서 '신선한' 눌림목들을 찾는다.
 
     마지막 grace_bars+1개 봉을 각각 독립 후보로 판정한다.
     중복 발송 방지는 호출 측(state)이 dedup_key로 처리한다.
     """
-    need = max(params.ma_entry, params.ma_above)
     n = len(df)
-    if n < need + 2:
+    g = Gate(df, params)
+    if n < g.need + 2:
         return []
 
-    close, high, low = df["Close"], df["High"], df["Low"]
-    m_entry = sma(close, params.ma_entry)
-    m_above = sma(close, params.ma_above)
-
-    bands = quarterly_vwap_bands(df, params.band_mult) if params.band_condition else None
-    vwap, lower = (bands[0], bands[1]) if bands is not None else (None, None)
-
-    def band_at(t: int) -> float | None:
-        if lower is None or pd.isna(lower.iloc[t]):
-            return None
-        return float(lower.iloc[t])
-
-    def below_entry(t: int) -> bool:        # ② 60선 하회
-        return not pd.isna(m_entry.iloc[t]) and close.iloc[t] < m_entry.iloc[t]
-
-    def above_long(t: int) -> bool:         # ① 480선 위
-        return not pd.isna(m_above.iloc[t]) and close.iloc[t] > m_above.iloc[t]
-
-    def qualifies(t: int) -> bool:
-        """①②③ — 밴드 위(또는 밴드에 닿은) 상태."""
-        if not below_entry(t) or not above_long(t):
-            return False
-        band = band_at(t)
-        return band is None or float(high.iloc[t]) >= band
-
-    def is_entry(t: int) -> bool:
-        """③-타점 — 캔들이 하단 밴드에 닿았다."""
-        band = band_at(t)
-        return qualifies(t) and band is not None and float(low.iloc[t]) <= band
-
-    def first_in_dip(t: int, pred) -> bool:
-        """같은 하회 구간에서 pred를 만족한 앞선 봉이 없으면 True."""
-        j = t - 1
-        while j >= 0 and below_entry(j) and not pred(j):
-            j -= 1
-        return not (j >= 0 and below_entry(j))
-
     events = []
-    for t in range(max(need + 1, n - 1 - params.grace_bars), n):
-        if not qualifies(t):
+    for t in range(max(g.need + 1, n - 1 - params.grace_bars), n):
+        if not g.qualifies(t):
             continue
-        entry = is_entry(t)
+        entry = g.is_entry(t)
         # 타점은 구간 내 첫 터치만, 대기는 구간 내 첫 충족만 알린다
-        if not first_in_dip(t, is_entry if entry else qualifies):
+        if not g.first_in_dip(t, g.is_entry if entry else g.qualifies):
             continue
-        band = band_at(t)
         events.append(SignalEvent(
             symbol=symbol,
             signal=NAME,
             bar_time=df.index[t],
-            price=float(close.iloc[t]),
+            price=float(df["Close"].iloc[t]),
             detail={
                 "label": LABEL,
-                "stage": STAGE_ENTRY if entry else STAGE_WAIT,
-                "entry_ma": float(m_entry.iloc[t]),
+                "stage": g.stage(t),
+                "entry_ma": float(g.m_entry.iloc[t]),
                 "entry_ma_period": params.ma_entry,
-                "long_ma": float(m_above.iloc[t]),
+                "long_ma": float(g.m_above.iloc[t]),
                 "long_ma_period": params.ma_above,
-                "band": band,
-                "qvwap": (None if vwap is None or pd.isna(vwap.iloc[t])
-                          else float(vwap.iloc[t])),
+                "band": g.band_at(t),
+                "qvwap": (None if g.vwap is None or pd.isna(g.vwap.iloc[t])
+                          else float(g.vwap.iloc[t])),
             },
         ))
     return events

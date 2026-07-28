@@ -59,10 +59,11 @@ signal:
       gain_lookback_bars: 18  # 상승률 계산 구간 — 18봉 = 3일
       min_turnover_usd: 3000000  # 24h 거래대금 $3M 미만은 무조건 제외
   mss:                      # MSS (4h봉): 직전 스윙저점(좌우 6봉=24h) 하향돌파
+    # 진입 조건은 위 pullback 설정(480선 위·60선 하회·하단 밴드)을 그대로 공유하고,
+    # 그 위에 스윙저점 이탈이라는 프라이스 액션이 있으면 ⚠️MSS로 표기한다
     enabled: true
     pivot_k: 6              # 스윙저점 판정 — 좌우 k봉보다 낮은 저가 (6봉 = 24시간)
     grace_bars: 1
-    qvwap_condition: true   # 돌파 봉 종가가 분기 앵커드 VWAP 위여야 알림 (눌림목 칸 조건과 동일)
 
 crypto:
   enabled: true
