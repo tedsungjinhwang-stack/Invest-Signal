@@ -74,6 +74,9 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tags.append(f"⚠️MSS 저점 {_fmt_price(d['broken_low'])} 이탈"
                     if d.get("broken_low") else "⚠️MSS")
     else:
+        if d.get("stage"):
+            # 눌림목 — 타점(밴드 터치)과 대기(밴드 위)를 한눈에 구분
+            tags.append("🎯타점" if d["stage"] == "타점" else "대기")
         if e.signal == "downtrend_reversal" and d.get("broken_low"):
             tags.append(f"직전저점 {_fmt_price(d['broken_low'])} 이탈")
         if e.signal == "pump_dip" and d.get("pump_gain") is not None:
@@ -117,8 +120,11 @@ def format_events(events_crypto: list, events_etf: list,
             # MSS는 신규 줄과 같은 형식으로 — 깨진 저점 레벨 포함
             tags.append(f"⚠️MSS 저점 {_fmt_price(d['broken_low'])} 이탈"
                         if d.get("broken_low") else "⚠️MSS")
-        elif d.get("align"):
-            tags.append(d["align"])
+        else:
+            if d.get("stage"):
+                tags.append("🎯타점" if d["stage"] == "타점" else "대기")
+            if d.get("align"):
+                tags.append(d["align"])
         price = d.get("last_price")
         return (f"↳ {_short_symbol(e.symbol, kind, name)}"
                 + (f"  {_fmt_price(price)}" if price else "")

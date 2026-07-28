@@ -45,6 +45,33 @@ def anchored_vwap(df: pd.DataFrame, period: str) -> pd.Series | None:
     return pv / cv.replace(0, np.nan)
 
 
+def anchored_vwap_bands(df: pd.DataFrame, period: str, mult: float = 1.0):
+    """앵커드 VWAP과 표준편차 밴드 — (vwap, lower, upper) 또는 None.
+
+    TradingView의 Anchored VWAP 밴드(Standard Deviation 모드)와 같은 식:
+      분산 = Σ(Vol×TP²)/Σ(Vol) − VWAP²,  밴드 = VWAP ± mult × √분산
+    기간 시작(UTC)마다 리셋되며 Volume이 없으면 None.
+    """
+    if "Volume" not in df.columns:
+        return None
+    vol = df["Volume"].fillna(0.0)
+    if not (vol > 0).any():
+        return None
+    tp = (df["High"] + df["Low"] + df["Close"]) / 3
+    idx = df.index.tz_convert(None) if df.index.tz is not None else df.index
+    p = idx.to_period(period)
+    cv = vol.groupby(p).cumsum().replace(0, np.nan)
+    vwap = (tp * vol).groupby(p).cumsum() / cv
+    var = (tp ** 2 * vol).groupby(p).cumsum() / cv - vwap ** 2
+    sd = np.sqrt(var.clip(lower=0))
+    return vwap, vwap - mult * sd, vwap + mult * sd
+
+
+def quarterly_vwap_bands(df: pd.DataFrame, mult: float = 1.0):
+    """분기 앵커드 VWAP 밴드 — (vwap, lower, upper)."""
+    return anchored_vwap_bands(df, "Q", mult)
+
+
 def quarterly_vwap(df: pd.DataFrame) -> pd.Series | None:
     """분기 앵커드 VWAP (1/4/7/10월 1일 리셋)."""
     return anchored_vwap(df, "Q")

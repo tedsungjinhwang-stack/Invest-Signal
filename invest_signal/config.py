@@ -29,9 +29,11 @@ def uptrend_params(cfg: dict) -> uptrend_onset.Params:
 def pullback_params(cfg: dict) -> pullback.Params:
     s = (cfg.get("signal") or {}).get("pullback") or {}
     return pullback.Params(
-        ma_entry=int(s.get("ma_entry", 120)),
+        ma_entry=int(s.get("ma_entry", 60)),
+        ma_above=int(s.get("ma_above", 480)),
+        band_mult=float(s.get("band_mult", 1.0)),
+        band_condition=bool(s.get("band_condition", True)),
         grace_bars=int(s.get("grace_bars", 1)),
-        qvwap_condition=bool(s.get("qvwap_condition", True)),
     )
 
 

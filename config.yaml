@@ -12,11 +12,13 @@ signal:
       gain_top: 100         # 최근 3일 상승률 상위 N위 이내면 통과하되
       gain_lookback_bars: 18  # 상승률 계산 구간 — 18봉 = 3일
       min_turnover_usd: 1000000  # 24h 거래대금 $1M 미만은 무조건 제외
-  pullback:                 # 눌림목 (4h봉): 240선>480선 구간에서 120선 하회
+  pullback:                 # 눌림목 (4h봉): 480선 위 + 60선 하회 + 분기VWAP 하단밴드
     enabled: true
-    ma_entry: 120           # 하회 판정 기준선 — 60으로 바꾸면 얕은 눌림도 잡음
+    ma_entry: 60            # ② 이 선을 하회해야 함 (단기 조정)
+    ma_above: 480           # ① 종가가 이 선 위여야 함 (장기 추세 유지)
+    band_mult: 1.0          # ③ 하단 밴드 = 분기VWAP − mult×표준편차 (2.0이면 더 깊은 눌림만)
+    band_condition: true    # 밴드 조건 사용 — false면 ①②만 본다
     grace_bars: 1
-    qvwap_condition: true   # 트리거 봉 종가가 분기 앵커드 VWAP 위여야 알림 (아래면 위로 올 때까지 대기)
     crypto_rank_filter:     # 크립토 전용 — 눌림목 칸 전체(눌림목+MSS+펌핑)에 주도주 필터 (ETF·주식엔 미적용)
       enabled: true
       volume_top: 100       # 24h 거래대금 상위 N위 이내, 또는

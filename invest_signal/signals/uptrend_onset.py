@@ -86,7 +86,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     for t in range(max(need, last - params.grace_bars), last + 1):
         if not is_trigger_state(t):
             continue
-        # 240선이 480선 위면 이미 '눌림목 구간' — 상승초입은 발동하지 않는다
+        # 240선이 480선 위면 이미 상승 국면 — 역배열 반전을 잡는 시그널이 아니다
         if not pd.isna(a3.iloc[t]) and a2.iloc[t] > a3.iloc[t]:
             continue
         touch_idx = None        # t 직전 touch_window 안에서 가장 최근 터치

@@ -104,6 +104,16 @@ def test_pump_section_with_gain_tag():
     assert ">AKE</a>" in msg
 
 
+def test_pullback_stage_tags():
+    """눌림목은 타점(밴드 터치)과 대기(밴드 위)를 태그로 구분한다."""
+    entry = _event("BTCUSDT", {"label": "눌림목", "stage": "타점", "align": "정배열"})
+    wait = _event("ETHUSDT", {"label": "눌림목", "stage": "대기", "align": "정배열",
+                              "last_price": 3400.0})
+    msg = format_events([entry], [], {}, ongoing_crypto=[wait])
+    assert "🎯타점" in msg
+    assert "↳ ETH  3,400.0 · " in msg and "대기" in msg
+
+
 def test_pump_early_section_with_rise_tag():
     """펌핑초기는 🌱 칸에 — 급등 구간 시간·상승률과 저점대비 누적을 함께 표시."""
     ev = SignalEvent(symbol="XYZUSDT", signal="pump_early",
