@@ -22,5 +22,12 @@ class SignalEvent:
 
     @property
     def dedup_key(self) -> str:
-        """상태 파일에서 중복 알림을 막을 때 쓰는 키."""
-        return f"{self.symbol}|{self.signal}|{self.bar_time.isoformat()}"
+        """상태 파일에서 중복 알림을 막을 때 쓰는 키.
+
+        단계(눌림목의 대기/타점)가 있으면 키에 포함한다 — 같은 봉이
+        인트라바에서 '대기'로 알림된 뒤 마감 때 밴드를 터치해 '타점'이
+        되면 그건 새 정보라 다시 알려야 한다.
+        """
+        base = f"{self.symbol}|{self.signal}|{self.bar_time.isoformat()}"
+        stage = self.detail.get("stage")
+        return f"{base}|{stage}" if stage else base

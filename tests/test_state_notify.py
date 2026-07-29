@@ -26,6 +26,22 @@ def test_state_dedup_roundtrip(tmp_path):
     assert not st2.is_new(key)
 
 
+def test_dedup_key_separates_pullback_stages(tmp_path):
+    """같은 봉이 대기 → 타점으로 바뀌면 새 알림이어야 한다.
+
+    인트라바 스캔에서 '대기'로 알린 봉이 마감 때 밴드를 터치해 '타점'이
+    되는 경우 — 키가 같으면 정작 중요한 진입 신호가 막힌다.
+    """
+    wait = _event("BTCUSDT", {"label": "눌림목", "stage": "대기"})
+    entry = _event("BTCUSDT", {"label": "눌림목", "stage": "타점"})
+    assert wait.dedup_key != entry.dedup_key
+    st = AlertState(str(tmp_path / "state.json"))
+    st.mark(wait.dedup_key)
+    assert st.is_new(entry.dedup_key)
+    # 단계가 없는 시그널은 키 형식이 그대로다
+    assert _event("BTCUSDT").dedup_key.count("|") == 2
+
+
 def test_state_prunes_old_entries(tmp_path):
     p = str(tmp_path / "state.json")
     st = AlertState(p)
