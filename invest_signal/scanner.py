@@ -22,14 +22,16 @@ ONGOING_LOOKBACK_BARS = 42      # '유지 중' 판정 시 트리거를 찾아볼
 CHOCH_EVICTS = {"pullback"}     # CHoCH 발생 시 리스트에서 걷어낼 셋업 (상승초입은 240선 재이탈로만 제거)
 
 # 크립토 랭크 필터 적용 범위 — signal.<키>.crypto_rank_filter 설정별로 걸러낼
-# 시그널 집합. 눌림목 칸은 MSS 줄까지 함께 거르고, 상승초입은 자체(완화) 기준을 쓴다.
+# 시그널 집합. 눌림목 칸은 진입 게이트를 공유하는 MSS 줄까지 함께 거르고,
+# 펌핑·상승초입·펌핑초기는 성격이 달라 각자 기준을 쓴다.
 RANK_FILTER_SCOPE = {
-    "pullback": frozenset({"pullback", "mss", "pump_dip"}),
+    "pullback": frozenset({"pullback", "mss"}),
+    "pump_dip": frozenset({"pump_dip"}),
     "uptrend_onset": frozenset({"uptrend_onset"}),
     "pump_early": frozenset({"pump_early"}),
 }
-RANK_FILTER_LABEL = {"pullback": "눌림목·MSS·펌핑", "uptrend_onset": "상승초입",
-                     "pump_early": "펌핑초기"}
+RANK_FILTER_LABEL = {"pullback": "눌림목·MSS", "pump_dip": "펌핑",
+                     "uptrend_onset": "상승초입", "pump_early": "펌핑초기"}
 
 
 def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[list, list]:
@@ -75,15 +77,22 @@ def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[l
 
 
 def _crypto_rank_eligible(frames: dict, rcfg: dict) -> set:
-    """눌림목 랭크 필터 대상.
+    """랭크 필터 대상 종목 집합.
 
-    (24h 거래대금 상위 N ∪ 최근 상승률 상위 N) 중에서
-    24h 거래대금이 min_turnover_usd 이상인 종목만 남긴다.
+    24h 거래대금 상위 N위와 최근 상승률 상위권을 각각 구해 mode에 따라
+    합집합(or, 기본) 또는 교집합(and)을 취하고, 24h 거래대금이
+    min_turnover_usd 이상인 종목만 남긴다.
+
+    상승률 상위권 크기는 gain_top(절대 종목 수) 또는 gain_top_pct(유니버스
+    대비 비율)로 정한다 — 비율은 상장 종목 수가 변해도 기준이 흔들리지 않는다.
+    mode=and는 "거래량도 상승률도 상위" = 그 시기의 주도주만 남기는 설정.
     """
     vol_top = int(rcfg.get("volume_top", 100))
     gain_top = int(rcfg.get("gain_top", 50))
+    gain_top_pct = float(rcfg.get("gain_top_pct", 0) or 0)
     lookback = int(rcfg.get("gain_lookback_bars", 42))
     min_turnover = float(rcfg.get("min_turnover_usd", 0))
+    require_both = str(rcfg.get("mode", "or")).lower() == "and"
     turnover, gain = {}, {}
     for sym, df in frames.items():
         if len(df) >= 6 and "Volume" in df.columns:
@@ -92,9 +101,11 @@ def _crypto_rank_eligible(frames: dict, rcfg: dict) -> set:
             base = float(df["Close"].iloc[-1 - lookback])
             if base > 0:
                 gain[sym] = float(df["Close"].iloc[-1]) / base - 1
+    if gain_top_pct > 0:
+        gain_top = max(1, round(len(gain) * gain_top_pct))
     top_vol = set(sorted(turnover, key=turnover.get, reverse=True)[:vol_top])
     top_gain = set(sorted(gain, key=gain.get, reverse=True)[:gain_top])
-    eligible = top_vol | top_gain
+    eligible = (top_vol & top_gain) if require_both else (top_vol | top_gain)
     if min_turnover > 0:
         eligible = {s for s in eligible if turnover.get(s, 0.0) >= min_turnover}
     return eligible

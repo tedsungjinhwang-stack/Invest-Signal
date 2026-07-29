@@ -102,6 +102,9 @@ def test_filter_ranked_scopes():
     assert {(e.symbol, e.signal) for e in out} == {
         ("BIGVOL", "pullback"), ("BIGVOL", "mss"),
         ("BIGVOL", "uptrend_onset"), ("THIN", "uptrend_onset")}
+    # 펌핑은 눌림목 스코프에서 빠져 자체 기준으로만 걸러진다
+    assert "pump_dip" not in RANK_FILTER_SCOPE["pullback"]
+    assert RANK_FILTER_SCOPE["pump_dip"] == frozenset({"pump_dip"})
     # 상승초입은 자체(더 넓은) eligible 집합으로 거른다 — 풀백·MSS는 건드리지 않음
     out = _filter_ranked(out, {"BIGVOL", "THIN"}, RANK_FILTER_SCOPE["uptrend_onset"])
     assert ("THIN", "uptrend_onset") in {(e.symbol, e.signal) for e in out}
@@ -131,6 +134,51 @@ def test_crypto_rank_eligible_union_of_volume_and_gain():
     assert "BIGVOL" in eligible          # 거래대금 통과
     assert "PUMP" in eligible            # 상승률 통과
     assert "SLEEPY" not in eligible      # 어느 쪽도 아님
+
+
+def test_crypto_rank_eligible_and_mode_requires_both():
+    """mode=and면 거래대금·상승률 둘 다 상위여야 통과 — 주도주만 남긴다."""
+    from invest_signal.scanner import _crypto_rank_eligible
+    import numpy as np
+
+    idx = pd.date_range("2025-01-01", periods=50, freq="4h", tz="UTC")
+
+    def frame(price, vol, rising=False):
+        c = pd.Series(np.linspace(price * (0.5 if rising else 1.0), price, 50), index=idx)
+        return pd.DataFrame({"Open": c, "High": c, "Low": c, "Close": c,
+                             "Volume": float(vol)})
+
+    frames = {
+        "LEADER": frame(2.0, 10_000_000, rising=True),   # 거래대금·상승률 모두 상위
+        "BIGVOL": frame(1.0, 9_000_000),                 # 거래대금만 상위 (횡보)
+        "THINPUMP": frame(2.0, 10, rising=True),         # 상승률만 상위 (유동성 없음)
+    }
+    rcfg = {"mode": "and", "volume_top": 2, "gain_top": 2, "gain_lookback_bars": 42}
+    assert _crypto_rank_eligible(frames, rcfg) == {"LEADER"}
+    # 같은 설정이라도 or면 셋 다 통과 — mode가 실제로 교집합을 만든다
+    assert _crypto_rank_eligible(frames, {**rcfg, "mode": "or"}) == {
+        "LEADER", "BIGVOL", "THINPUMP"}
+
+
+def test_crypto_rank_eligible_gain_top_pct_scales_with_universe():
+    """gain_top_pct는 유니버스 크기에 비례해 상위권 크기를 정한다."""
+    from invest_signal.scanner import _crypto_rank_eligible
+    import numpy as np
+
+    idx = pd.date_range("2025-01-01", periods=50, freq="4h", tz="UTC")
+    # 20종 — 상승률이 큰 순서대로 COIN00 … COIN19
+    frames = {}
+    for i in range(20):
+        c = pd.Series(np.linspace(1.0 - i * 0.02, 1.0, 50), index=idx)
+        frames[f"COIN{i:02d}"] = pd.DataFrame(
+            {"Open": c, "High": c, "Low": c, "Close": c, "Volume": 1_000_000.0})
+    rcfg = {"mode": "and", "volume_top": 20, "gain_top_pct": 0.10,
+            "gain_lookback_bars": 42}
+    eligible = _crypto_rank_eligible(frames, rcfg)
+    assert len(eligible) == 2                      # 20종의 10% = 상위 2종
+    assert eligible == {"COIN19", "COIN18"}
+    # gain_top(절대 수)보다 gain_top_pct가 우선한다
+    assert len(_crypto_rank_eligible(frames, {**rcfg, "gain_top": 15})) == 2
 
 
 def test_crypto_rank_filter_min_turnover_floor():
