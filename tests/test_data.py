@@ -82,7 +82,10 @@ def test_safe_scrubs_proxy_credentials_from_exception_text():
     assert "myuser" not in msg and "sup3rs3cret" not in msg
     assert "***:***@203.0.113.9:1080" in msg      # 호스트·포트는 남아 진단은 가능
     # 자격증명이 없는 평범한 메시지는 그대로 통과
-    assert _safe(Exception("Read timed out")) == "Read timed out"def test_fill_missing_kr_names(monkeypatch):
+    assert _safe(Exception("Read timed out")) == "Read timed out"
+
+
+def test_fill_missing_kr_names(monkeypatch):
     """이름 빈 한국 종목만 야후에서 보충 — 실패·미국 종목은 그대로."""
     import yfinance
 
