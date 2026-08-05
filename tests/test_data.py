@@ -70,7 +70,19 @@ def test_binance_proxy_applies_to_fapi_only(monkeypatch):
     assert _proxies_for(SPOT_MIRROR_BASE) is None    # 미러는 프록시 안 탐
 
 
-def test_fill_missing_kr_names(monkeypatch):
+def test_safe_scrubs_proxy_credentials_from_exception_text():
+    """프록시 실패 예외를 로그로 내보내기 전에 user:pass@를 지운다.
+
+    퍼블릭 레포는 Actions 로그도 공개되므로 자격증명이 새면 안 된다.
+    """
+    from invest_signal.data_binance import _safe
+
+    msg = _safe(Exception("Unable to connect to proxy "
+                          "socks5h://myuser:sup3rs3cret@203.0.113.9:1080"))
+    assert "myuser" not in msg and "sup3rs3cret" not in msg
+    assert "***:***@203.0.113.9:1080" in msg      # 호스트·포트는 남아 진단은 가능
+    # 자격증명이 없는 평범한 메시지는 그대로 통과
+    assert _safe(Exception("Read timed out")) == "Read timed out"def test_fill_missing_kr_names(monkeypatch):
     """이름 빈 한국 종목만 야후에서 보충 — 실패·미국 종목은 그대로."""
     import yfinance
 

@@ -37,6 +37,17 @@ class GeoBlockedError(RuntimeError):
     """미국 등 제한 지역 IP에서 바이낸스가 451을 돌려줄 때."""
 
 
+def _safe(exc: Exception) -> str:
+    """예외 메시지에서 URL 자격증명(user:pass@)을 지운 문자열.
+
+    프록시 연결 실패 예외는 프록시 URL을 통째로 담고 있어서 그대로 찍으면
+    BINANCE_PROXY의 아이디·비밀번호가 로그에 남는다. 퍼블릭 레포는 Actions
+    로그도 공개되므로(시크릿 자동 마스킹은 값이 정확히 일치할 때만 걸린다)
+    로그로 내보내기 전에 여기서 지운다.
+    """
+    return re.sub(r"(?<=//)[^/\s@]+:[^/\s@]+@", "***:***@", str(exc))
+
+
 def fapi_base() -> str:
     # GitHub Actions는 미설정 시크릿을 빈 문자열로 넘기므로 빈 값도 기본값 취급
     return (os.environ.get("BINANCE_FAPI_BASE") or FAPI_BASE).rstrip("/")
@@ -199,7 +210,7 @@ def resolve_source(session: requests.Session, requested: str,
         except Exception as e:              # noqa: BLE001
             if requested == "fapi":
                 raise
-            log(f"[binance] fapi 실패({e}) — 현물 미러로 폴백")
+            log(f"[binance] fapi 실패({_safe(e)}) — 현물 미러로 폴백")
     syms = usdt_spot_symbols(session, exclude)
     try:
         # 퍼프 상장 이력 없는 현물 전용 코인(ADX 등)은 스캔에서 제외
@@ -208,7 +219,7 @@ def resolve_source(session: requests.Session, requested: str,
         syms = [s for s in syms if s in perps]
         log(f"[binance] 퍼프 미상장 제외: 현물 {before}종 → {len(syms)}종")
     except Exception as e:                  # noqa: BLE001 — 목록 조회 실패가 스캔을 막지 않게
-        log(f"[binance] 퍼프 심볼 목록 조회 실패({e}) — 현물 전체 스캔")
+        log(f"[binance] 퍼프 심볼 목록 조회 실패({_safe(e)}) — 현물 전체 스캔")
     return "spot_mirror", syms
 
 
@@ -271,7 +282,7 @@ def fetch_all(session: requests.Session, symbols: list[str], source: str,
                     break
                 except Exception as e:             # noqa: BLE001 — 종목별 실패는 스캔 전체를 막지 않는다
                     failed.append(sym)
-                    log(f"[binance] {sym} 수집 실패: {e}")
+                    log(f"[binance] {sym} 수집 실패: {_safe(e)}")
                 done += 1
                 if done % 100 == 0:
                     log(f"[binance] {done}/{len(symbols)} 수집")
