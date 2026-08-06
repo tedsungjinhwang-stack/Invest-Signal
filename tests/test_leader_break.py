@@ -98,3 +98,47 @@ def test_leaders_top_n_caps_result():
     top = leader_break.leaders(ticker, set(ticker), Params(top_n=5))
     assert len(top) == 5
     assert [s for s, _ in top] == [f"C{i}USDT" for i in (19, 18, 17, 16, 15)]
+
+
+def test_watch_list_keeps_dropped_leaders_recent_first():
+    """상위권에서 밀려난 종목도 recent에 남아 있으면 계속 확인 대상."""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 8, 6, tzinfo=timezone.utc)
+    top = [("AUSDT", {"change_pct": 0.9}), ("BUSDT", {"change_pct": 0.5})]
+    recent = {
+        "AUSDT": now,                          # 지금도 상위권 — 중복으로 안 들어감
+        "OLDUSDT": now - timedelta(days=1),    # 어제 밀려남
+        "OLDERUSDT": now - timedelta(days=5),  # 닷새 전
+        "GONEUSDT": now - timedelta(hours=2),  # 두 시간 전 — 가장 최근
+    }
+    universe = {"AUSDT", "BUSDT", "OLDUSDT", "OLDERUSDT", "GONEUSDT"}
+    out = leader_break.watch_list(top, recent, universe, Params(top_n=2))
+    assert [s for s, _ in out] == ["AUSDT", "BUSDT",        # 현재 상위권이 앞
+                                   "GONEUSDT", "OLDUSDT", "OLDERUSDT"]  # 최근 등재 순
+    assert [since for _, since in out[:2]] == [None, None]  # 상위권은 추적일 표시 없음
+    assert out[2][1] == recent["GONEUSDT"]
+
+
+def test_watch_list_caps_at_max_watch_keeping_current_top():
+    """max_watch를 넘으면 현재 상위권은 지키고 잔류분만 잘라낸다."""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 8, 6, tzinfo=timezone.utc)
+    top = [(f"T{i}USDT", {"change_pct": 1.0}) for i in range(3)]
+    recent = {f"O{i}USDT": now - timedelta(hours=i) for i in range(20)}
+    universe = {s for s, _ in top} | set(recent)
+    out = leader_break.watch_list(top, recent, universe, Params(top_n=3, max_watch=5))
+    assert len(out) == 5
+    assert [s for s, _ in out[:3]] == [f"T{i}USDT" for i in range(3)]   # 상위권 보존
+    assert [s for s, _ in out[3:]] == ["O0USDT", "O1USDT"]              # 최근 순 2종
+
+
+def test_watch_list_skips_symbols_no_longer_in_universe():
+    """상장폐지 등으로 스캔 유니버스에서 빠진 종목은 되살리지 않는다."""
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 8, 6, tzinfo=timezone.utc)
+    out = leader_break.watch_list([("AUSDT", {"change_pct": 0.9})],
+                                  {"DELISTEDUSDT": now}, {"AUSDT"}, Params())
+    assert [s for s, _ in out] == ["AUSDT"]

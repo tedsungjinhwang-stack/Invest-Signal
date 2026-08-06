@@ -33,6 +33,8 @@ class Params:
     ma: int = 60                # 15m봉 SMA 기간 (60봉 = 15시간)
     grace_bars: int = 4         # 소급 판정 봉 수 — 15m×4 = 1시간(스캔 주기)
     min_turnover_usd: float = 1_000_000   # 24h 거래대금 하한(유동성)
+    watch_days: int = 7         # 상위권에서 밀려난 뒤에도 계속 볼 기간
+    max_watch: int = 60         # 한 스캔에서 15m 캔들을 받을 최대 종목 수
 
 
 def leaders(ticker: dict[str, dict], symbols: set[str],
@@ -46,6 +48,25 @@ def leaders(ticker: dict[str, dict], symbols: set[str],
             if s in symbols and t["quote_volume"] >= params.min_turnover_usd]
     cand.sort(key=lambda kv: kv[1]["change_pct"], reverse=True)
     return cand[:max(0, params.top_n)]
+
+
+def watch_list(top: list[tuple[str, dict]], recent: dict, symbols: set[str],
+               params: Params = Params()) -> list[tuple[str, dict | None]]:
+    """이번 스캔에서 15m을 확인할 종목 — 현재 상위권 + 최근 상위권 잔류분.
+
+    상위권은 하루에도 여러 번 바뀌므로, 한 번 뽑힌 종목이 순위에서 밀렸다고
+    바로 눈을 떼면 정작 꺾이는 순간을 놓친다. recent(마지막 등재 시각)에
+    남아 있는 종목을 최근 등재 순으로 이어 붙이되, 매 스캔 캔들을 받아야
+    하므로 max_watch로 총량을 묶는다. 반환값의 두 번째 항목은 마지막 등재
+    시각(현재 상위권이면 None)이라 호출 측이 '추적 N일차'를 붙일 수 있다.
+    """
+    out: list[tuple[str, dict | None]] = [(s, None) for s, _ in top]
+    in_top = {s for s, _ in top}
+    room = max(0, params.max_watch - len(out))
+    carried = sorted((s for s in recent if s not in in_top and s in symbols),
+                     key=lambda s: recent[s], reverse=True)
+    out.extend((s, recent[s]) for s in carried[:room])
+    return out
 
 
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:

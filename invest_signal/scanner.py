@@ -113,45 +113,69 @@ def _crypto_rank_eligible(frames: dict, rcfg: dict) -> set:
 
 
 def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
-                       log=print) -> list:
-    """주도주 이탈 — 24h 상승률 상위 N종만 15m봉으로 따로 판정한다.
+                       state=None, log=print) -> list:
+    """주도주 이탈 — 24h 상승률 상위 N종을 15m봉으로 따로 판정한다.
 
     나머지 시그널과 달리 4h 프레임을 쓰지 않는다: 대상 선정은 24hr 티커
-    (전 종목 1회 요청)로 하고, 뽑힌 N종만 15m 캔들을 추가로 받는다.
+    (전 종목 1회 요청)로 하고, 뽑힌 종목만 15m 캔들을 추가로 받는다.
+    한 번 상위권에 들었던 종목은 순위에서 밀려도 watch_days 동안 계속
+    본다(상태 파일의 leaders에 마지막 등재 시각을 기록).
     실패는 크립토 스캔 전체를 막지 않는다 — 이 시그널만 비운다.
     """
     s = (cfg.get("signal") or {}).get("leader_break") or {}
     if not s.get("enabled", True):
         return []
     params = leader_break.Params(
-        top_n=int(s.get("top_n", 5)),
+        top_n=int(s.get("top_n", 10)),
         ma=int(s.get("ma", 60)),
         grace_bars=int(s.get("grace_bars", 4)),
         min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
+        watch_days=int(s.get("watch_days", 7)),
+        max_watch=int(s.get("max_watch", 60)),
     )
     try:
         ticker = data_binance.ticker_24h(session, source)
     except Exception as e:                      # noqa: BLE001
         log(f"[binance] 24h 티커 조회 실패({data_binance._safe(e)}) — 주도주 이탈 건너뜀")
         return []
-    top = leader_break.leaders(ticker, set(symbols), params)
+    universe = set(symbols)
+    top = leader_break.leaders(ticker, universe, params)
     if not top:
         log("[binance] 주도주 이탈: 거래대금 하한을 넘는 종목 없음")
         return []
-    log("[binance] 주도주 이탈 대상 — " + ", ".join(
+    recent = {}
+    if state is not None:
+        state.touch_leaders(sym for sym, _ in top)
+        recent = state.recent_leaders(days=params.watch_days)
+    watch = leader_break.watch_list(top, recent, universe, params)
+    log("[binance] 주도주 이탈 상위 — " + ", ".join(
         f"{sym}({t['change_pct'] * 100:+.0f}%)" for sym, t in top))
+    carried = len(watch) - len(top)
+    if carried:
+        log(f"[binance] 주도주 이탈 추적 유지 {carried}종 "
+            f"(상위권 이탈 후 {params.watch_days}일 이내)")
+    dropped = sum(1 for sym in recent
+                  if sym in universe and sym not in {w for w, _ in watch})
+    if dropped:
+        log(f"[binance] 주도주 이탈: max_watch={params.max_watch} 초과분 "
+            f"{dropped}종은 이번 스캔에서 제외 (최근 등재 순으로 남김)")
 
+    now = pd.Timestamp.now(tz="UTC")
     events = []
-    for sym, stat in top:
+    for sym, since in watch:
         try:
             df = data_binance.klines(session, sym, source, leader_break.INTERVAL,
                                      limit=leader_break.KLINE_LIMIT)
         except Exception as e:                  # noqa: BLE001 — 종목별 실패는 건너뛴다
             log(f"[binance] {sym} 15m 수집 실패: {data_binance._safe(e)}")
             continue
+        stat = ticker.get(sym) or {}
         for ev in leader_break.detect(df, sym, params):
-            ev.detail["gain_24h"] = stat["change_pct"]
-            ev.detail["turnover_24h"] = stat["quote_volume"]
+            ev.detail["gain_24h"] = stat.get("change_pct")
+            ev.detail["turnover_24h"] = stat.get("quote_volume")
+            if since is not None:       # 지금은 상위권 밖 — 며칠째 추적 중인지
+                ev.detail["watch_days"] = max(
+                    0, (now - pd.Timestamp(since)).days)
             events.append(ev)
     return events
 
@@ -161,12 +185,20 @@ def _filter_ranked(items: list, eligible: set, signals: frozenset) -> list:
     return [e for e in items if e.signal not in signals or e.symbol in eligible]
 
 
-def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False) -> tuple[list, list]:
+def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
+                state=None) -> tuple[list, list]:
     """intrabar=True: 진행 중인 4h봉을 포함해 인트라바 판정이 안전한
     시그널(펌핑 터치)만 돌린다 — 종가 조건 시그널은 마감 스캔에서만."""
     c = cfg.get("crypto") or {}
     if not c.get("enabled", True):
         return [], []
+    scfg = cfg.get("signal") or {}
+    # crypto_enabled: false인 시그널은 크립토에서 빼고 ETF·주식에서만 본다
+    skipped = [m.NAME for m, _ in detectors
+               if not (scfg.get(m.NAME) or {}).get("crypto_enabled", True)]
+    if skipped:
+        detectors = [(m, p) for m, p in detectors if m.NAME not in skipped]
+        log(f"[binance] 크립토 제외 시그널: {', '.join(skipped)}")
     if intrabar:
         detectors = [(m, p) for m, p in detectors
                      if getattr(m, "INTRABAR_OK", False)]
@@ -179,7 +211,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False) -> tupl
         log(f"[binance] {source} · USDT {len(symbols)}종 스캔 시작 (워커 {workers}"
             + (" · 인트라바" if intrabar else "") + ")")
         # 주도주 이탈은 4h 프레임을 안 쓰므로 마감·인트라바 양쪽에서 매번 돈다
-        leader_events = _scan_leader_break(s, source, symbols, cfg, log)
+        leader_events = _scan_leader_break(s, source, symbols, cfg, state, log)
         if not detectors:           # 인트라바인데 4h 대상 시그널이 없을 때
             return leader_events, []
         frames = data_binance.fetch_all(s, symbols, source, limit=limit, log=log,
@@ -196,11 +228,12 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False) -> tupl
     # 크립토 전용 랭크 필터 — 주도주(거래대금·상승률 상위)만 남긴다.
     # 눌림목 칸(눌림목+MSS 줄)과 상승초입이 각자 기준을 갖는다 —
     # 상승초입은 3파 전 초입이라 기준을 낮게 잡는다.
-    scfg = cfg.get("signal") or {}
     for key, signals in RANK_FILTER_SCOPE.items():
         rcfg = (scfg.get(key) or {}).get("crypto_rank_filter") or {}
         if not rcfg.get("enabled", True):
             continue
+        if not any(e.signal in signals for e in events + ongoing):
+            continue        # 해당 시그널이 크립토에서 아예 안 도는 경우
         eligible = _crypto_rank_eligible(frames, rcfg)
         before = sum(1 for e in events if e.signal in signals)
         events = _filter_ranked(events, eligible, signals)
@@ -311,7 +344,7 @@ def run(config_path: str, state_path: str, only: str | None = None,
     if only in (None, "crypto"):
         try:
             crypto_events, crypto_ongoing = scan_crypto(cfg, detectors, log,
-                                                        intrabar=intrabar)
+                                                        intrabar=intrabar, state=state)
         except Exception as e:                      # noqa: BLE001 — 한쪽 실패가 다른 쪽을 막지 않게
             errors.append(f"crypto: {e}")
             log(f"[binance] 크립토 스캔 실패: {e}")
@@ -321,6 +354,11 @@ def run(config_path: str, state_path: str, only: str | None = None,
         except Exception as e:                      # noqa: BLE001
             errors.append(f"etf: {e}")
             log(f"[etf] ETF·주식 스캔 실패: {e}")
+
+    # 주도주 상위권 등재 이력은 알림 유무와 무관하게 매 스캔 남긴다 —
+    # 알림이 나갈 때만 저장하면 조용한 스캔에서 추적 창이 끊긴다.
+    if not dry_run:
+        state.save()
 
     def grp(ev):
         return yf_groups.get(ev.symbol, "etf")

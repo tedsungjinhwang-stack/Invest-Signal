@@ -89,9 +89,12 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         if e.signal == "leader_break":
             # 24h 상승률 순위로 뽑힌 종목이 15m 추세선을 깬 자리
             if d.get("gain_24h") is not None:
-                tags.append(f"24h +{d['gain_24h'] * 100:.0f}%")
+                tags.append(f"24h {d['gain_24h'] * 100:+.0f}%")
             tags.append(f"{d.get('interval', '15m')} "
                         f"{d.get('ma_period', 60)}SMA {_fmt_price(d['ma'])} 이탈")
+            if d.get("watch_days") is not None:
+                # 지금은 상위권 밖 — 등재 후 며칠째 추적 중인지
+                tags.append(f"추적 {d['watch_days']}일차")
         if d.get("align"):
             tags.append(d["align"])
     return head + (" · " + " · ".join(tags) if tags else "")

@@ -1,5 +1,6 @@
 """상태(중복 방지)와 알림 포맷 테스트."""
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
@@ -166,3 +167,36 @@ def test_align_tag_shown_in_lines_and_ongoing():
     assert "↳ XRP  3 · " in msg and "MSS" in msg
     xrp_line = next(l for l in msg.split("\n") if l.startswith("↳ XRP"))
     assert "정배열" not in xrp_line                   # MSS 항목은 MSS만
+
+
+def test_leaders_persist_and_expire_after_watch_window(tmp_path):
+    """상위권 등재 이력은 저장되고, 창을 벗어나면 prune에서 사라진다."""
+    from datetime import datetime, timedelta, timezone
+
+    from invest_signal.state import AlertState
+
+    p = tmp_path / "s.json"
+    now = datetime(2026, 8, 6, tzinfo=timezone.utc)
+    st = AlertState(str(p))
+    st.touch_leaders(["AUSDT", "BUSDT"], when=now - timedelta(days=1))
+    st.touch_leaders(["OLDUSDT"], when=now - timedelta(days=9))
+    st.save()
+
+    reloaded = AlertState(str(p))          # 파일에서 다시 읽어도 남아 있어야 한다
+    recent = reloaded.recent_leaders(days=7, now=now)
+    assert set(recent) == {"AUSDT", "BUSDT"}    # 9일 전 등재분은 창 밖
+    assert recent["AUSDT"] == now - timedelta(days=1)
+    # save()의 prune이 창 밖 항목을 파일에서도 지운다
+    assert "OLDUSDT" not in json.loads(p.read_text(encoding="utf-8"))["leaders"]
+
+
+def test_leaders_absent_in_legacy_state_file(tmp_path):
+    """leaders 키가 없던 기존 상태 파일도 그대로 읽힌다."""
+    from invest_signal.state import AlertState
+
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps({"alerts": {"X|pullback|2026-01-01T00:00:00+00:00": "2026-01-01T00:00:00+00:00"}}),
+                 encoding="utf-8")
+    st = AlertState(str(p))
+    assert st.recent_leaders() == {}
+    assert not st.is_new("X|pullback|2026-01-01T00:00:00+00:00")
