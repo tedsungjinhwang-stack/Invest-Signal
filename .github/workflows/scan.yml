@@ -1,17 +1,31 @@
-# 4h봉 마감 1분 뒤 — 6개 마감 전부(하루 6회).
-# UTC 00/04/08/12/16/20:01 = KST 09/13/17/21/01/05시.
-# 나머지 18개 시간대는 scan-intrabar.yml이 채워 전체가 1시간 간격이 된다.
-# 마감 직후 정렬이지만 실제 시작 시각은 깃허브 크론 대기열에 따라
-# 밀린다(최근 관측치 +17~175분, 중앙값 ~50분).
-# 주의: schedule 트리거는 레포 '기본 브랜치'의 워크플로만 동작한다.
+# 매시 1회 스캔 — 실행 시각의 UTC 시(hour)를 보고 모드를 스스로 고른다.
+#
+#   UTC 00/04/08/12/16/20시 (= KST 09/13/17/21/01/05) → 마감 스캔
+#     4h봉이 막 닫힌 시각. 전 시그널을 마감된 봉으로 판정한다.
+#   나머지 18개 시간                                  → 인트라바 스캔
+#     진행 중인 봉을 포함해 판정 — 펌핑·펌핑초기·상승초입·눌림목만,
+#     알림에 ⏳진행봉 태그가 붙는다. 하락전환·MSS는 마감 스캔 전용.
+#   (주도주 이탈은 15m봉이라 두 모드 모두에서 매번 돈다)
+#
+# 워크플로가 하나라서 외부 크론은 URL 하나·스케줄 하나(`0 * * * *`)면 된다.
+# schedule 트리거는 그 외부 크론이 죽었을 때를 위한 보험으로 남겨 둔다 —
+# 다만 schedule은 크론 시각보다 수십 분 밀리므로(관측 +17~175분, 중앙값 ~50분)
+# 지연이 시 경계를 넘으면 모드가 한 칸 밀릴 수 있다. 정시성이 필요하면
+# workflow_dispatch를 외부에서 호출하는 쪽이 정답이다(README '크론 지연' 참고).
+#
 # 이 파일을 수정해 푸시하면 즉시 1회 실행된다(수동 실행 대용).
-# manual-run: 2026-07-26 #6 펌핑초기(pump_early) 첫 실전 확인
 name: Signal Scan
 
 on:
   schedule:
-    - cron: "7 0,4,8,12,16,20 * * *"
-  workflow_dispatch: {}
+    - cron: "7 * * * *"       # 매시 :07 — 정각은 GitHub 예약 대기열 피크라 피한다
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "판정 모드 — auto면 UTC 시로 자동 선택"
+        type: choice
+        options: [auto, close, intrabar]
+        default: auto
   push:
     branches: [claude/signal-alarm-feature-yo698c]
     paths: [".github/workflows/scan.yml"]
@@ -20,7 +34,7 @@ permissions:
   contents: write            # 알림 상태 파일 커밋용
 
 concurrency:
-  group: signal-scan
+  group: signal-scan         # 겹쳐 떠도 직렬화 — 상태 커밋 경쟁 방지
   cancel-in-progress: false
 
 jobs:
@@ -53,6 +67,9 @@ jobs:
 
       - name: Run scan
         env:
+          # 입력값은 셸에 직접 보간하지 않고 환경변수로 받는다(스크립트 주입 방지).
+          # type: choice라 auto|close|intrabar 셋 중 하나이고, schedule/push에선 빈 값.
+          MODE_IN: ${{ inputs.mode }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           # 미국 러너에서 fapi가 막히면 자동으로 현물 미러 폴백.
@@ -64,7 +81,18 @@ jobs:
           # Quant-Portfolio(퍼블릭) 리포트에서 주식 감시 목록 자동 로드.
           # 기본 GITHUB_TOKEN으로 충분 — 프라이빗으로 되돌리면 PAT를 등록.
           QP_GITHUB_TOKEN: ${{ secrets.QP_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
-        run: python -m invest_signal --state state/alerts_state.json
+        run: |
+          MODE="${MODE_IN:-auto}"
+          HOUR=$((10#$(date -u +%H)))          # 10# — "08"을 8진수로 읽지 않게
+          if [ "$MODE" = "auto" ]; then
+            if [ $((HOUR % 4)) -eq 0 ]; then MODE=close; else MODE=intrabar; fi
+          fi
+          echo "UTC $(date -u '+%Y-%m-%d %H:%M') · 모드 $MODE"
+          if [ "$MODE" = "close" ]; then
+            python -m invest_signal --state state/alerts_state.json
+          else
+            python -m invest_signal --state state/alerts_state.json --intrabar
+          fi
 
       - name: Commit alert state
         if: always()
