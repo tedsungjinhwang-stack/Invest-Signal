@@ -38,8 +38,8 @@ def chart_url(symbol: str, kind: str, market: str = "US") -> str:
 
 
 SIGNAL_EMOJI = {"상승초입": "🟢", "눌림목": "🔵", "펌핑": "🚀", "펌핑초기": "🌱",
-                "하락전환": "🔻"}
-SIGNAL_ORDER = ["상승초입", "눌림목", "펌핑", "펌핑초기", "하락전환"]
+                "주도주 이탈": "⚡", "하락전환": "🔻"}
+SIGNAL_ORDER = ["상승초입", "눌림목", "펌핑", "펌핑초기", "주도주 이탈", "하락전환"]
 DISPLAY_GROUP = {"MSS": "눌림목", "풀백": "눌림목"}   # MSS는 눌림목 칸에 태그로 표시
 MARKET_EMOJI = {"크립토": "🪙", "ETF": "📊", "주식": "🏛"}
 DIVIDER = "─" * 16
@@ -86,6 +86,12 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
             tags.append(f"{hours}h +{d['rise'] * 100:.1f}%"
                         + (f" · 저점대비 +{d['total_gain'] * 100:.0f}%"
                            if d.get("total_gain") is not None else ""))
+        if e.signal == "leader_break":
+            # 24h 상승률 순위로 뽑힌 종목이 15m 추세선을 깬 자리
+            if d.get("gain_24h") is not None:
+                tags.append(f"24h +{d['gain_24h'] * 100:.0f}%")
+            tags.append(f"{d.get('interval', '15m')} "
+                        f"{d.get('ma_period', 60)}SMA {_fmt_price(d['ma'])} 이탈")
         if d.get("align"):
             tags.append(d["align"])
     return head + (" · " + " · ".join(tags) if tags else "")

@@ -223,15 +223,46 @@ def resolve_source(session: requests.Session, requested: str,
     return "spot_mirror", syms
 
 
-def klines_4h(session: requests.Session, symbol: str, source: str,
-              limit: int = 600, include_live: bool = False) -> pd.DataFrame:
+def klines(session: requests.Session, symbol: str, source: str,
+           interval: str = KLINE_INTERVAL, limit: int = 600,
+           include_live: bool = False) -> pd.DataFrame:
+    """임의 인터벌 캔들 — 4h 시그널 외에 15m 주도주 이탈 판정에도 쓴다."""
     if source == "fapi":
         base, path = fapi_base(), "/fapi/v1/klines"
     else:
         base, path = SPOT_MIRROR_BASE, "/api/v3/klines"
     rows = _get(session, base, path,
-                {"symbol": symbol, "interval": KLINE_INTERVAL, "limit": limit}).json()
+                {"symbol": symbol, "interval": interval, "limit": limit}).json()
     return parse_klines(rows, include_live=include_live)
+
+
+def klines_4h(session: requests.Session, symbol: str, source: str,
+              limit: int = 600, include_live: bool = False) -> pd.DataFrame:
+    return klines(session, symbol, source, KLINE_INTERVAL, limit, include_live)
+
+
+def ticker_24h(session: requests.Session, source: str) -> dict[str, dict]:
+    """전 종목 24시간 통계 — 한 번의 요청으로 {심볼: {상승률, 거래대금}}.
+
+    캔들로 24h 상승률을 역산하면 마지막 '마감된' 4h봉 기준이라 최대 4시간
+    묵은 값이 된다. 이 엔드포인트는 호출 시점 기준 롤링 24시간이라 주도주
+    순위를 실시간으로 매길 수 있다.
+    """
+    if source == "fapi":
+        base, path = fapi_base(), "/fapi/v1/ticker/24hr"
+    else:
+        base, path = SPOT_MIRROR_BASE, "/api/v3/ticker/24hr"
+    out = {}
+    for r in _get(session, base, path).json():
+        try:
+            out[r["symbol"]] = {
+                "change_pct": float(r["priceChangePercent"]) / 100,
+                "quote_volume": float(r["quoteVolume"]),   # 24h 거래대금(USDT)
+                "last": float(r["lastPrice"]),
+            }
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
 
 
 def fetch_all(session: requests.Session, symbols: list[str], source: str,
