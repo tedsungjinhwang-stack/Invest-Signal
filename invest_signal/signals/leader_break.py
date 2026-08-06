@@ -29,7 +29,7 @@ KLINE_LIMIT = 200       # ma(60) + grace + 여유
 
 @dataclass(frozen=True)
 class Params:
-    top_n: int = 5              # 24h 상승률 상위 몇 종을 볼지
+    top_n: int = 10             # 24h 상승률 상위 몇 종을 볼지
     ma: int = 60                # 15m봉 SMA 기간 (60봉 = 15시간)
     grace_bars: int = 4         # 소급 판정 봉 수 — 15m×4 = 1시간(스캔 주기)
     min_turnover_usd: float = 1_000_000   # 24h 거래대금 하한(유동성)
