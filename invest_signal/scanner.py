@@ -114,7 +114,7 @@ def _crypto_rank_eligible(frames: dict, rcfg: dict) -> set:
 
 def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                        state=None, log=print) -> list:
-    """주도주 이탈 — 24h 상승률 상위 N종을 15m봉으로 따로 판정한다.
+    """크립토 모멘텀 눌림목/이탈 — 24h 상승률 상위 N종을 15m봉으로 따로 판정한다.
 
     나머지 시그널과 달리 4h 프레임을 쓰지 않는다: 대상 선정은 24hr 티커
     (전 종목 1회 요청)로 하고, 뽑힌 종목만 15m 캔들을 추가로 받는다.
@@ -136,28 +136,28 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     try:
         ticker = data_binance.ticker_24h(session, source)
     except Exception as e:                      # noqa: BLE001
-        log(f"[binance] 24h 티커 조회 실패({data_binance._safe(e)}) — 주도주 이탈 건너뜀")
+        log(f"[binance] 24h 티커 조회 실패({data_binance._safe(e)}) — 크립토 모멘텀 눌림목/이탈 건너뜀")
         return []
     universe = set(symbols)
     top = leader_break.leaders(ticker, universe, params)
     if not top:
-        log("[binance] 주도주 이탈: 거래대금 하한을 넘는 종목 없음")
+        log("[binance] 크립토 모멘텀 눌림목/이탈: 거래대금 하한을 넘는 종목 없음")
         return []
     recent = {}
     if state is not None:
         state.touch_leaders(sym for sym, _ in top)
         recent = state.recent_leaders(days=params.watch_days)
     watch = leader_break.watch_list(top, recent, universe, params)
-    log("[binance] 주도주 이탈 상위 — " + ", ".join(
+    log("[binance] 크립토 모멘텀 눌림목/이탈 상위 — " + ", ".join(
         f"{sym}({t['change_pct'] * 100:+.0f}%)" for sym, t in top))
     carried = len(watch) - len(top)
     if carried:
-        log(f"[binance] 주도주 이탈 추적 유지 {carried}종 "
+        log(f"[binance] 크립토 모멘텀 눌림목/이탈 추적 유지 {carried}종 "
             f"(상위권 이탈 후 {params.watch_days}일 이내)")
     dropped = sum(1 for sym in recent
                   if sym in universe and sym not in {w for w, _ in watch})
     if dropped:
-        log(f"[binance] 주도주 이탈: max_watch={params.max_watch} 초과분 "
+        log(f"[binance] 크립토 모멘텀 눌림목/이탈: max_watch={params.max_watch} 초과분 "
             f"{dropped}종은 이번 스캔에서 제외 (최근 등재 순으로 남김)")
 
     now = pd.Timestamp.now(tz="UTC")
@@ -210,7 +210,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         source, symbols = data_binance.resolve_source(s, requested, exclude, log)
         log(f"[binance] {source} · USDT {len(symbols)}종 스캔 시작 (워커 {workers}"
             + (" · 인트라바" if intrabar else "") + ")")
-        # 주도주 이탈은 4h 프레임을 안 쓰므로 마감·인트라바 양쪽에서 매번 돈다
+        # 크립토 모멘텀 눌림목/이탈은 4h 프레임을 안 쓰므로 마감·인트라바 양쪽에서 매번 돈다
         leader_events = _scan_leader_break(s, source, symbols, cfg, state, log)
         if not detectors:           # 인트라바인데 4h 대상 시그널이 없을 때
             return leader_events, []
@@ -242,7 +242,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         log(f"[binance] {RANK_FILTER_LABEL[key]} 랭크 필터: "
             f"대상 {len(eligible)}종 — 신규 {before}→{after}건")
 
-    # 주도주 이탈은 자체 선정(24h 상승률 상위)이라 위 랭크 필터를 타지 않는다
+    # 크립토 모멘텀 눌림목/이탈은 자체 선정(24h 상승률 상위)이라 위 랭크 필터를 타지 않는다
     events.extend(leader_events)
     log(f"[binance] 시그널 {len(events)}건 · 유지 중 {len(ongoing)}건")
     return events, ongoing

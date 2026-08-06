@@ -1,4 +1,4 @@
-"""주도주 이탈 시그널 (15m봉) — 크립토 선물 전용.
+"""크립토 모멘텀 눌림목/이탈 시그널 (15m봉) — 크립토 선물 전용.
 
 24시간 상승률 **상위 top_n종**만 대상으로, 15분봉 종가가 ma(기본 60)선을
 **하향 이탈하는 첫 봉**에서 알린다. 하루 사이 가장 많이 오른 종목들이
@@ -21,7 +21,7 @@ from ..indicators import sma
 from . import SignalEvent
 
 NAME = "leader_break"
-LABEL = "주도주 이탈"
+LABEL = "크립토 모멘텀 눌림목/이탈"
 CRYPTO_ONLY = True      # ETF·주식 스캔에서는 돌리지 않는다
 INTERVAL = "15m"
 KLINE_LIMIT = 200       # ma(60) + grace + 여유

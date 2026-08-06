@@ -226,7 +226,7 @@ def resolve_source(session: requests.Session, requested: str,
 def klines(session: requests.Session, symbol: str, source: str,
            interval: str = KLINE_INTERVAL, limit: int = 600,
            include_live: bool = False) -> pd.DataFrame:
-    """임의 인터벌 캔들 — 4h 시그널 외에 15m 주도주 이탈 판정에도 쓴다."""
+    """임의 인터벌 캔들 — 4h 시그널 외에 15m 크립토 모멘텀 눌림목/이탈 판정에도 쓴다."""
     if source == "fapi":
         base, path = fapi_base(), "/fapi/v1/klines"
     else:
