@@ -247,15 +247,52 @@ BTC·ETH·SOL 등 주요 코인은 전부 커버된다. 진짜 무기한 데이�
 되므로 셋업을 더 일찍 잡는 대신, 마감 전에 되돌아갈 일시적 상태도 함께
 잡힌다(⏳진행봉 태그로 구분되고, 같은 봉은 재알림되지 않는다).
 
-> GitHub 크론 대기열 탓에 실제 시작은 밀린다 — 최근 20회 관측치가
-> **+17~175분(중앙값 ~50분)**이다. 슬롯이 24개라 빈도는 확보되지만
-> 각 실행 시각은 정시가 아니다. 지연이 60분을 넘으면 다음 슬롯과 겹치는데,
-> 두 워크플로가 `signal-scan` 동시성 그룹을 공유하므로 직렬화된다
-> (실행 자체는 1~2분이라 대개 문제가 되지 않는다).
-`scan.yml`을 수정해 푸시하면 즉시 1회 실행된다.
-**schedule 트리거는 기본 브랜치에서만 동작**하므로 이 브랜치를 main에
-머지해야 활성화된다. 중복 알림은 `state/alerts_state.json`으로 방지하며
-실행 후 자동 커밋된다.
+중복 알림은 `state/alerts_state.json`으로 방지하며 실행 후 자동 커밋된다.
+`scan.yml`을 수정해 푸시하면 즉시 1회 실행된다(수동 실행 대용).
+
+#### 크론 지연과 외부 트리거
+
+**`schedule` 실행은 정시에 오지 않는다.** 최근 20회 관측치가 크론 시각
+대비 **+17~175분(중앙값 ~50분)** 늦었다. GitHub 문서도 schedule 이벤트가
+부하에 밀릴 수 있고 **매시 정각이 그 피크**라고 명시한다 — 이 레포의
+크론은 전부 `:01`분이라 정확히 그 자리에 있다.
+
+밀리는 건 **실행이 생성되는 시점**뿐이다. 측정해 보면:
+
+| 이벤트 | 크론 시각 → 생성 | 생성 → 시작 |
+|---|---|---|
+| `schedule` (29건) | +17~175분 | **0초** |
+| `push` (1건) | 해당 없음 | **0초** |
+
+즉 러너 대기열은 병목이 아니다. `workflow_dispatch`·`repository_dispatch`
+같은 **API 트리거는 push와 같은 경로라 호출 즉시 실행이 생성된다.** 두
+워크플로 모두 `workflow_dispatch:`가 열려 있으므로, 외부 크론이 정시에
+API를 때리면 지연이 사라진다. 스캔·알림은 그대로 Actions에서 돌고 외부
+서비스는 신호만 보낸다(별도 서버 불필요).
+
+```bash
+# 마감 스캔 — UTC 0,4,8,12,16,20시
+curl -X POST -H "Authorization: Bearer $PAT" \
+  -H "Accept: application/vnd.github+json" \
+  https://api.github.com/repos/tedsungjinhwang-stack/Invest-Signal/actions/workflows/scan.yml/dispatches \
+  -d '{"ref":"claude/signal-alarm-feature-yo698c"}'
+
+# 인트라바 — 나머지 18개 시간
+curl -X POST -H "Authorization: Bearer $PAT" \
+  -H "Accept: application/vnd.github+json" \
+  https://api.github.com/repos/tedsungjinhwang-stack/Invest-Signal/actions/workflows/scan-intrabar.yml/dispatches \
+  -d '{"ref":"claude/signal-alarm-feature-yo698c"}'
+```
+
+PAT는 fine-grained로 이 레포에만, **Actions: Read and write** 권한 하나면
+된다. 크론 서비스 쪽 스케줄은 `0 0,4,8,12,16,20 * * *`와
+`0 1,2,3,5,6,7,9,10,11,13,14,15,17,18,19,21,22,23 * * *`로 나눠 걸면 된다.
+
+`schedule:` 블록은 **일부러 남겨 뒀다** — 외부 서비스가 죽어도 늦게나마
+스캔이 돌게 하는 보험이다. 둘 다 걸리면 같은 시간대에 두 번 실행되지만,
+중복 알림은 `bar_time` 기반 dedup이 막고 두 워크플로가 `signal-scan`
+동시성 그룹을 공유해 직렬화되며, 퍼블릭 레포라 Actions 분도 무제한이다.
+외부 트리거가 안정적으로 도는 걸 확인한 뒤 지워도 된다.
 
 ### 3. 로컬 실행
 
