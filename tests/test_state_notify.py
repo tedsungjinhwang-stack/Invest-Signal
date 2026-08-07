@@ -200,3 +200,22 @@ def test_leaders_absent_in_legacy_state_file(tmp_path):
     st = AlertState(str(p))
     assert st.recent_leaders() == {}
     assert not st.is_new("X|pullback|2026-01-01T00:00:00+00:00")
+
+
+def test_hold_line_shows_leader_break_rank_and_ma_side():
+    """유지 중 줄 — 상위권이면 순위, 밀렸으면 추적일차 + 60선 위/아래."""
+    top = SignalEvent(symbol="HFTUSDT", signal="leader_break",
+                      bar_time=pd.Timestamp("2026-08-06T06:00:00Z"), price=0.0174,
+                      detail={"label": "크립토 모멘텀 눌림목/이탈", "last_price": 0.0174,
+                              "ma": 0.0180, "above_ma": False, "rank": 2,
+                              "gain_24h": 0.41})
+    lapsed = SignalEvent(symbol="ETHUSDT", signal="leader_break",
+                         bar_time=pd.Timestamp("2026-08-04T06:00:00Z"), price=3120.0,
+                         detail={"label": "크립토 모멘텀 눌림목/이탈", "last_price": 3200.0,
+                                 "ma": 3155.0, "above_ma": True, "watch_days": 3,
+                                 "gain_24h": -0.02})
+    out = format_events([], [], {}, ongoing_crypto=[top, lapsed])
+    assert "↳ HFT  0.0174 · 2위·🔻60선 아래·24h +41%" in out
+    assert "↳ ETH  3,200.0 · 추적 3일차·60선 위·24h -2%" in out
+    # 60선 위로 복귀한 종목도 목록에 남아 있어야 한다
+    assert "ETH" in out

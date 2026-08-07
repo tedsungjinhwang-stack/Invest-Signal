@@ -124,6 +124,16 @@ def format_events(events_crypto: list, events_etf: list,
     def hold_line(e, kind):
         d = e.detail
         name = etf_names.get(e.symbol, "") if kind != "crypto" else ""
+        if e.signal == "leader_break":
+            # 감시 창 안이면 60선 위로 복귀해도 남는다 — 순위·선 위아래를 같이 보여준다
+            tags = [f"{d['rank']}위" if d.get("rank")
+                    else f"추적 {d.get('watch_days', 0)}일차",
+                    "60선 위" if d.get("above_ma") else "🔻60선 아래"]
+            if d.get("gain_24h") is not None:
+                tags.append(f"24h {d['gain_24h'] * 100:+.0f}%")
+            return (f"↳ {_short_symbol(e.symbol, kind, name)}"
+                    + (f"  {_fmt_price(d['last_price'])}" if d.get("last_price") else "")
+                    + " · " + "·".join(tags))
         tags = [f"{_age_days(e.bar_time)}d"]
         if e.signal == "mss" or d.get("label") == "MSS":
             # MSS는 신규 줄과 같은 형식으로 — 깨진 저점 레벨 포함

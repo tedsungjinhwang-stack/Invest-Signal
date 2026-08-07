@@ -14,7 +14,7 @@ import requests
 
 from . import config as cfg_mod
 from . import data_binance, data_etf, data_qp, indicators, notify
-from .signals import leader_break
+from .signals import SignalEvent, leader_break
 from .state import AlertState
 
 ONGOING_LOOKBACK_BARS = 42      # '유지 중' 판정 시 트리거를 찾아볼 범위 — 42봉 = 7일
@@ -113,18 +113,21 @@ def _crypto_rank_eligible(frames: dict, rcfg: dict) -> set:
 
 
 def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
-                       state=None, log=print) -> list:
+                       state=None, log=print) -> tuple[list, list]:
     """크립토 모멘텀 눌림목/이탈 — 24h 상승률 상위 N종을 15m봉으로 따로 판정한다.
 
     나머지 시그널과 달리 4h 프레임을 쓰지 않는다: 대상 선정은 24hr 티커
     (전 종목 1회 요청)로 하고, 뽑힌 종목만 15m 캔들을 추가로 받는다.
     한 번 상위권에 들었던 종목은 순위에서 밀려도 watch_days 동안 계속
     본다(상태 파일의 leaders에 마지막 등재 시각을 기록).
+
+    (신규 이탈, 유지 중)을 돌려준다. 유지 중은 감시 창 안의 전 종목이며
+    60선 위로 복귀해도 빠지지 않는다 — 창이 끝날 때까지 상태만 갱신된다.
     실패는 크립토 스캔 전체를 막지 않는다 — 이 시그널만 비운다.
     """
     s = (cfg.get("signal") or {}).get("leader_break") or {}
     if not s.get("enabled", True):
-        return []
+        return [], []
     params = leader_break.Params(
         top_n=int(s.get("top_n", 10)),
         ma=int(s.get("ma", 60)),
@@ -137,12 +140,12 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         ticker = data_binance.ticker_24h(session, source)
     except Exception as e:                      # noqa: BLE001
         log(f"[binance] 24h 티커 조회 실패({data_binance._safe(e)}) — 크립토 모멘텀 눌림목/이탈 건너뜀")
-        return []
+        return [], []
     universe = set(symbols)
     top = leader_break.leaders(ticker, universe, params)
     if not top:
         log("[binance] 크립토 모멘텀 눌림목/이탈: 거래대금 하한을 넘는 종목 없음")
-        return []
+        return [], []
     recent = {}
     if state is not None:
         state.touch_leaders(sym for sym, _ in top)
@@ -161,7 +164,8 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             f"{dropped}종은 이번 스캔에서 제외 (최근 등재 순으로 남김)")
 
     now = pd.Timestamp.now(tz="UTC")
-    events = []
+    rank = {sym: i + 1 for i, (sym, _) in enumerate(top)}
+    events, ongoing = [], []
     for sym, since in watch:
         try:
             df = data_binance.klines(session, sym, source, leader_break.INTERVAL,
@@ -170,14 +174,29 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             log(f"[binance] {sym} 15m 수집 실패: {data_binance._safe(e)}")
             continue
         stat = ticker.get(sym) or {}
+
+        def annotate(detail: dict) -> dict:
+            """순위·추적일·24h 지표를 신규/유지 양쪽에 같은 모양으로 붙인다."""
+            detail["gain_24h"] = stat.get("change_pct")
+            detail["turnover_24h"] = stat.get("quote_volume")
+            if sym in rank:
+                detail["rank"] = rank[sym]      # 지금도 상위권
+            if since is not None:               # 상위권 밖 — 며칠째 감시 창에 있는지
+                detail["watch_days"] = max(0, (now - pd.Timestamp(since)).days)
+            return detail
+
         for ev in leader_break.detect(df, sym, params):
-            ev.detail["gain_24h"] = stat.get("change_pct")
-            ev.detail["turnover_24h"] = stat.get("quote_volume")
-            if since is not None:       # 지금은 상위권 밖 — 며칠째 추적 중인지
-                ev.detail["watch_days"] = max(
-                    0, (now - pd.Timestamp(since)).days)
+            annotate(ev.detail)
             events.append(ev)
-    return events
+        # 유지 중 — 감시 창 안이면 60선 위로 복귀했어도 상태를 계속 보여준다.
+        # bar_time은 마지막 상위권 등재 시각이라 최신 등재 순으로 정렬된다.
+        snap = leader_break.tracking(df, params)
+        if snap is not None:
+            ongoing.append(SignalEvent(
+                symbol=sym, signal=leader_break.NAME,
+                bar_time=pd.Timestamp(since) if since is not None else now,
+                price=snap["last_price"], detail=annotate(snap)))
+    return events, ongoing
 
 
 def _filter_ranked(items: list, eligible: set, signals: frozenset) -> list:
@@ -211,9 +230,10 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         log(f"[binance] {source} · USDT {len(symbols)}종 스캔 시작 (워커 {workers}"
             + (" · 인트라바" if intrabar else "") + ")")
         # 크립토 모멘텀 눌림목/이탈은 4h 프레임을 안 쓰므로 마감·인트라바 양쪽에서 매번 돈다
-        leader_events = _scan_leader_break(s, source, symbols, cfg, state, log)
+        leader_events, leader_ongoing = _scan_leader_break(
+            s, source, symbols, cfg, state, log)
         if not detectors:           # 인트라바인데 4h 대상 시그널이 없을 때
-            return leader_events, []
+            return leader_events, leader_ongoing
         frames = data_binance.fetch_all(s, symbols, source, limit=limit, log=log,
                                         workers=workers, include_live=intrabar)
     events, ongoing = _detect_all(frames, detectors, log)
@@ -244,6 +264,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
 
     # 크립토 모멘텀 눌림목/이탈은 자체 선정(24h 상승률 상위)이라 위 랭크 필터를 타지 않는다
     events.extend(leader_events)
+    ongoing.extend(leader_ongoing)
     log(f"[binance] 시그널 {len(events)}건 · 유지 중 {len(ongoing)}건")
     return events, ongoing
 

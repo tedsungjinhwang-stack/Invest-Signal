@@ -69,6 +69,25 @@ def watch_list(top: list[tuple[str, dict]], recent: dict, symbols: set[str],
     return out
 
 
+def tracking(df: pd.DataFrame, params: Params = Params()) -> dict | None:
+    """현재 상태 스냅샷 — 종가가 ma선 위인지 아래인지.
+
+    감시 창(watch_days) 안의 종목은 이탈했든 안 했든 이 상태를 '유지 중'
+    목록에 계속 표시한다. 60선 위로 복귀해도 목록에서 빼지 않는다 —
+    한 번 상위권에 들었으면 창이 끝날 때까지 지켜보자는 취지다.
+    데이터가 모자라 ma선을 못 구하면 None.
+    """
+    if len(df) < params.ma:
+        return None
+    m = sma(df["Close"], params.ma)
+    if pd.isna(m.iloc[-1]):
+        return None
+    close, ma = float(df["Close"].iloc[-1]), float(m.iloc[-1])
+    return {"label": LABEL, "last_price": close, "ma": ma,
+            "above_ma": bool(close >= ma), "ma_period": params.ma,
+            "interval": INTERVAL}
+
+
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
     """마감된 15m OHLC(오름차순, UTC 인덱스)에서 60선 하향 이탈을 찾는다.
 

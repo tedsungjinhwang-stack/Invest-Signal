@@ -142,3 +142,21 @@ def test_watch_list_skips_symbols_no_longer_in_universe():
     out = leader_break.watch_list([("AUSDT", {"change_pct": 0.9})],
                                   {"DELISTEDUSDT": now}, {"AUSDT"}, Params())
     assert [s for s, _ in out] == ["AUSDT"]
+
+
+def test_tracking_reports_state_on_both_sides_of_the_ma():
+    """유지 중 스냅샷 — 60선 위로 복귀해도 상태만 바뀌고 계속 만들어진다."""
+    above = leader_break.tracking(make_df(rising()), P)
+    assert above["above_ma"] is True
+    assert above["last_price"] > above["ma"]
+    assert above["ma_period"] == 60 and above["interval"] == "15m"
+
+    closes = rising()
+    closes.append(closes[-1] - 200)          # 60선 아래로 이탈
+    below = leader_break.tracking(make_df(closes), P)
+    assert below["above_ma"] is False        # 빠지지 않고 '아래'로 표시될 뿐
+    assert below["last_price"] < below["ma"]
+
+
+def test_tracking_needs_enough_bars():
+    assert leader_break.tracking(make_df(rising(bars=30)), P) is None

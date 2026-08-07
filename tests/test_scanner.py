@@ -215,7 +215,7 @@ def test_crypto_enabled_false_drops_signal_from_crypto_only(monkeypatch):
 
     monkeypatch.setattr(scanner, "_detect_all", fake_detect_all)
     monkeypatch.setattr(scanner, "_scan_leader_break",
-                        lambda *a, **k: [])
+                        lambda *a, **k: ([], []))
     monkeypatch.setattr(scanner.data_binance, "resolve_source",
                         lambda *a, **k: ("fapi", ["XUSDT"]))
     monkeypatch.setattr(scanner.data_binance, "fetch_all",
