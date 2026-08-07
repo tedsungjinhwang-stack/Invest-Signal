@@ -96,11 +96,14 @@ def test_format_events_ongoing_section():
     assert "↳" not in format_events([_event("BTCUSDT")], [], {})
 
 
-def test_ongoing_list_caps_per_label():
+def test_ongoing_list_shows_every_symbol():
+    """추적 목록은 자르지 않는다 — 20종이면 20줄 그대로."""
     evs = [_event(f"C{i:02d}USDT", {"label": "눌림목"}) for i in range(20)]
     msg = format_events([_event("BTCUSDT")], [], {}, ongoing_crypto=evs)
-    assert "↳ 외 5종" in msg
-    assert msg.count("↳") == 16               # 15종 각 한 줄 + '외 N종' 줄
+    assert msg.count("↳") == 20
+    assert "외 " not in msg
+    for i in range(20):
+        assert f"C{i:02d}" in msg
 
 
 def test_intrabar_tag_shown():

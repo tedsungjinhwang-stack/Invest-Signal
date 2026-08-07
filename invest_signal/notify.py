@@ -10,7 +10,6 @@ import requests
 KST = ZoneInfo("Asia/Seoul")
 TG_LIMIT = 4096          # 텔레그램 메시지 최대 길이
 CHUNK = 3800             # 여유를 둔 분할 기준
-ONGOING_MAX_PER_LABEL = 15   # 유지 중 목록 — 라벨당 최대 표시 종목 수
 
 
 def _fmt_price(v: float) -> str:
@@ -166,13 +165,9 @@ def format_events(events_crypto: list, events_etf: list,
                 name = etf_names.get(e.symbol, "") if kind != "crypto" else ""
                 market = "KR" if (kind != "crypto" and e.symbol[:1].isdigit()) else "US"
                 lines.append(_event_line(e, chart_url(e.symbol, kind, market), name, kind))
-            if hold_sel:
-                shown = hold_sel[:ONGOING_MAX_PER_LABEL]
-                extra = len(hold_sel) - len(shown)
-                # 추적 리스트 — 종목마다 한 줄, 현재가(최근 4h 종가) 포함
-                lines.extend(hold_line(e, kind) for e in shown)
-                if extra > 0:
-                    lines.append(f"↳ 외 {extra}종")
+            # 추적 리스트 — 종목마다 한 줄, 현재가 포함. 자르지 않고 전부 보여준다
+            # (길어지면 split_chunks가 여러 메시지로 나눠 보낸다).
+            lines.extend(hold_line(e, kind) for e in hold_sel)
 
     return "\n".join(lines)
 
