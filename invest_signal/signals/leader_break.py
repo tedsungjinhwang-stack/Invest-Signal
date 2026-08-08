@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..indicators import sma
+from ..indicators import alignment, sma
 from . import SignalEvent
 
 NAME = "leader_break"
@@ -25,6 +25,8 @@ LABEL = "크립토 모멘텀 눌림목/이탈"
 CRYPTO_ONLY = True      # ETF·주식 스캔에서는 돌리지 않는다
 INTERVAL = "15m"
 KLINE_LIMIT = 200       # ma(60) + grace + 여유
+TREND_INTERVAL = "4h"   # 아래 exhausted() 판정용 — 4h 프레임이 없을 때만 따로 받는다
+TREND_LIMIT = 600       # MA480 성립(480봉) + 여유
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,9 @@ class Params:
     min_turnover_usd: float = 1_000_000   # 24h 거래대금 하한(유동성)
     watch_days: int = 7         # 상위권에서 밀려난 뒤에도 계속 볼 기간
     max_watch: int = 60         # 한 스캔에서 15m 캔들을 받을 최대 종목 수
+    exhausted_filter: bool = True        # 아래 exhausted() 조건에 걸리면 대상에서 제외
+    exhausted_mas: tuple = (120, 240, 480)   # 4h봉 정배열 판정 3선
+    exhausted_below: int = 480               # 4h 종가가 이 선 아래면 제외
 
 
 def leaders(ticker: dict[str, dict], symbols: set[str],
@@ -67,6 +72,27 @@ def watch_list(top: list[tuple[str, dict]], recent: dict, symbols: set[str],
                      key=lambda s: recent[s], reverse=True)
     out.extend((s, recent[s]) for s in carried[:room])
     return out
+
+
+def exhausted(df4h: pd.DataFrame, params: Params = Params()) -> bool:
+    """4h가 정배열인데 종가가 exhausted_below선 아래 — 대상에서 뺄 자리.
+
+    정배열(MA120 > MA240 > MA480)은 상승 구조가 이미 완성됐다는 뜻이고,
+    그 상태에서 종가가 480선까지 밀렸으면 오를 만큼 오른 뒤 꺾인 것이다.
+    새로 잡을 눌림이 아니라서 제외한다. 역배열·혼조는 이 조건과 무관하게
+    통과한다 — 아직 구조가 만들어지는 중이라 판단할 자리가 아니다.
+
+    MA를 못 구할 만큼 이력이 짧으면(신규 상장) alignment가 None을 주므로
+    제외하지 않는다 — 판단 불가는 통과로 둔다.
+    """
+    if not params.exhausted_filter:
+        return False
+    if alignment(df4h, tuple(params.exhausted_mas)) != "정배열":
+        return False
+    ref = sma(df4h["Close"], params.exhausted_below)
+    if pd.isna(ref.iloc[-1]):
+        return False
+    return bool(float(df4h["Close"].iloc[-1]) < float(ref.iloc[-1]))
 
 
 def tracking(df: pd.DataFrame, params: Params = Params()) -> dict | None:

@@ -160,3 +160,47 @@ def test_tracking_reports_state_on_both_sides_of_the_ma():
 
 def test_tracking_needs_enough_bars():
     assert leader_break.tracking(make_df(rising(bars=30)), P) is None
+
+
+def _df4h(closes):
+    idx = pd.date_range("2024-01-01", periods=len(closes), freq="4h", tz="UTC")
+    c = pd.Series([float(x) for x in closes], index=idx)
+    return pd.DataFrame({"Open": c, "High": c, "Low": c, "Close": c, "Volume": 1.0})
+
+
+def test_exhausted_excludes_bullish_stack_that_fell_under_the_long_ma():
+    """정배열인데 종가가 480선 아래 — 오를 만큼 오르고 꺾인 자리라 제외."""
+    up = list(np.linspace(100.0, 400.0, 600))    # 우상향 → MA120>MA240>MA480 정배열
+    df = _df4h(up)
+    assert alignment_of(df) == "정배열"
+    assert leader_break.exhausted(df, P) is False   # 아직 480선 위
+
+    ma480 = float(pd.Series(up).rolling(480).mean().iloc[-1])
+    df_down = _df4h(up + [ma480 - 20])           # 480선 아래로 밀린 봉
+    assert alignment_of(df_down) == "정배열"       # 배열은 아직 정배열
+    assert leader_break.exhausted(df_down, P) is True
+
+
+def test_exhausted_ignores_bearish_and_mixed_alignment():
+    """역배열은 480선 아래여도 제외 대상이 아니다 — 구조가 다른 국면."""
+    down = list(np.linspace(400.0, 100.0, 600))  # 우하향 → 역배열
+    df = _df4h(down)
+    assert alignment_of(df) == "역배열"
+    assert leader_break.exhausted(df, P) is False
+
+
+def test_exhausted_passes_when_history_too_short():
+    """MA480을 못 구하는 신규 상장은 판단 불가 — 제외하지 않는다."""
+    assert leader_break.exhausted(_df4h(np.linspace(100.0, 200.0, 300)), P) is False
+
+
+def test_exhausted_filter_can_be_turned_off():
+    up = list(np.linspace(100.0, 400.0, 600))
+    ma480 = float(pd.Series(up).rolling(480).mean().iloc[-1])
+    df = _df4h(up + [ma480 - 20])
+    assert leader_break.exhausted(df, Params(exhausted_filter=False)) is False
+
+
+def alignment_of(df):
+    from invest_signal.indicators import alignment
+    return alignment(df, (120, 240, 480))

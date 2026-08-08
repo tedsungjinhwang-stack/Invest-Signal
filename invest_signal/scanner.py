@@ -113,7 +113,7 @@ def _crypto_rank_eligible(frames: dict, rcfg: dict) -> set:
 
 
 def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
-                       state=None, log=print) -> tuple[list, list]:
+                       state=None, log=print, frames: dict | None = None) -> tuple[list, list]:
     """크립토 모멘텀 눌림목/이탈 — 24h 상승률 상위 N종을 15m봉으로 따로 판정한다.
 
     나머지 시그널과 달리 4h 프레임을 쓰지 않는다: 대상 선정은 24hr 티커
@@ -135,6 +135,9 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
         watch_days=int(s.get("watch_days", 7)),
         max_watch=int(s.get("max_watch", 60)),
+        exhausted_filter=bool(s.get("exhausted_filter", True)),
+        exhausted_mas=tuple(s.get("exhausted_mas", (120, 240, 480))),
+        exhausted_below=int(s.get("exhausted_below", 480)),
     )
     try:
         ticker = data_binance.ticker_24h(session, source)
@@ -163,10 +166,34 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         log(f"[binance] 크립토 모멘텀 눌림목/이탈: max_watch={params.max_watch} 초과분 "
             f"{dropped}종은 이번 스캔에서 제외 (최근 등재 순으로 남김)")
 
+    def is_exhausted(sym: str) -> bool:
+        """4h 정배열 + 480선 아래면 제외 — 이미 오를 만큼 오르고 꺾인 자리.
+
+        4h 프레임이 이미 있으면 그걸 쓰고(스캔이 받아온 750봉), 없으면
+        (인트라바에 4h 대상 시그널이 없는 경우) 해당 종목만 따로 받는다.
+        조회 실패는 제외하지 않는다 — 판단 불가는 통과.
+        """
+        if not params.exhausted_filter:
+            return False
+        need = max(params.exhausted_mas + (params.exhausted_below,))
+        df4 = (frames or {}).get(sym)
+        if df4 is None or len(df4) < need:
+            try:
+                df4 = data_binance.klines(session, sym, source,
+                                          leader_break.TREND_INTERVAL,
+                                          limit=leader_break.TREND_LIMIT)
+            except Exception as e:              # noqa: BLE001
+                log(f"[binance] {sym} 4h 수집 실패: {data_binance._safe(e)}")
+                return False
+        return leader_break.exhausted(df4, params)
+
     now = pd.Timestamp.now(tz="UTC")
     rank = {sym: i + 1 for i, (sym, _) in enumerate(top)}
-    events, ongoing = [], []
+    events, ongoing, spent = [], [], []
     for sym, since in watch:
+        if is_exhausted(sym):
+            spent.append(sym)
+            continue
         try:
             df = data_binance.klines(session, sym, source, leader_break.INTERVAL,
                                      limit=leader_break.KLINE_LIMIT)
@@ -196,6 +223,9 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                 symbol=sym, signal=leader_break.NAME,
                 bar_time=pd.Timestamp(since) if since is not None else now,
                 price=snap["last_price"], detail=annotate(snap)))
+    if spent:
+        log(f"[binance] 크립토 모멘텀 눌림목/이탈 제외 {len(spent)}종 "
+            f"(4h 정배열 + {params.exhausted_below}선 아래): {', '.join(spent)}")
     return events, ongoing
 
 
@@ -229,13 +259,16 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         source, symbols = data_binance.resolve_source(s, requested, exclude, log)
         log(f"[binance] {source} · USDT {len(symbols)}종 스캔 시작 (워커 {workers}"
             + (" · 인트라바" if intrabar else "") + ")")
-        # 크립토 모멘텀 눌림목/이탈은 4h 프레임을 안 쓰므로 마감·인트라바 양쪽에서 매번 돈다
+        frames = {}
+        if detectors:
+            frames = data_binance.fetch_all(s, symbols, source, limit=limit, log=log,
+                                            workers=workers, include_live=intrabar)
+        # 15m 판정이라 마감·인트라바 양쪽에서 매번 돈다. 4h 프레임은 제외 조건
+        # (정배열 + 480선 아래) 판정에만 쓰고, 없으면 대상 종목만 따로 받는다.
         leader_events, leader_ongoing = _scan_leader_break(
-            s, source, symbols, cfg, state, log)
+            s, source, symbols, cfg, state, log, frames)
         if not detectors:           # 인트라바인데 4h 대상 시그널이 없을 때
             return leader_events, leader_ongoing
-        frames = data_binance.fetch_all(s, symbols, source, limit=limit, log=log,
-                                        workers=workers, include_live=intrabar)
     events, ongoing = _detect_all(frames, detectors, log)
     if intrabar:
         ongoing = []                        # 인트라바 스캔은 신규 알림만
