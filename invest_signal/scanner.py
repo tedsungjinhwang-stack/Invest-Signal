@@ -24,15 +24,14 @@ CHOCH_EVICTS = {"pullback"}     # CHoCH 발생 시 리스트에서 걷어낼 셋
 
 # 크립토 랭크 필터 적용 범위 — signal.<키>.crypto_rank_filter 설정별로 걸러낼
 # 시그널 집합. 눌림목 칸은 진입 게이트를 공유하는 MSS 줄까지 함께 거르고,
-# 펌핑·상승초입·펌핑초기는 성격이 달라 각자 기준을 쓴다.
+# 상승초입·펌핑초기는 성격이 달라 각자 기준을 쓴다.
 RANK_FILTER_SCOPE = {
     "pullback": frozenset({"pullback", "mss"}),
-    "pump_dip": frozenset({"pump_dip"}),
     "uptrend_onset": frozenset({"uptrend_onset"}),
     "pump_early": frozenset({"pump_early"}),
 }
-RANK_FILTER_LABEL = {"pullback": "눌림목·MSS", "pump_dip": "펌핑",
-                     "uptrend_onset": "상승초입", "pump_early": "펌핑초기"}
+RANK_FILTER_LABEL = {"pullback": "눌림목·MSS", "uptrend_onset": "상승초입",
+                     "pump_early": "펌핑초기"}
 
 
 def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[list, list]:
@@ -121,15 +120,18 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     한 번 상위권에 들었던 종목은 순위에서 밀려도 watch_days 동안 계속
     본다(상태 파일의 leaders에 마지막 등재 시각을 기록).
 
-    (신규 이탈, 유지 중)을 돌려준다. 유지 중은 감시 창 안의 전 종목이며
+    (신규 이탈, 유지 중, 보드)를 돌려준다. 유지 중은 감시 창 안의 전 종목이며
     60선 위로 복귀해도 빠지지 않는다 — 창이 끝날 때까지 상태만 갱신된다.
+    보드는 알림 맨 위에 붙일 24h 상승률 상위 board_top종으로, 60선 이탈이나
+    제외 조건과 무관하게 순위 그대로 싣는다.
     실패는 크립토 스캔 전체를 막지 않는다 — 이 시그널만 비운다.
     """
     s = (cfg.get("signal") or {}).get("leader_break") or {}
     if not s.get("enabled", True):
-        return [], []
+        return [], [], []
     params = leader_break.Params(
         top_n=int(s.get("top_n", 10)),
+        board_top=int(s.get("board_top", 5)),
         ma=int(s.get("ma", 60)),
         grace_bars=int(s.get("grace_bars", 4)),
         min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
@@ -143,12 +145,12 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         ticker = data_binance.ticker_24h(session, source)
     except Exception as e:                      # noqa: BLE001
         log(f"[binance] 24h 티커 조회 실패({data_binance._safe(e)}) — 크립토 모멘텀 눌림목/이탈 건너뜀")
-        return [], []
+        return [], [], []
     universe = set(symbols)
     top = leader_break.leaders(ticker, universe, params)
     if not top:
         log("[binance] 크립토 모멘텀 눌림목/이탈: 거래대금 하한을 넘는 종목 없음")
-        return [], []
+        return [], [], []
     recent = {}
     if state is not None:
         state.touch_leaders(sym for sym, _ in top)
@@ -226,7 +228,11 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     if spent:
         log(f"[binance] 크립토 모멘텀 눌림목/이탈 제외 {len(spent)}종 "
             f"(4h 정배열 + {params.exhausted_below}선 아래): {', '.join(spent)}")
-    return events, ongoing
+    # 알림 맨 위에 실을 순위표 — 조건(60선 이탈·제외 필터)과 무관하게 상위 그대로
+    board = [{"symbol": sym, "rank": i + 1, "gain_24h": t["change_pct"],
+              "price": t.get("last"), "turnover_24h": t.get("quote_volume")}
+             for i, (sym, t) in enumerate(top[:max(0, params.board_top)])]
+    return events, ongoing, board
 
 
 def _filter_ranked(items: list, eligible: set, signals: frozenset) -> list:
@@ -235,12 +241,12 @@ def _filter_ranked(items: list, eligible: set, signals: frozenset) -> list:
 
 
 def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
-                state=None) -> tuple[list, list]:
+                state=None) -> tuple[list, list, list]:
     """intrabar=True: 진행 중인 4h봉을 포함해 인트라바 판정이 안전한
     시그널(펌핑 터치)만 돌린다 — 종가 조건 시그널은 마감 스캔에서만."""
     c = cfg.get("crypto") or {}
     if not c.get("enabled", True):
-        return [], []
+        return [], [], []
     scfg = cfg.get("signal") or {}
     # crypto_enabled: false인 시그널은 크립토에서 빼고 ETF·주식에서만 본다
     skipped = [m.NAME for m, _ in detectors
@@ -265,10 +271,10 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
                                             workers=workers, include_live=intrabar)
         # 15m 판정이라 마감·인트라바 양쪽에서 매번 돈다. 4h 프레임은 제외 조건
         # (정배열 + 480선 아래) 판정에만 쓰고, 없으면 대상 종목만 따로 받는다.
-        leader_events, leader_ongoing = _scan_leader_break(
+        leader_events, leader_ongoing, board = _scan_leader_break(
             s, source, symbols, cfg, state, log, frames)
         if not detectors:           # 인트라바인데 4h 대상 시그널이 없을 때
-            return leader_events, leader_ongoing
+            return leader_events, leader_ongoing, board
     events, ongoing = _detect_all(frames, detectors, log)
     if intrabar:
         ongoing = []                        # 인트라바 스캔은 신규 알림만
@@ -299,7 +305,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
     events.extend(leader_events)
     ongoing.extend(leader_ongoing)
     log(f"[binance] 시그널 {len(events)}건 · 유지 중 {len(ongoing)}건")
-    return events, ongoing
+    return events, ongoing, board
 
 
 def _load_stock_tickers(cfg: dict, log=print) -> list[dict]:
@@ -393,12 +399,12 @@ def run(config_path: str, state_path: str, only: str | None = None,
     if intrabar:
         only = "crypto"                     # 인트라바는 크립토 펌핑 터치 전용
 
-    crypto_events, crypto_ongoing = [], []
+    crypto_events, crypto_ongoing, crypto_board = [], [], []
     yf_events, yf_ongoing, yf_names, yf_groups = [], [], {}, {}
     if only in (None, "crypto"):
         try:
-            crypto_events, crypto_ongoing = scan_crypto(cfg, detectors, log,
-                                                        intrabar=intrabar, state=state)
+            crypto_events, crypto_ongoing, crypto_board = scan_crypto(
+                cfg, detectors, log, intrabar=intrabar, state=state)
         except Exception as e:                      # noqa: BLE001 — 한쪽 실패가 다른 쪽을 막지 않게
             errors.append(f"crypto: {e}")
             log(f"[binance] 크립토 스캔 실패: {e}")
@@ -440,7 +446,8 @@ def run(config_path: str, state_path: str, only: str | None = None,
     hold_stock = [e for e in hold_yf if grp(e) == "stock"]
 
     msg = notify.format_events(show_crypto, show_etf, yf_names, hold_crypto, hold_etf,
-                               events_stocks=show_stock, ongoing_stocks=hold_stock)
+                               events_stocks=show_stock, ongoing_stocks=hold_stock,
+                               crypto_board=crypto_board)
     if dry_run:
         log("[dry-run] 발송 생략 — 메시지 미리보기:")
         log(msg)

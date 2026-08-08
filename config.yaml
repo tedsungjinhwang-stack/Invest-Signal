@@ -41,19 +41,6 @@ signal:
     lookback_bars: 180      # 직전저점 유효기간 — 180봉 = 30일
     grace_bars: 1
     qvwap_condition: true   # 돌파 봉 종가가 분기 앵커드 VWAP 아래여야 알림 (상승초입의 거울)
-  pump_dip:                 # 펌핑 (4h봉, 크립토 전용): 하루 내 급등 후 월간 VWAP 첫 터치
-    enabled: true
-    peak_lookback_bars: 42  # 터치 시점 기준 고점 유효기간 — 42봉 = 7일
-    pump_window_bars: 6     # 급등 속도 판정 — 고점 직전 6봉 = 하루
-    min_gain: 0.3           # 하루 내 저점→고점 상승률 하한 (0.3 = +30%)
-    touch_tolerance: 0.003  # 저가가 라인 위 0.3% 이내 접근도 터치 인정
-    grace_bars: 1
-    crypto_rank_filter:     # 펌핑은 급등 자체가 선별이라 눌림목보다 완화된 기존 기준 유지
-      enabled: true
-      volume_top: 100       # 24h 거래대금 상위 N위 이내, 또는
-      gain_top: 50          # 최근 3일 상승률 상위 N위 이내면 통과하되
-      gain_lookback_bars: 18  # 상승률 계산 구간 — 18봉 = 3일
-      min_turnover_usd: 5000000  # 24h 거래대금 $5M 미만은 무조건 제외
   pump_early:               # 펌핑초기 (4h봉, 크립토 전용): 막 불붙은 봉 — 아직 크게 안 간 종목만
     enabled: true
     rise_bars: 1            # 급등 판정 구간 — 1봉 = 4시간 (2로 올리면 8시간)

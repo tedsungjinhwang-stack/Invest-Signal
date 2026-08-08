@@ -36,9 +36,9 @@ def chart_url(symbol: str, kind: str, market: str = "US") -> str:
     return f"https://www.tradingview.com/symbols/{symbol}/"
 
 
-SIGNAL_EMOJI = {"상승초입": "🟢", "눌림목": "🔵", "펌핑": "🚀", "펌핑초기": "🌱",
+SIGNAL_EMOJI = {"상승초입": "🟢", "눌림목": "🔵", "펌핑초기": "🌱",
                 "크립토 모멘텀 눌림목/이탈": "⚡", "하락전환": "🔻"}
-SIGNAL_ORDER = ["상승초입", "눌림목", "펌핑", "펌핑초기", "크립토 모멘텀 눌림목/이탈", "하락전환"]
+SIGNAL_ORDER = ["상승초입", "눌림목", "펌핑초기", "크립토 모멘텀 눌림목/이탈", "하락전환"]
 DISPLAY_GROUP = {"MSS": "눌림목", "풀백": "눌림목"}   # MSS는 눌림목 칸에 태그로 표시
 MARKET_EMOJI = {"크립토": "🪙", "ETF": "📊", "주식": "🏛"}
 DIVIDER = "─" * 16
@@ -78,8 +78,6 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
             tags.append("🎯타점" if d["stage"] == "타점" else "대기")
         if e.signal == "downtrend_reversal" and d.get("broken_low"):
             tags.append(f"직전저점 {_fmt_price(d['broken_low'])} 이탈")
-        if e.signal == "pump_dip" and d.get("pump_gain") is not None:
-            tags.append(f"저점대비 +{d['pump_gain'] * 100:.0f}% · 월간VWAP 터치")
         if e.signal == "pump_early" and d.get("rise") is not None:
             hours = int(d.get("rise_bars", 1)) * 4
             tags.append(f"{hours}h +{d['rise'] * 100:.1f}%"
@@ -99,12 +97,33 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     return head + (" · " + " · ".join(tags) if tags else "")
 
 
+LEADER_LABEL = "크립토 모멘텀 눌림목/이탈"
+
+
+def _board_lines(board: list) -> list[str]:
+    """24h 상승률 순위표 — 조건과 무관하게 상위 몇 종을 그대로 적는다."""
+    out = ["📈 <b>24h 상승률 TOP</b>"]
+    for b in board:
+        gain = b.get("gain_24h")
+        price = b.get("price")
+        out.append(f"{b['rank']}. <a href=\"{chart_url(b['symbol'], 'crypto')}\">"
+                   f"{_short_symbol(b['symbol'], 'crypto', '')}</a>"
+                   + (f"  {_fmt_price(price)}" if price else "")
+                   + (f" · {gain * 100:+.0f}%" if gain is not None else ""))
+    return out
+
+
 def format_events(events_crypto: list, events_etf: list,
                   etf_names: dict[str, str],
                   ongoing_crypto: list = (), ongoing_etf: list = (),
-                  events_stocks: list = (), ongoing_stocks: list = ()) -> str:
+                  events_stocks: list = (), ongoing_stocks: list = (),
+                  crypto_board: list = ()) -> str:
     """텔레그램 메시지 — 시그널별 → 시장별. 신규는 상세 줄, 추적 중 종목은
-    같은 칸 아래 ↳ 한 줄로 붙는다."""
+    같은 칸 아래 ↳ 한 줄로 붙는다.
+
+    crypto_board가 있으면 ⚡칸 맨 위에 24h 상승률 순위표를 먼저 싣는다 —
+    이탈·제외 조건과 무관한 '지금 뭐가 오르고 있나' 목록이다.
+    """
     now_kst = pd.Timestamp.now(tz=KST).strftime("%m-%d %H:%M")
     lines = [f"🚨 <b>4h 시그널</b> · {now_kst} KST"]
 
@@ -117,6 +136,8 @@ def format_events(events_crypto: list, events_etf: list,
         return DISPLAY_GROUP.get(label, label)
 
     present = {label_of(e) for _, new, hold, _ in markets for e in list(new) + list(hold)}
+    if crypto_board:            # 순위표만 있고 이벤트가 없어도 칸은 만든다
+        present.add(LEADER_LABEL)
     ordered = [k for k in SIGNAL_ORDER if k in present] + \
               sorted(k for k in present if k not in SIGNAL_ORDER)
 
@@ -157,6 +178,12 @@ def format_events(events_crypto: list, events_etf: list,
                              key=lambda x: x.symbol)
             hold_sel = sorted((e for e in hold if label_of(e) == label),
                               key=lambda x: x.bar_time, reverse=True)   # 최신 순
+            board = crypto_board if (label == LEADER_LABEL and kind == "crypto") else ()
+            if not new_sel and not hold_sel and not board:
+                continue
+            if board:
+                lines.append("")
+                lines.extend(_board_lines(board))
             if not new_sel and not hold_sel:
                 continue
             lines.append("")

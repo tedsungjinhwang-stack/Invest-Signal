@@ -59,7 +59,7 @@ def test_no_fire_when_close_above_ref_ma():
 def test_no_fire_when_already_pumped():
     """한 봉에 +40% — 급등이지만 이미 크게 간 것이라 '초기'가 아니다.
 
-    이런 종목은 pump_dip이 월간 VWAP 눌림 자리에서 잡는다.
+    하루 만에 확 오른 종목은 이미 '초기'가 아니다.
     """
     df = make_df(base() + [(100.0, 140.0, 100.0, 140.0)])
     assert pump_early.detect(df, "TEST", P) == []
@@ -72,7 +72,7 @@ def test_no_fire_when_day_pump_happened_earlier():
     """되돌려졌더라도 조회 구간 안에 '하루 내 저점→고가 +30%'가 있으면 제외.
 
     누적 상승률은 +10%뿐이라 max_gain에는 안 걸리는 케이스 — 하루 급등
-    이력만으로 걸러지는지 확인한다(이런 종목은 pump_dip 담당).
+    이력만으로 걸러지는지 확인한다.
     """
     bars = (base(tail=23) + [(100.0, 132.0, 100.0, 132.0)]   # 하루 만에 +32% 급등
             + flat(18, 105.0)                                # 되돌림

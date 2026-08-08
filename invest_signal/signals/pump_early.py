@@ -1,14 +1,11 @@
 """펌핑초기 시그널 (4h봉) — 크립토 전용.
 
-기존 펌핑(pump_dip)이 이미 크게 오른 뒤 월간 VWAP까지 눌린 자리를
-잡는다면, 이건 그 앞 단계 — 아직 크게 가지 않은 종목에 막 불이 붙는
-봉을 잡는다:
+아직 크게 가지 않은 종목에 막 불이 붙는 봉을 잡는다:
   ① 최근 rise_bars(기본 1봉 = 4시간) 동안 시가 대비 종가가
      min_gain(기본 +5%) 이상 오르고
   ② 최근 lookback_bars(기본 42봉 = 7일) 안에 **하루(pump_window_bars,
      기본 6봉) 내 저점 → 고가가 max_pump_gain(기본 +30%) 이상 급등한
-     봉이 없어야** 한다 — pump_dip의 펌핑 판정과 같은 정의라,
-     이미 펌핑한 종목은 pump_dip이 눌림 자리에서 담당하고 여기선 빠진다
+     봉이 없어야** 한다 — 하루 만에 확 오른 종목은 이미 '초기'가 아니다
   ③ 같은 구간 저점 대비 종가 상승률도 max_gain(기본 +30%) 미만 —
      하루 급등은 없었어도 이미 누적으로 크게 간 종목을 거른다
   ④ 종가가 ma_ref(기본 480)선 이하 — 장기선 위로 올라선 종목은 이미
@@ -38,7 +35,7 @@ class Params:
     rise_bars: int = 1          # 급등 판정 구간 — 1봉 = 4시간 (2면 8시간)
     min_gain: float = 0.05      # 구간 시가 대비 종가 상승률 하한 (0.05 = +5%)
     lookback_bars: int = 42     # '아직 초기' 판정 구간 — 42봉 = 7일
-    pump_window_bars: int = 6   # 이미 펌핑했는지 볼 창 — 6봉 = 하루 (pump_dip과 동일)
+    pump_window_bars: int = 6   # 이미 펌핑했는지 볼 창 — 6봉 = 하루
     max_pump_gain: float = 0.30  # 하루 내 저점→고가 상승률 상한 — 이상이면 제외
     max_gain: float = 0.30      # 구간 저점 대비 종가 상승률 상한 (누적 기준)
     ma_ref: int = 480           # 이 선 이하에 캔들이 있어야 한다 (장기선)
@@ -61,8 +58,8 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     op, high, close, low = df["Open"], df["High"], df["Close"], df["Low"]
     m_ref = sma(close, params.ma_ref) if params.below_ma_condition else None
 
-    # 각 봉의 '하루(pump_window_bars봉) 내 저점 → 고가' 상승률 —
-    # pump_dip의 펌핑 판정과 같은 창(저점 구간은 판정 봉 포함)
+    # 각 봉의 '하루(pump_window_bars봉) 내 저점 → 고가' 상승률
+    # (저점 구간은 판정 봉 포함)
     roll_low = low.rolling(params.pump_window_bars + 1, min_periods=1).min()
     day_gain = high / roll_low.where(roll_low > 0) - 1
 
@@ -85,7 +82,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
 
     def had_pump(t: int) -> bool:
         """② 조회 구간 안에 하루 만에 max_pump_gain 이상 급등한 봉이 있었나
-        — 있으면 이미 펌핑한 종목이라 '초기'가 아니다(pump_dip 담당)."""
+        — 있으면 이미 펌핑한 종목이라 '초기'가 아니다."""
         w0 = max(0, t - params.lookback_bars)
         return bool((day_gain.iloc[w0:t + 1] >= params.max_pump_gain).any())
 

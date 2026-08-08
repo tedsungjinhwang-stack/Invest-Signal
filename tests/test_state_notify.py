@@ -113,16 +113,6 @@ def test_intrabar_tag_shown():
     assert "⏳진행봉" in msg
 
 
-def test_pump_section_with_gain_tag():
-    """펌핑은 🚀 칸에 크립토만 — 저점대비 상승률·주간VWAP 태그 포함."""
-    ev = SignalEvent(symbol="AKEUSDT", signal="pump_dip",
-                     bar_time=pd.Timestamp("2026-07-21 04:00", tz="UTC"),
-                     price=0.0015, detail={"label": "펌핑", "pump_gain": 2.0})
-    msg = format_events([ev], [], {})
-    assert "🚀 <b>펌핑</b>" in msg
-    assert "저점대비 +200% · 월간VWAP 터치" in msg
-    assert ">AKE</a>" in msg
-
 
 def test_pullback_stage_tags():
     """눌림목은 타점(밴드 터치)과 대기(밴드 위)를 태그로 구분한다."""
@@ -222,3 +212,38 @@ def test_hold_line_shows_leader_break_rank_and_ma_side():
     assert "↳ ETH  3,200.0 · 추적 3일차·60선 위·24h -2%" in out
     # 60선 위로 복귀한 종목도 목록에 남아 있어야 한다
     assert "ETH" in out
+
+
+def test_crypto_board_leads_the_leader_break_section():
+    """⚡칸 맨 위에 24h 상승률 순위표 — 조건 충족 종목보다 먼저 온다."""
+    board = [{"symbol": "BICOUSDT", "rank": 1, "gain_24h": 0.37, "price": 0.05101},
+             {"symbol": "TSTUSDT", "rank": 2, "gain_24h": 0.34, "price": 0.01407}]
+    ev = SignalEvent(symbol="HFTUSDT", signal="leader_break",
+                     bar_time=pd.Timestamp("2026-08-06T06:00:00Z"), price=0.0174,
+                     detail={"label": "크립토 모멘텀 눌림목/이탈", "ma": 0.0180,
+                             "ma_period": 60, "interval": "15m", "gain_24h": 0.13})
+    msg = format_events([ev], [], {}, crypto_board=board)
+    assert "📈 <b>24h 상승률 TOP</b>" in msg
+    assert "1. " in msg and "BICO" in msg and "+37%" in msg
+    # 순위표가 조건 충족 줄(•)보다 위에 있어야 한다
+    assert msg.index("24h 상승률 TOP") < msg.index("• ")
+    # 순위표 종목은 조건과 무관 — TST는 이탈하지 않았는데도 실린다
+    assert "TST" in msg
+
+
+def test_crypto_board_renders_even_without_leader_events():
+    """이탈 종목이 없어도 순위표만으로 ⚡칸이 만들어진다."""
+    board = [{"symbol": "AUSDT", "rank": 1, "gain_24h": 0.9, "price": 1.5}]
+    other = SignalEvent(symbol="X", signal="pump_early",
+                        bar_time=pd.Timestamp("2026-08-06T06:00:00Z"), price=1.0,
+                        detail={"label": "펌핑초기"})
+    msg = format_events([other], [], {}, crypto_board=board)
+    assert "⚡ <b>크립토 모멘텀 눌림목/이탈</b>" in msg
+    assert "1. " in msg and "+90%" in msg
+
+
+def test_no_board_leaves_message_unchanged():
+    ev = SignalEvent(symbol="X", signal="pump_early",
+                     bar_time=pd.Timestamp("2026-08-06T06:00:00Z"), price=1.0,
+                     detail={"label": "펌핑초기"})
+    assert "24h 상승률 TOP" not in format_events([ev], [], {})

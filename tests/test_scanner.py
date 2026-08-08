@@ -102,9 +102,9 @@ def test_filter_ranked_scopes():
     assert {(e.symbol, e.signal) for e in out} == {
         ("BIGVOL", "pullback"), ("BIGVOL", "mss"),
         ("BIGVOL", "uptrend_onset"), ("THIN", "uptrend_onset")}
-    # 펌핑은 눌림목 스코프에서 빠져 자체 기준으로만 걸러진다
-    assert "pump_dip" not in RANK_FILTER_SCOPE["pullback"]
-    assert RANK_FILTER_SCOPE["pump_dip"] == frozenset({"pump_dip"})
+    # 펌핑초기는 눌림목 스코프에서 빠져 자체 기준으로만 걸러진다
+    assert "pump_early" not in RANK_FILTER_SCOPE["pullback"]
+    assert RANK_FILTER_SCOPE["pump_early"] == frozenset({"pump_early"})
     # 상승초입은 자체(더 넓은) eligible 집합으로 거른다 — 풀백·MSS는 건드리지 않음
     out = _filter_ranked(out, {"BIGVOL", "THIN"}, RANK_FILTER_SCOPE["uptrend_onset"])
     assert ("THIN", "uptrend_onset") in {(e.symbol, e.signal) for e in out}
@@ -205,7 +205,7 @@ def test_crypto_rank_filter_min_turnover_floor():
 def test_crypto_enabled_false_drops_signal_from_crypto_only(monkeypatch):
     """crypto_enabled: false인 시그널은 크립토에서 빠지고 ETF·주식엔 남는다."""
     from invest_signal import scanner
-    from invest_signal.signals import pullback, pump_dip
+    from invest_signal.signals import pullback, pump_early
 
     seen = {}
 
@@ -215,17 +215,17 @@ def test_crypto_enabled_false_drops_signal_from_crypto_only(monkeypatch):
 
     monkeypatch.setattr(scanner, "_detect_all", fake_detect_all)
     monkeypatch.setattr(scanner, "_scan_leader_break",
-                        lambda *a, **k: ([], []))
+                        lambda *a, **k: ([], [], []))
     monkeypatch.setattr(scanner.data_binance, "resolve_source",
                         lambda *a, **k: ("fapi", ["XUSDT"]))
     monkeypatch.setattr(scanner.data_binance, "fetch_all",
                         lambda *a, **k: {"XUSDT": pd.DataFrame()})
 
-    dets = [(pullback, pullback.Params()), (pump_dip, pump_dip.Params())]
+    dets = [(pullback, pullback.Params()), (pump_early, pump_early.Params())]
     cfg = {"crypto": {"enabled": True},
            "signal": {"pullback": {"crypto_enabled": False}}}
     scanner.scan_crypto(cfg, dets, log=lambda *a: None)
-    assert seen["names"] == ["pump_dip"]        # 눌림목은 크립토에서 제외
+    assert seen["names"] == ["pump_early"]      # 눌림목은 크립토에서 제외
 
     # 같은 설정이어도 ETF·주식 경로는 그대로 눌림목을 돌린다
     assert (cfg["signal"]["pullback"]["crypto_enabled"] is False)
