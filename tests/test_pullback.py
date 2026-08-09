@@ -115,11 +115,17 @@ def test_entry_not_repeated_after_first_touch():
 
 
 def test_band_condition_off_ignores_band():
-    """band_condition=false면 ①480선 위 + ②60선 하회만 본다."""
+    """band_condition=false면 ①480선 위 + ②60선 하회만 본다.
+
+    타점은 '밴드 터치'가 정의라 밴드를 끄면 단계 구분이 사라진다 —
+    stage는 None이 되고 알림에 대기/타점 태그가 붙지 않는다.
+    """
     df = make_df(base_bars() + [(150.0, 109.0, 100.0, 105.0, 0.001)])
     assert pullback.detect(df, "TEST", P) == []            # 밴드 아래라 제외
     evs = pullback.detect(df, "TEST", Params(band_condition=False))
-    assert len(evs) == 1 and evs[0].detail["stage"] == "대기"
+    assert len(evs) == 1
+    assert evs[0].detail["stage"] is None
+    assert evs[0].dedup_key.count("|") == 2                # 단계가 키에 안 붙는다
 
 
 def test_deeper_band_needs_deeper_dip():
@@ -144,12 +150,16 @@ def test_still_active_until_band_or_ma480_breaks():
 
 
 def test_no_volume_skips_band_condition():
-    """Volume이 없으면 밴드를 계산할 수 없으므로 ①②만으로 판정한다."""
+    """Volume이 없으면 밴드를 계산할 수 없으므로 ①②만으로 판정한다.
+
+    밴드가 없으니 단계 구분도 없다 — band_condition을 끈 것과 같은 상태.
+    """
     bars = base_bars() + [(150.0, 150.0, 118.0, 120.0, 0.001)]
     df = make_df(bars).drop(columns=["Volume"])
     evs = pullback.detect(df, "TEST", P)
-    assert len(evs) == 1 and evs[0].detail["stage"] == "대기"
+    assert len(evs) == 1
     assert evs[0].detail["band"] is None
+    assert evs[0].detail["stage"] is None
 
 
 def test_params_from_config():

@@ -5,20 +5,24 @@ signal:
     enabled: true
     touch_window_bars: 60   # 240선 터치 후 60선 이탈을 기다리는 기간 — 60봉 = 10일
     grace_bars: 1           # 직전 스캔을 놓쳤을 때 소급 허용할 봉 수
-    qvwap_condition: true   # 트리거 봉 종가가 분기 앵커드 VWAP 위여야 알림 (아래면 위로 올 때까지 대기)
+    # QVWAP 조건 끔 — 240선 터치 후 60선을 이탈하는 첫 봉에서 바로 알린다
+    # (켜면 종가가 분기 앵커드 VWAP 위일 때까지 기다린다)
+    qvwap_condition: false
     crypto_rank_filter:     # 크립토 전용 — 3파 전 초입이라 눌림목보다 낮은 기준
       enabled: true
       volume_top: 200       # 24h 거래대금 상위 N위 이내, 또는
       gain_top: 100         # 최근 3일 상승률 상위 N위 이내면 통과하되
       gain_lookback_bars: 18  # 상승률 계산 구간 — 18봉 = 3일
       min_turnover_usd: 1000000  # 24h 거래대금 $1M 미만은 무조건 제외
-  pullback:                 # 눌림목 (4h봉): 480선 위 + 60선 하회 + 분기VWAP 하단밴드
+  pullback:                 # 눌림목 (4h봉): 480선 위 + 60선 하회
     enabled: true
     crypto_enabled: false   # 크립토는 눌림목 대신 크립토 모멘텀 눌림목/이탈로 본다 (ETF·주식만 유지)
     ma_entry: 60            # ② 이 선을 하회해야 함 (단기 조정)
     ma_above: 480           # ① 종가가 이 선 위여야 함 (장기 추세 유지)
     band_mult: 1.0          # ③ 하단 밴드 = 분기VWAP − mult×표준편차 (2.0이면 더 깊은 눌림만)
-    band_condition: true    # 밴드 조건 사용 — false면 ①②만 본다
+    # 밴드 조건 끔 — ①480선 위 + ②60선 하회만 본다. 타점은 '밴드 터치'가
+    # 정의라 함께 사라지고, 알림에 대기/타점 태그가 붙지 않는다.
+    band_condition: false
     grace_bars: 1
     crypto_rank_filter:     # 크립토 전용 — 눌림목+MSS 줄에 주도주 필터 (ETF·주식엔 미적용)
       # 그 시기의 주도주만 남기려면 거래량·상승률을 둘 다 요구해야 한다.
@@ -81,7 +85,7 @@ signal:
     exhausted_mas: [120, 240, 480]   # 정배열 판정 3선 (4h봉)
     exhausted_below: 480             # 4h 종가가 이 선 아래면 제외
   mss:                      # MSS (4h봉): 직전 스윙저점(좌우 6봉=24h) 하향돌파
-    # 진입 조건은 위 pullback 설정(480선 위·60선 하회·하단 밴드)을 그대로 공유하고,
+    # 진입 조건은 위 pullback 설정(480선 위·60선 하회)을 그대로 공유하고,
     # 그 위에 스윙저점 이탈이라는 프라이스 액션이 있으면 ⚠️MSS로 표기한다
     enabled: true
     # 눌림목 칸에 태그로 붙는 줄이라 눌림목을 뺀 크립토에선 같이 뺀다

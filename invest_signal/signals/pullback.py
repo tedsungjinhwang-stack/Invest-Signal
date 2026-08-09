@@ -83,7 +83,14 @@ class Gate:
         return (self.qualifies(t) and band is not None
                 and float(self.df["Low"].iloc[t]) <= band)
 
-    def stage(self, t: int) -> str:
+    def stage(self, t: int) -> str | None:
+        """대기/타점 — 밴드가 없으면(band_condition: false) 구분 자체가 없어 None.
+
+        타점은 '하단 밴드 터치'로 정의되므로 밴드를 끄면 나눌 기준이 사라진다.
+        None이면 알림에 단계 태그가 붙지 않고 dedup 키에도 들어가지 않는다.
+        """
+        if self.band_at(t) is None:
+            return None
         return STAGE_ENTRY if self.is_entry(t) else STAGE_WAIT
 
     def first_in_dip(self, t: int, pred) -> bool:
