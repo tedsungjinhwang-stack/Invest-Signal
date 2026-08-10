@@ -5,9 +5,12 @@ signal:
     enabled: true
     touch_window_bars: 60   # 240선 터치 후 60선 이탈을 기다리는 기간 — 60봉 = 10일
     grace_bars: 1           # 직전 스캔을 놓쳤을 때 소급 허용할 봉 수
-    # QVWAP 조건 끔 — 240선 터치 후 60선을 이탈하는 첫 봉에서 바로 알린다
-    # (켜면 종가가 분기 앵커드 VWAP 위일 때까지 기다린다)
+    # QVWAP 조건: 종가가 분기 앵커드 VWAP 위일 때까지 기다릴지.
+    # ETF·주식은 끄고(60선 이탈 즉시 알림), 크립토는 켠다 —
+    # 크립토는 종목이 373개라 끄면 알림이 8배로 늘어난다
+    # (373종 최근 7일: 켬 1.6건/일 · 끔 12.7건/일, 랭크 필터 통과 후).
     qvwap_condition: false
+    crypto_qvwap_condition: true
     crypto_rank_filter:     # 크립토 전용 — 3파 전 초입이라 눌림목보다 낮은 기준
       enabled: true
       volume_top: 200       # 24h 거래대금 상위 N위 이내, 또는

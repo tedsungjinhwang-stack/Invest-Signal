@@ -231,3 +231,30 @@ def test_crypto_enabled_false_drops_signal_from_crypto_only(monkeypatch):
     assert (cfg["signal"]["pullback"]["crypto_enabled"] is False)
     dets_yf = [(m, p) for m, p in dets if not getattr(m, "CRYPTO_ONLY", False)]
     assert [m.NAME for m, _ in dets_yf] == ["pullback"]
+
+
+def test_crypto_override_applies_only_to_crypto_detectors():
+    """crypto_<키> 오버라이드는 크립토 목록에만 반영되고 ETF·주식은 공용 값."""
+    from invest_signal import config as cfg_mod
+
+    cfg = {"signal": {"uptrend_onset": {"qvwap_condition": False,
+                                        "crypto_qvwap_condition": True}}}
+    crypto = dict((m.NAME, p) for m, p in cfg_mod.detectors(cfg, crypto=True))
+    yf = dict((m.NAME, p) for m, p in cfg_mod.detectors(cfg))
+    assert crypto["uptrend_onset"].qvwap_condition is True
+    assert yf["uptrend_onset"].qvwap_condition is False
+    # 오버라이드가 없으면 양쪽 다 공용 값을 쓴다
+    cfg2 = {"signal": {"uptrend_onset": {"qvwap_condition": False}}}
+    for c in (True, False):
+        d = dict((m.NAME, p) for m, p in cfg_mod.detectors(cfg2, crypto=c))
+        assert d["uptrend_onset"].qvwap_condition is False
+
+
+def test_market_value_prefers_crypto_key():
+    from invest_signal.config import market_value
+
+    s = {"x": 1, "crypto_x": 2}
+    assert market_value(s, "x", 0, crypto=True) == 2
+    assert market_value(s, "x", 0, crypto=False) == 1
+    assert market_value({}, "x", 9, crypto=True) == 9      # 둘 다 없으면 기본값
+    assert market_value({"x": 1}, "x", 0, crypto=True) == 1  # 오버라이드 없으면 공용

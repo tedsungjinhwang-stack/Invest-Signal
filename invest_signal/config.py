@@ -17,12 +17,24 @@ def load(path: str = DEFAULT_PATH) -> dict:
     return cfg
 
 
-def uptrend_params(cfg: dict) -> uptrend_onset.Params:
+def market_value(s: dict, key: str, default, crypto: bool = False):
+    """시장별로 다르게 줄 수 있는 설정값.
+
+    크립토 스캔이면 `crypto_<key>`가 있을 때 그 값을 우선 쓰고, 없으면
+    공용 값을 쓴다. ETF·주식은 항상 공용 값. 같은 시그널을 시장마다
+    다른 기준으로 돌려야 할 때 쓰는 패턴이다
+    (예: 상승초입의 QVWAP 조건은 크립토에서만 켠다).
+    """
+    base = s.get(key, default)
+    return s.get(f"crypto_{key}", base) if crypto else base
+
+
+def uptrend_params(cfg: dict, crypto: bool = False) -> uptrend_onset.Params:
     s = (cfg.get("signal") or {}).get("uptrend_onset") or {}
     return uptrend_onset.Params(
         touch_window_bars=int(s.get("touch_window_bars", 60)),
         grace_bars=int(s.get("grace_bars", 1)),
-        qvwap_condition=bool(s.get("qvwap_condition", True)),
+        qvwap_condition=bool(market_value(s, "qvwap_condition", True, crypto)),
     )
 
 
@@ -72,12 +84,16 @@ def pump_early_params(cfg: dict) -> pump_early.Params:
     )
 
 
-def detectors(cfg: dict) -> list:
-    """활성화된 시그널 모듈과 파라미터 목록."""
+def detectors(cfg: dict, crypto: bool = False) -> list:
+    """활성화된 시그널 모듈과 파라미터 목록.
+
+    crypto=True면 `crypto_<키>` 오버라이드가 있는 설정을 크립토 값으로
+    바꿔 넣는다 — 같은 시그널을 시장별로 다르게 돌리기 위한 것이다.
+    """
     s = cfg.get("signal") or {}
     out = []
     if (s.get("uptrend_onset") or {}).get("enabled", True):
-        out.append((uptrend_onset, uptrend_params(cfg)))
+        out.append((uptrend_onset, uptrend_params(cfg, crypto)))
     if (s.get("pullback") or {}).get("enabled", True):
         out.append((pullback, pullback_params(cfg)))
     if (s.get("pump_early") or {}).get("enabled", True):

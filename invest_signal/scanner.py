@@ -393,7 +393,9 @@ def _collapse(events: list) -> list:
 def run(config_path: str, state_path: str, only: str | None = None,
         dry_run: bool = False, intrabar: bool = False, log=print) -> int:
     cfg = cfg_mod.load(config_path)
-    detectors = cfg_mod.detectors(cfg)
+    # 시장별로 파라미터가 갈리는 시그널이 있어 목록을 따로 만든다
+    crypto_detectors = cfg_mod.detectors(cfg, crypto=True)
+    yf_detectors = cfg_mod.detectors(cfg)
     state = AlertState(state_path)
     errors = []
     if intrabar:
@@ -404,13 +406,13 @@ def run(config_path: str, state_path: str, only: str | None = None,
     if only in (None, "crypto"):
         try:
             crypto_events, crypto_ongoing, crypto_board = scan_crypto(
-                cfg, detectors, log, intrabar=intrabar, state=state)
+                cfg, crypto_detectors, log, intrabar=intrabar, state=state)
         except Exception as e:                      # noqa: BLE001 — 한쪽 실패가 다른 쪽을 막지 않게
             errors.append(f"crypto: {e}")
             log(f"[binance] 크립토 스캔 실패: {e}")
     if only in (None, "etf"):
         try:
-            yf_events, yf_ongoing, yf_names, yf_groups = scan_yfinance(cfg, detectors, log)
+            yf_events, yf_ongoing, yf_names, yf_groups = scan_yfinance(cfg, yf_detectors, log)
         except Exception as e:                      # noqa: BLE001
             errors.append(f"etf: {e}")
             log(f"[etf] ETF·주식 스캔 실패: {e}")
