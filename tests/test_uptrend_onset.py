@@ -162,6 +162,45 @@ def test_ride_above_ma240_does_not_refresh_touch():
     assert evs[0].detail["touch_time"] == df.index[t_idx].isoformat()
 
 
+def rebound_after_decline(rise_bars=120):
+    """하락 뒤 반등 레그 — MA120은 MA240 위로 올라오지만 MA240 < MA480은 유지.
+
+    120선을 역배열 판정에 넣느냐 마느냐가 갈리는 유일한 구간이라
+    두 설정의 차이를 재는 데 쓴다.
+    """
+    closes, highs = base_decline()
+    for _ in range(rise_bars):
+        closes.append(closes[-1] + 1.0)
+        highs.append(closes[-1])
+    t = len(closes)
+    ma240 = float(np.mean(closes[t - 240:t]))
+    closes.append(ma240 - 5.0)              # 240선을 걸친 눌림 봉 (저가<240선<고가)
+    highs.append(ma240 + 5.0)
+    add_drop(closes, highs, closes[-1] - 1.0)   # 60선 아래 마감 → 트리거
+    return make_df(closes, highs)
+
+
+def test_ma_align_two_lines_admits_what_three_lines_reject():
+    """기본 (240,480)은 반등으로 120선이 뒤집힌 자리도 잡지만
+    (120,240,480)은 역배열이 깨졌다고 보고 거른다."""
+    df = rebound_after_decline()
+    c = df["Close"]
+    ma = {k: float(c.rolling(k).mean().iloc[-1]) for k in (120, 240, 480)}
+    assert ma[120] > ma[240] < ma[480]          # 전제: 120선만 뒤집힌 상태
+    assert len(uptrend_onset.detect(df, "TEST", Params(ma_align=(240, 480)))) == 1
+    assert uptrend_onset.detect(df, "TEST", Params(ma_align=(120, 240, 480))) == []
+
+
+def test_ma_align_three_lines_still_fires_on_full_bearish():
+    """선을 3개로 되돌려도 완전 역배열 구간에서는 그대로 발화한다."""
+    closes, highs = base_decline()
+    add_touch(closes, highs)
+    add_drop(closes, highs)
+    df = make_df(closes, highs)
+    evs = uptrend_onset.detect(df, "TEST", Params(ma_align=(120, 240, 480)))
+    assert len(evs) == 1 and evs[0].bar_time == df.index[-1]
+
+
 def test_qvwap_condition_gates_signal():
     """트리거 봉 종가가 분기 VWAP 위여야 발화 — 아래면 대기."""
     # 520봉(≈87일) — 2025-01-01 시작이라 전 구간이 1분기 안

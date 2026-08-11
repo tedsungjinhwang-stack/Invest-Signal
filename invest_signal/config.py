@@ -34,6 +34,7 @@ def uptrend_params(cfg: dict, crypto: bool = False) -> uptrend_onset.Params:
     return uptrend_onset.Params(
         touch_window_bars=int(s.get("touch_window_bars", 60)),
         grace_bars=int(s.get("grace_bars", 1)),
+        ma_align=tuple(s.get("ma_align", (240, 480))),
         qvwap_condition=bool(market_value(s, "qvwap_condition", True, crypto)),
     )
 

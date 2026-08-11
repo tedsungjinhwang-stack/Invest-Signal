@@ -1,7 +1,7 @@
 """상승초입 시그널 (4h봉).
 
 조건:
-  ① 120·240·480 이동평균이 역배열(MA120 < MA240 < MA480)인 상태에서
+  ① ma_align 이동평균이 역배열(기본 MA240 < MA480)인 상태에서
   ② 캔들 고가가 240선에 닿음(터치)
   ③ 터치 후 touch_window_bars(기본 60봉 = 10일) 이내에
   ④ 종가가 60선 아래이면서 분기 앵커드 VWAP(QVWAP) "위"에 있는
@@ -29,7 +29,7 @@ INTRABAR_OK = True   # 진행봉 현재가를 잠정 종가로 판정 — 알림
 @dataclass(frozen=True)
 class Params:
     ma_entry: int = 60          # 이탈 판정 기준선
-    ma_align: tuple = (120, 240, 480)   # 역배열 판정 3선
+    ma_align: tuple = (240, 480)        # 역배열 판정선 (짧은 것부터)
     ma_touch: int = 240         # 터치 판정 기준선
     touch_window_bars: int = 60  # 터치 유효기간(봉 수). 4h×60 = 10일
     grace_bars: int = 1         # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
@@ -50,22 +50,32 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
 
     close, high, low = df["Close"], df["High"], df["Low"]
     m_entry = sma(close, params.ma_entry)
-    a1, a2, a3 = (sma(close, k) for k in params.ma_align)
+    aligns = [sma(close, k) for k in params.ma_align]   # 선 개수는 설정에 따라 2~N
     m_touch = sma(close, params.ma_touch)
     qv = quarterly_vwap(df)
 
     last = n - 1
 
-    def is_touch(i: int) -> bool:
-        """역배열 + 240선이 캔들 범위 안 (아래에서 윗꼬리로 닿는 터치).
+    def bearish(i: int) -> bool:
+        """ma_align 선들이 짧은 것부터 오름차순 — 역배열.
 
-        고가만 보면 캔들 전체가 240선 위로 올라탄 봉도 매봉 '터치'가 되어
-        터치 시점이 계속 갱신된다 — 저가가 240선 이하인지도 본다.
+        선 개수는 설정에 따라 다르다(기본 240·480 두 선). MA를 못 구하는
+        구간은 판정하지 않는다.
         """
-        if pd.isna(a3.iloc[i]) or pd.isna(m_touch.iloc[i]):
+        vals = [m.iloc[i] for m in aligns]
+        if any(pd.isna(v) for v in vals):
             return False
-        return (a1.iloc[i] < a2.iloc[i] < a3.iloc[i]
-                and high.iloc[i] >= m_touch.iloc[i] >= low.iloc[i])
+        return all(vals[j] < vals[j + 1] for j in range(len(vals) - 1))
+
+    def is_touch(i: int) -> bool:
+        """역배열 + 터치선이 캔들 범위 안.
+
+        고가만 보면 캔들 전체가 터치선 위로 올라탄 봉도 매봉 '터치'가 되어
+        터치 시점이 계속 갱신된다 — 저가가 터치선 이하인지도 본다.
+        """
+        if pd.isna(m_touch.iloc[i]):
+            return False
+        return bearish(i) and high.iloc[i] >= m_touch.iloc[i] >= low.iloc[i]
 
     def below_entry(i: int) -> bool:
         return not pd.isna(m_entry.iloc[i]) and close.iloc[i] < m_entry.iloc[i]
@@ -86,8 +96,10 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     for t in range(max(need, last - params.grace_bars), last + 1):
         if not is_trigger_state(t):
             continue
-        # 240선이 480선 위면 이미 상승 국면 — 역배열 반전을 잡는 시그널이 아니다
-        if not pd.isna(a3.iloc[t]) and a2.iloc[t] > a3.iloc[t]:
+        # 가장 긴 두 선이 뒤집혔으면(짧은 쪽이 위) 이미 상승 국면 —
+        # 역배열 반전을 잡는 시그널이라 대상이 아니다
+        long2, long1 = aligns[-2].iloc[t], aligns[-1].iloc[t]
+        if not pd.isna(long1) and not pd.isna(long2) and long2 > long1:
             continue
         touch_idx = None        # t 직전 touch_window 안에서 가장 최근 터치
         for i in range(t - 1, max(need - 1, t - params.touch_window_bars) - 1, -1):

@@ -3,6 +3,7 @@
 signal:
   uptrend_onset:            # 상승초입 (4h봉): 역배열 + 240터치 → 60선 이탈
     enabled: true
+    ma_align: [240, 480]    # 역배열 판정선 (짧은 것부터). 120을 넣으면 더 엄격해진다
     touch_window_bars: 60   # 240선 터치 후 60선 이탈을 기다리는 기간 — 60봉 = 10일
     grace_bars: 1           # 직전 스캔을 놓쳤을 때 소급 허용할 봉 수
     # QVWAP 조건: 종가가 분기 앵커드 VWAP 위일 때까지 기다릴지.
