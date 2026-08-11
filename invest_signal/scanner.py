@@ -24,14 +24,12 @@ CHOCH_EVICTS = {"pullback"}     # CHoCH 발생 시 리스트에서 걷어낼 셋
 
 # 크립토 랭크 필터 적용 범위 — signal.<키>.crypto_rank_filter 설정별로 걸러낼
 # 시그널 집합. 눌림목 칸은 진입 게이트를 공유하는 MSS 줄까지 함께 거르고,
-# 상승초입·펌핑초기는 성격이 달라 각자 기준을 쓴다.
+# 상승초입은 성격이 달라 자체 기준을 쓴다.
 RANK_FILTER_SCOPE = {
     "pullback": frozenset({"pullback", "mss"}),
     "uptrend_onset": frozenset({"uptrend_onset"}),
-    "pump_early": frozenset({"pump_early"}),
 }
-RANK_FILTER_LABEL = {"pullback": "눌림목·MSS", "uptrend_onset": "상승초입",
-                     "pump_early": "펌핑초기"}
+RANK_FILTER_LABEL = {"pullback": "눌림목·MSS", "uptrend_onset": "상승초입"}
 
 
 def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[list, list]:
@@ -243,7 +241,7 @@ def _filter_ranked(items: list, eligible: set, signals: frozenset) -> list:
 def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
                 state=None) -> tuple[list, list, list]:
     """intrabar=True: 진행 중인 4h봉을 포함해 인트라바 판정이 안전한
-    시그널(펌핑 터치)만 돌린다 — 종가 조건 시그널은 마감 스캔에서만."""
+    시그널(INTRABAR_OK)만 돌린다 — 그 외는 마감 스캔에서만."""
     c = cfg.get("crypto") or {}
     if not c.get("enabled", True):
         return [], [], []
@@ -374,7 +372,7 @@ def scan_yfinance(cfg: dict, detectors, log=print) -> tuple[list, list, dict, di
     log(f"[yfinance] ETF·주식 {len(tickers)}종 스캔 시작")
     frames = data_etf.fetch_all(tickers, log=log)
     dets = [(m, p) for m, p in detectors
-            if not getattr(m, "CRYPTO_ONLY", False)]   # 펌핑 등 크립토 전용 제외
+            if not getattr(m, "CRYPTO_ONLY", False)]   # 크립토 전용 시그널 제외
     events, ongoing = _detect_all(frames, dets, log, show_choch=True)
     log(f"[yfinance] 시그널 {len(events)}건 · 유지 중 {len(ongoing)}건")
     return events, ongoing, names, groups
@@ -399,7 +397,7 @@ def run(config_path: str, state_path: str, only: str | None = None,
     state = AlertState(state_path)
     errors = []
     if intrabar:
-        only = "crypto"                     # 인트라바는 크립토 펌핑 터치 전용
+        only = "crypto"                     # 인트라바는 크립토 전용
 
     crypto_events, crypto_ongoing, crypto_board = [], [], []
     yf_events, yf_ongoing, yf_names, yf_groups = [], [], {}, {}

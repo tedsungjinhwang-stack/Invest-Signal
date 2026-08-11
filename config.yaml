@@ -50,23 +50,6 @@ signal:
     lookback_bars: 180      # 직전저점 유효기간 — 180봉 = 30일
     grace_bars: 1
     qvwap_condition: true   # 돌파 봉 종가가 분기 앵커드 VWAP 아래여야 알림 (상승초입의 거울)
-  pump_early:               # 펌핑초기 (4h봉, 크립토 전용): 막 불붙은 봉 — 아직 크게 안 간 종목만
-    enabled: true
-    rise_bars: 1            # 급등 판정 구간 — 1봉 = 4시간 (2로 올리면 8시간)
-    min_gain: 0.05          # 구간 시가 대비 종가 상승률 하한 (0.05 = +5%)
-    lookback_bars: 42       # '아직 초기' 판정 구간 — 42봉 = 7일
-    pump_window_bars: 6     # 이미 펌핑했는지 볼 창 — 6봉 = 하루 (펌핑 시그널과 동일 정의)
-    max_pump_gain: 0.30     # 위 구간 안에 '하루 내 저점→고가 +30% 이상' 봉이 있으면 제외
-    max_gain: 0.30          # 누적 기준 — 42봉 저점 대비 종가가 이 이상이면 제외
-    ma_ref: 480             # 이 선 이하에 캔들이 있어야 함 (480봉 미만 신규 상장은 자동 제외)
-    below_ma_condition: true  # 종가 ≤ 480선 요구 — false면 선 위/아래 무관
-    grace_bars: 1
-    crypto_rank_filter:     # 전용 기준 — 5% 급등은 흔해서 자체 필터로 알림량을 조절한다
-      enabled: true
-      volume_top: 150       # 24h 거래대금 상위 N위 이내, 또는
-      gain_top: 100         # 최근 3일 상승률 상위 N위 이내면 통과하되
-      gain_lookback_bars: 18  # 상승률 계산 구간 — 18봉 = 3일
-      min_turnover_usd: 3000000  # 24h 거래대금 $3M 미만은 무조건 제외
   leader_break:             # 크립토 모멘텀 눌림목/이탈 (15m봉, 크립토 선물 전용)
     # 24h 상승률 상위 top_n종이 15분봉 ma선을 하향 이탈하는 첫 봉에서 알림.
     # 대상 선정은 바이낸스 24hr 티커(전 종목 1회 요청)라 캔들 역산과 달리

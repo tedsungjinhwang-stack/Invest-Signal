@@ -169,7 +169,7 @@ def parse_klines(rows: list, now_ms: int | None = None,
     """kline 배열 → OHLCV DataFrame(UTC 인덱스).
 
     기본은 진행 중인 마지막 봉을 버린다(마감 확정 봉만 판정).
-    include_live=True면 진행 중 봉도 포함 — 펌핑 인트라바 터치 판정용.
+    include_live=True면 진행 중 봉도 포함 — 인트라바 판정용.
     """
     if now_ms is None:
         now_ms = int(time.time() * 1000)

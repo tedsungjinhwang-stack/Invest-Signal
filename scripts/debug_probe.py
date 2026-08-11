@@ -1,7 +1,7 @@
 """심볼 진단 프로브 — 러너에서 실데이터로 특정 코인의 시그널 판정을 재현.
 
 PROBE_SYMBOLS 환경변수(쉼표 구분)의 각 심볼에 대해 최근 봉들의 OHLC와
-월간/분기 VWAP, 펌핑 시그널 재현 결과를 출력한다. 알림이 왜 왔는지/안
+월간/분기 VWAP, 4h 시그널 재현 결과를 출력한다. 알림이 왜 왔는지/안
 왔는지 검증할 때 .github/workflows/debug-probe.yml의 심볼을 바꿔 푸시.
 """
 
@@ -14,7 +14,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import requests
 
 from invest_signal import data_binance, indicators
-from invest_signal.signals import pullback, pump_dip
+from invest_signal.signals import pullback, uptrend_onset
+
+PROBES = (uptrend_onset, pullback)   # 4h 종가 시그널 — 모듈을 늘리면 그대로 재현된다
 
 symbols = [s.strip().upper() for s in
            os.environ.get("PROBE_SYMBOLS", "BTCUSDT").split(",") if s.strip()]
@@ -44,17 +46,11 @@ with requests.Session() as sess:
                   f" | 120 {m120.iloc[i]:.6g} 240 {m240.iloc[i]:.6g}"
                   f" 480 {m480.iloc[i]:.6g}")
         closed = df.iloc[:-1]                       # 시그널 재현은 마감봉 기준
-        evs = pump_dip.detect(closed, sym,
-                              dataclasses.replace(pump_dip.Params(), grace_bars=12))
-        if not evs:
-            print("  pump_dip: 최근 12봉 내 발화 없음")
-        for e in evs:
-            kst = e.bar_time.tz_convert("Asia/Seoul").strftime("%m-%d %H시")
-            print(f"  pump_dip 발화: {kst} KST · {e.detail}")
-        evs = pullback.detect(closed, sym,
-                              dataclasses.replace(pullback.Params(), grace_bars=12))
-        if not evs:
-            print("  pullback: 최근 12봉 내 발화 없음")
-        for e in evs:
-            kst = e.bar_time.tz_convert("Asia/Seoul").strftime("%m-%d %H시")
-            print(f"  pullback 발화: {kst} KST · {e.detail}")
+        for mod in PROBES:
+            evs = mod.detect(closed, sym,
+                             dataclasses.replace(mod.Params(), grace_bars=12))
+            if not evs:
+                print(f"  {mod.NAME}: 최근 12봉 내 발화 없음")
+            for e in evs:
+                kst = e.bar_time.tz_convert("Asia/Seoul").strftime("%m-%d %H시")
+                print(f"  {mod.NAME} 발화: {kst} KST · {e.detail}")

@@ -26,7 +26,7 @@ def test_parse_klines_drops_in_progress_bar():
     df2 = parse_klines(rows, now_ms=t0 + 8 * H)   # 둘 다 마감
     assert len(df2) == 2 and df2["Volume"].iloc[1] == 200
 
-    # include_live=True면 진행 중 봉도 포함 (인트라바 펌핑 터치 판정용)
+    # include_live=True면 진행 중 봉도 포함 (인트라바 판정용)
     df3 = parse_klines(rows, now_ms=now, include_live=True)
     assert len(df3) == 2
 
