@@ -221,7 +221,7 @@ def test_crypto_board_leads_the_leader_break_section():
     ev = SignalEvent(symbol="HFTUSDT", signal="leader_break",
                      bar_time=pd.Timestamp("2026-08-06T06:00:00Z"), price=0.0174,
                      detail={"label": "크립토 모멘텀 눌림목/이탈", "ma": 0.0180,
-                             "ma_period": 60, "interval": "15m", "gain_24h": 0.13})
+                             "ma_period": 20, "interval": "15m", "gain_24h": 0.13})
     msg = format_events([ev], [], {}, crypto_board=board)
     assert "📈 <b>24h 상승률 TOP</b>" in msg
     assert "1. " in msg and "BICO" in msg and "+37%" in msg

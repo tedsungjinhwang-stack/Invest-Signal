@@ -30,7 +30,7 @@ def test_fires_on_first_close_below_ma():
     ev = evs[0]
     assert ev.signal == "leader_break"
     assert ev.bar_time == df.index[-1]
-    assert ev.detail["ma_period"] == 60 and ev.detail["interval"] == "15m"
+    assert ev.detail["ma_period"] == P.ma and ev.detail["interval"] == "15m"
     assert ev.price < ev.detail["ma"]
 
 
@@ -72,7 +72,7 @@ def test_grace_limits_how_far_back_it_looks():
 
 
 def test_insufficient_data_returns_empty():
-    assert leader_break.detect(make_df(rising(bars=30)), "TESTUSDT", P) == []
+    assert leader_break.detect(make_df(rising(bars=P.ma - 5)), "TESTUSDT", P) == []
 
 
 def test_leaders_ranks_by_gain_within_universe_and_liquidity():
@@ -149,7 +149,7 @@ def test_tracking_reports_state_on_both_sides_of_the_ma():
     above = leader_break.tracking(make_df(rising()), P)
     assert above["above_ma"] is True
     assert above["last_price"] > above["ma"]
-    assert above["ma_period"] == 60 and above["interval"] == "15m"
+    assert above["ma_period"] == P.ma and above["interval"] == "15m"
 
     closes = rising()
     closes.append(closes[-1] - 200)          # 60선 아래로 이탈
@@ -159,7 +159,9 @@ def test_tracking_reports_state_on_both_sides_of_the_ma():
 
 
 def test_tracking_needs_enough_bars():
-    assert leader_break.tracking(make_df(rising(bars=30)), P) is None
+    """ma선을 못 구할 만큼 봉이 적으면 스냅샷을 만들지 않는다."""
+    assert leader_break.tracking(make_df(rising(bars=P.ma - 5)), P) is None
+    assert leader_break.tracking(make_df(rising(bars=P.ma + 5)), P) is not None
 
 
 def _df4h(closes):

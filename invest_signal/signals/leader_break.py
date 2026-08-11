@@ -1,15 +1,15 @@
 """크립토 모멘텀 눌림목/이탈 시그널 (15m봉) — 크립토 선물 전용.
 
-24시간 상승률 **상위 top_n종**만 대상으로, 15분봉 종가가 ma(기본 60)선을
+24시간 상승률 **상위 top_n종**만 대상으로, 15분봉 종가가 ma(기본 20)선을
 **하향 이탈하는 첫 봉**에서 알린다. 하루 사이 가장 많이 오른 종목들이
 단기 추세선을 깨는 자리 — 주도주의 모멘텀이 꺾이는 지점을 잡는다.
 
 다른 시그널과 두 가지가 다르다:
-  · 4h봉이 아니라 **15m봉**으로 판정한다 (60봉 = 15시간).
+  · 4h봉이 아니라 **15m봉**으로 판정한다 (20봉 = 5시간).
   · 종목 선정이 횡단면 순위라 스캐너가 대상 5종을 먼저 고른 뒤
     이 모듈의 detect를 종목별로 부른다.
 
-'첫 봉'만 알리므로 60선 아래에 머무는 동안 반복 알림은 없다. 60선 위로
+'첫 봉'만 알리므로 선 아래에 머무는 동안 반복 알림은 없다. 선 위로
 복귀했다가 다시 깨면 새 이탈로 다시 알린다.
 """
 
@@ -24,7 +24,7 @@ NAME = "leader_break"
 LABEL = "크립토 모멘텀 눌림목/이탈"
 CRYPTO_ONLY = True      # ETF·주식 스캔에서는 돌리지 않는다
 INTERVAL = "15m"
-KLINE_LIMIT = 200       # ma(60) + grace + 여유
+KLINE_LIMIT = 200       # ma + grace + 여유 (ma를 키워도 넉넉하도록)
 TREND_INTERVAL = "4h"   # 아래 exhausted() 판정용 — 4h 프레임이 없을 때만 따로 받는다
 TREND_LIMIT = 600       # MA480 성립(480봉) + 여유
 
@@ -33,7 +33,7 @@ TREND_LIMIT = 600       # MA480 성립(480봉) + 여유
 class Params:
     top_n: int = 10             # 24h 상승률 상위 몇 종을 볼지
     board_top: int = 5          # 알림 맨 위에 조건 없이 적어줄 상위 종목 수
-    ma: int = 60                # 15m봉 SMA 기간 (60봉 = 15시간)
+    ma: int = 20                # 15m봉 SMA 기간 (20봉 = 5시간)
     grace_bars: int = 4         # 소급 판정 봉 수 — 15m×4 = 1시간(스캔 주기)
     min_turnover_usd: float = 1_000_000   # 24h 거래대금 하한(유동성)
     watch_days: int = 7         # 상위권에서 밀려난 뒤에도 계속 볼 기간
@@ -100,7 +100,7 @@ def tracking(df: pd.DataFrame, params: Params = Params()) -> dict | None:
     """현재 상태 스냅샷 — 종가가 ma선 위인지 아래인지.
 
     감시 창(watch_days) 안의 종목은 이탈했든 안 했든 이 상태를 '유지 중'
-    목록에 계속 표시한다. 60선 위로 복귀해도 목록에서 빼지 않는다 —
+    목록에 계속 표시한다. 선 위로 복귀해도 목록에서 빼지 않는다 —
     한 번 상위권에 들었으면 창이 끝날 때까지 지켜보자는 취지다.
     데이터가 모자라 ma선을 못 구하면 None.
     """
@@ -116,7 +116,7 @@ def tracking(df: pd.DataFrame, params: Params = Params()) -> dict | None:
 
 
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
-    """마감된 15m OHLC(오름차순, UTC 인덱스)에서 60선 하향 이탈을 찾는다.
+    """마감된 15m OHLC(오름차순, UTC 인덱스)에서 ma선 하향 이탈을 찾는다.
 
     마지막 grace_bars+1개 봉을 각각 후보로 본다 — 스캔이 1시간 간격이라
     그 사이에 지나간 봉에서 발생한 이탈도 소급해 잡는다.
