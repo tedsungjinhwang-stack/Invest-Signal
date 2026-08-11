@@ -251,12 +251,14 @@ def test_crypto_override_applies_only_to_crypto_detectors():
 
 
 def test_uptrend_ma_align_read_from_config():
-    """ma_align은 설정에서 읽고, 없으면 기본 (240, 480)."""
+    """ma_align·ma_entry는 설정에서 읽고, 없으면 기본 (120,240,480)/20."""
     from invest_signal import config as cfg_mod
 
-    p = cfg_mod.uptrend_params({"signal": {"uptrend_onset": {"ma_align": [120, 240, 480]}}})
-    assert p.ma_align == (120, 240, 480)
-    assert cfg_mod.uptrend_params({}).ma_align == (240, 480)
+    p = cfg_mod.uptrend_params(
+        {"signal": {"uptrend_onset": {"ma_align": [240, 480], "ma_entry": 60}}})
+    assert p.ma_align == (240, 480) and p.ma_entry == 60
+    d = cfg_mod.uptrend_params({})
+    assert d.ma_align == (120, 240, 480) and d.ma_entry == 20
 
 
 def test_market_value_prefers_crypto_key():

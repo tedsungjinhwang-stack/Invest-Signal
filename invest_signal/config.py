@@ -32,9 +32,10 @@ def market_value(s: dict, key: str, default, crypto: bool = False):
 def uptrend_params(cfg: dict, crypto: bool = False) -> uptrend_onset.Params:
     s = (cfg.get("signal") or {}).get("uptrend_onset") or {}
     return uptrend_onset.Params(
+        ma_entry=int(s.get("ma_entry", 20)),
         touch_window_bars=int(s.get("touch_window_bars", 60)),
         grace_bars=int(s.get("grace_bars", 1)),
-        ma_align=tuple(s.get("ma_align", (240, 480))),
+        ma_align=tuple(s.get("ma_align", (120, 240, 480))),
         qvwap_condition=bool(market_value(s, "qvwap_condition", True, crypto)),
     )
 

@@ -23,7 +23,7 @@ def make_df(closes, highs, volumes=None, start="2025-01-01"):
 
 
 def base_decline(bars=DECLINE):
-    """400→100 선형 하락 — 끝에서 120<240<480 역배열, 종가는 60선 아래."""
+    """400→100 선형 하락 — 끝에서 120<240<480 역배열, 종가는 모든 MA 아래."""
     closes = list(np.linspace(400.0, 100.0, bars))
     highs = closes.copy()
     return closes, highs
@@ -39,7 +39,7 @@ def add_touch(closes, highs, spike_to=None):
 
 
 def add_sideways(closes, highs, bars, level=None):
-    """60선 위·240선 아래에서 옆으로 기는 구간(터치 없음)."""
+    """이탈선 위·240선 아래에서 옆으로 기는 구간(터치 없음)."""
     level = level if level is not None else closes[-1] + 20.0
     for i in range(bars):
         closes.append(level + 0.01 * i)
@@ -52,10 +52,10 @@ def add_drop(closes, highs, price=None):
     highs.append(price)
 
 
-def test_fires_on_first_close_below_ma60_after_touch():
+def test_fires_on_first_close_below_entry_ma_after_touch():
     closes, highs = base_decline()
     add_touch(closes, highs)
-    add_drop(closes, highs)                      # 하락 지속 → 종가 < 60선
+    add_drop(closes, highs)                      # 하락 지속 → 종가 < 이탈선
     df = make_df(closes, highs)
     evs = uptrend_onset.detect(df, "TEST", P)
     assert len(evs) == 1
@@ -67,7 +67,7 @@ def test_fires_on_first_close_below_ma60_after_touch():
 
 def test_no_touch_no_signal():
     closes, highs = base_decline()
-    df = make_df(closes, highs)                  # 종가는 늘 60선 아래지만 터치가 없음
+    df = make_df(closes, highs)                  # 종가는 늘 이탈선 아래지만 터치가 없음
     assert uptrend_onset.detect(df, "TEST", P) == []
 
 
@@ -75,12 +75,12 @@ def test_touch_without_bearish_alignment_no_signal():
     """상승장(정배열)에서는 고가가 240선 위여도 시그널이 없어야 한다."""
     closes = list(np.linspace(100.0, 400.0, DECLINE))   # 상승 → 정배열
     highs = closes.copy()
-    closes.append(closes[-1] * 0.8)              # 급락 → 종가 < 60선
+    closes.append(closes[-1] * 0.8)              # 급락 → 종가 < 이탈선
     highs.append(closes[-1] * 1.3)               # 고가는 240선보다 훨씬 위
     df = make_df(closes, highs)
-    m60 = df["Close"].rolling(60).mean().iloc[-1]
+    entry = df["Close"].rolling(P.ma_entry).mean().iloc[-1]
     m240 = df["Close"].rolling(240).mean().iloc[-1]
-    assert df["Close"].iloc[-1] < m60 and df["High"].iloc[-1] >= m240   # 전제 확인
+    assert df["Close"].iloc[-1] < entry and df["High"].iloc[-1] >= m240   # 전제 확인
     assert uptrend_onset.detect(df, "TEST", P) == []
 
 
@@ -117,11 +117,11 @@ def test_touch_window_boundary_exact():
 
 
 def test_rearm_on_new_touch_after_fire():
-    """발화 → 60선 위 복귀 → 새 240 터치 → 다시 이탈하면 재발화."""
+    """발화 → 이탈선 위 복귀 → 새 240 터치 → 다시 이탈하면 재발화."""
     closes, highs = base_decline()
     add_touch(closes, highs)
     add_drop(closes, highs)                      # 1차 발화 봉
-    add_sideways(closes, highs, bars=5)          # 60선 위로 복귀
+    add_sideways(closes, highs, bars=5)          # 이탈선 위로 복귀
     add_touch(closes, highs)                     # 새 터치
     add_drop(closes, highs, 90.0)                # 2차 이탈
     df = make_df(closes, highs)
@@ -139,7 +139,7 @@ def test_missed_bar_trigger_found_even_if_it_touches():
     closes.append(closes[-1] - 5)
     ma240 = float(np.mean(closes[t - 239:t + 1]))
     highs.append(ma240 + 1.0)
-    add_sideways(closes, highs, bars=1)          # 다음 봉은 60선 위 복귀
+    add_sideways(closes, highs, bars=1)          # 다음 봉은 이탈선 위 복귀
     df = make_df(closes, highs)
     evs = uptrend_onset.detect(df, "TEST", Params(grace_bars=1))
     assert len(evs) == 1 and evs[0].bar_time == df.index[-2]
@@ -155,7 +155,7 @@ def test_ride_above_ma240_does_not_refresh_touch():
     for _ in range(8):                        # 240선 위 올라탄 봉들 — 터치 아님
         closes.append(m240 + 20.0)
         highs.append(m240 + 25.0)
-    add_drop(closes, highs, 110.0)            # 60선 아래 붕괴 → 발화
+    add_drop(closes, highs, 110.0)            # 이탈선 아래 붕괴 → 발화
     df = make_df(closes, highs)
     evs = uptrend_onset.detect(df, "TEST", P)
     assert len(evs) == 1
@@ -176,13 +176,13 @@ def rebound_after_decline(rise_bars=120):
     ma240 = float(np.mean(closes[t - 240:t]))
     closes.append(ma240 - 5.0)              # 240선을 걸친 눌림 봉 (저가<240선<고가)
     highs.append(ma240 + 5.0)
-    add_drop(closes, highs, closes[-1] - 1.0)   # 60선 아래 마감 → 트리거
+    add_drop(closes, highs, closes[-1] - 1.0)   # 이탈선 아래 마감 → 트리거
     return make_df(closes, highs)
 
 
 def test_ma_align_two_lines_admits_what_three_lines_reject():
-    """기본 (240,480)은 반등으로 120선이 뒤집힌 자리도 잡지만
-    (120,240,480)은 역배열이 깨졌다고 보고 거른다."""
+    """(240,480)은 반등으로 120선이 뒤집힌 자리도 잡지만
+    기본값 (120,240,480)은 역배열이 깨졌다고 보고 거른다."""
     df = rebound_after_decline()
     c = df["Close"]
     ma = {k: float(c.rolling(k).mean().iloc[-1]) for k in (120, 240, 480)}
@@ -192,7 +192,7 @@ def test_ma_align_two_lines_admits_what_three_lines_reject():
 
 
 def test_ma_align_three_lines_still_fires_on_full_bearish():
-    """선을 3개로 되돌려도 완전 역배열 구간에서는 그대로 발화한다."""
+    """기본값(3선)은 완전 역배열 구간에서 그대로 발화한다."""
     closes, highs = base_decline()
     add_touch(closes, highs)
     add_drop(closes, highs)
@@ -203,33 +203,38 @@ def test_ma_align_three_lines_still_fires_on_full_bearish():
 
 def test_qvwap_condition_gates_signal():
     """트리거 봉 종가가 분기 VWAP 위여야 발화 — 아래면 대기."""
-    # 520봉(≈87일) — 2025-01-01 시작이라 전 구간이 1분기 안
-    closes, highs = base_decline(bars=520)
+    # 522봉(≈87일) — 2025-01-01 시작이라 전 구간이 1분기 안 (분기 리셋 없음)
+    dec = 495
+    closes, highs = base_decline(bars=dec)
+    add_sideways(closes, highs, bars=25, level=120.0)   # 이탈선(MA20)을 ~120으로
     add_touch(closes, highs)
-    # 트리거 후보: 직전 저점(100)보다 위지만 60선(≈116)보다는 아래로 마감
+    # 트리거 후보: 직전 저점(100)보다 위지만 20선(≈120)보다는 아래로 마감
     add_drop(closes, highs, 110.0)
-    # 균등 거래량 → QVWAP ≈ 분기 전체 평균(≈250) » 종가 110 → 아직 QVWAP 아래 → 대기
-    vols_eq = [1.0] * len(closes)
-    df_below = make_df(closes, highs, volumes=vols_eq)
+    n = len(closes)
+    # 평평한 120 구간에 거래량 몰빵 → QVWAP(≈121) > 종가 110 → 아직 아래 → 대기
+    vols_high = [1.0] * n
+    for i in range(dec, n):
+        vols_high[i] = 5000.0
+    df_below = make_df(closes, highs, volumes=vols_high)
     assert uptrend_onset.detect(df_below, "TEST", Params(qvwap_condition=True)) == []
-    # 같은 데이터라도 조건을 끄면 60선 이탈만으로 발화
+    # 같은 데이터라도 조건을 끄면 이탈선 하회만으로 발화
     evs = uptrend_onset.detect(df_below, "TEST", Params(qvwap_condition=False))
     assert len(evs) == 1 and evs[0].detail["above_qvwap"] is False
-    # 최근 저가 구간(~100)에 거래량 몰빵 → QVWAP이 종가(110) 아래로 → 발화
-    vols_late = [1.0] * len(closes)
-    for i in range(len(closes) - 30, len(closes)):
-        vols_late[i] = 5000.0
-    df_above = make_df(closes, highs, volumes=vols_late)
+    # 저가 구간(~100)에 거래량 몰빵 → QVWAP(≈109)이 종가(110) 아래로 → 발화
+    vols_low = [1.0] * n
+    for i in range(dec - 30, dec):
+        vols_low[i] = 5000.0
+    df_above = make_df(closes, highs, volumes=vols_low)
     evs = uptrend_onset.detect(df_above, "TEST", Params(qvwap_condition=True))
     assert len(evs) == 1 and evs[0].detail["above_qvwap"] is True
 
 
 def test_fires_when_qvwap_line_drops_below_price():
-    """60선 이탈 봉이 QVWAP 아래면 대기 — QVWAP 선이 내려와 종가가 그 위가
+    """이탈 봉이 QVWAP 아래면 대기 — QVWAP 선이 내려와 종가가 그 위가
     되는 첫 봉에서 발화한다 (선이 위에 있다가 확 내려오는 케이스)."""
     closes, highs = base_decline(bars=520)
     add_touch(closes, highs)
-    add_drop(closes, highs, 102.0)          # 60선 아래·QVWAP(≈105) 아래 → 대기
+    add_drop(closes, highs, 102.0)          # 이탈선 아래·QVWAP(≈105) 아래 → 대기
     vols = [1.0] * len(closes)
     for i, c in enumerate(closes):
         if 104.0 <= c <= 106.0:             # 저가 구간 몰빵 → QVWAP ≈ 105
@@ -255,13 +260,13 @@ def test_insufficient_data_returns_empty():
 
 
 def test_still_active_tracks_until_240_refail():
-    """상승초입은 60선 복귀·240선 돌파까지 유지하고, 240선 재이탈 시 제거."""
+    """상승초입은 이탈선 복귀·240선 돌파까지 유지하고, 240선 재이탈 시 제거."""
     closes, highs = base_decline()
     add_touch(closes, highs)
     add_drop(closes, highs)                            # 트리거
     df = make_df(closes, highs)
     ev = uptrend_onset.detect(df, "TEST", P)[0]
-    add_sideways(closes, highs, bars=2, level=130.0)   # 60선 위 복귀 — 유지
+    add_sideways(closes, highs, bars=2, level=130.0)   # 이탈선 위 복귀 — 유지
     assert uptrend_onset.still_active(make_df(closes, highs), ev, P)
     add_sideways(closes, highs, bars=2, level=200.0)   # 240선(≈160) 위 마감 — 유지
     assert uptrend_onset.still_active(make_df(closes, highs), ev, P)

@@ -1,13 +1,13 @@
 """상승초입 시그널 (4h봉).
 
 조건:
-  ① ma_align 이동평균이 역배열(기본 MA240 < MA480)인 상태에서
+  ① ma_align 이동평균이 역배열(기본 MA120 < MA240 < MA480)인 상태에서
   ② 캔들 고가가 240선에 닿음(터치)
   ③ 터치 후 touch_window_bars(기본 60봉 = 10일) 이내에
-  ④ 종가가 60선 아래이면서 분기 앵커드 VWAP(QVWAP) "위"에 있는
-     "첫" 봉 → 그 봉에서 시그널 발생. QVWAP 선이 캔들 위에 있다가
+  ④ 종가가 ma_entry(기본 20)선 아래이면서 분기 앵커드 VWAP(QVWAP) "위"에
+     있는 "첫" 봉 → 그 봉에서 시그널 발생. QVWAP 선이 캔들 위에 있다가
      (분기 리셋 등으로) 아래로 확 내려와 종가가 그 위로 올라선 순간을
-     잡는다 — 60선을 깼는데 아직 QVWAP 아래면 대기하고, 종가가 QVWAP
+     잡는다 — 이탈선을 깼는데 아직 QVWAP 아래면 대기하고, 종가가 QVWAP
      위가 되는 봉에서 알린다.
 
 같은 터치에 대해 그 상태가 계속 유지돼도 첫 봉에서만 발생한다.
@@ -28,8 +28,8 @@ INTRABAR_OK = True   # 진행봉 현재가를 잠정 종가로 판정 — 알림
 
 @dataclass(frozen=True)
 class Params:
-    ma_entry: int = 60          # 이탈 판정 기준선
-    ma_align: tuple = (240, 480)        # 역배열 판정선 (짧은 것부터)
+    ma_entry: int = 20          # 이탈 판정 기준선 (4h×20 = 약 3.3일)
+    ma_align: tuple = (120, 240, 480)   # 역배열 판정선 (짧은 것부터)
     ma_touch: int = 240         # 터치 판정 기준선
     touch_window_bars: int = 60  # 터치 유효기간(봉 수). 4h×60 = 10일
     grace_bars: int = 1         # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
@@ -59,8 +59,8 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     def bearish(i: int) -> bool:
         """ma_align 선들이 짧은 것부터 오름차순 — 역배열.
 
-        선 개수는 설정에 따라 다르다(기본 240·480 두 선). MA를 못 구하는
-        구간은 판정하지 않는다.
+        선 개수는 설정에 따라 다르다(기본 120·240·480 세 선). MA를 못
+        구하는 구간은 판정하지 않는다.
         """
         vals = [m.iloc[i] for m in aligns]
         if any(pd.isna(v) for v in vals):
@@ -81,9 +81,9 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
         return not pd.isna(m_entry.iloc[i]) and close.iloc[i] < m_entry.iloc[i]
 
     def is_trigger_state(i: int) -> bool:
-        """60선 아래 + (qvwap_condition이면) 종가가 분기 VWAP 위인 상태.
+        """이탈선 아래 + (qvwap_condition이면) 종가가 분기 VWAP 위인 상태.
 
-        60선 이탈 봉이 아직 QVWAP 아래면 발화하지 않고 대기 — QVWAP 선이
+        이탈 봉이 아직 QVWAP 아래면 발화하지 않고 대기 — QVWAP 선이
         내려와 종가가 그 위가 되는 첫 봉에서 발화한다.
         """
         if not below_entry(i):
@@ -134,7 +134,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
 
 
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:
-    """상승초입은 발생 후 상승 과정을 계속 추적한다(60선 위 복귀해도 유지).
+    """상승초입은 발생 후 상승 과정을 계속 추적한다(이탈선 위 복귀해도 유지).
 
     제거 조건: 종가가 240선 위로 올라섰다가 다시 240선 아래로 마감하면
     돌파 실패로 제거. 아직 240선을 넘지 못한 동안은 계속 유지되고,
