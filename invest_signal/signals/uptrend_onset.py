@@ -4,11 +4,11 @@
   ① ma_align 이동평균이 역배열(기본 MA120 < MA240 < MA480)인 상태에서
   ② 캔들 고가가 240선에 닿음(터치)
   ③ 터치 후 touch_window_bars(기본 60봉 = 10일) 이내에
-  ④ 종가가 ma_entry(기본 20)선 아래이면서 분기 앵커드 VWAP(QVWAP) "위"에
-     있는 "첫" 봉 → 그 봉에서 시그널 발생. QVWAP 선이 캔들 위에 있다가
-     (분기 리셋 등으로) 아래로 확 내려와 종가가 그 위로 올라선 순간을
-     잡는다 — 이탈선을 깼는데 아직 QVWAP 아래면 대기하고, 종가가 QVWAP
-     위가 되는 봉에서 알린다.
+  ④ 종가가 ma_entry(기본 20)선 아래이면서 앵커드 VWAP(기본 월간 MVWAP)
+     "위"에 있는 "첫" 봉 → 그 봉에서 시그널 발생. VWAP 선이 캔들 위에
+     있다가 (월 리셋 등으로) 아래로 확 내려와 종가가 그 위로 올라선
+     순간을 잡는다 — 이탈선을 깼는데 아직 VWAP 아래면 대기하고, 종가가
+     VWAP 위가 되는 봉에서 알린다.
 
 같은 터치에 대해 그 상태가 계속 유지돼도 첫 봉에서만 발생한다.
 새로운 240 터치가 나오면 다시 발생할 수 있다.
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..indicators import quarterly_vwap, sma
+from ..indicators import anchored_vwap, sma
 from . import SignalEvent
 
 NAME = "uptrend_onset"
@@ -33,7 +33,8 @@ class Params:
     ma_touch: int = 240         # 터치 판정 기준선
     touch_window_bars: int = 60  # 터치 유효기간(봉 수). 4h×60 = 10일
     grace_bars: int = 1         # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
-    qvwap_condition: bool = True  # ④ 트리거 종가 > 분기VWAP 요구 (Volume 없으면 자동 통과)
+    vwap_condition: bool = True  # ④ 트리거 종가 > VWAP 요구 (Volume 없으면 자동 통과)
+    vwap_period: str = "M"       # 앵커드 VWAP 리셋 주기 — M(월간)/Q(분기)/W(주간)
 
 
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
@@ -52,7 +53,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     m_entry = sma(close, params.ma_entry)
     aligns = [sma(close, k) for k in params.ma_align]   # 선 개수는 설정에 따라 2~N
     m_touch = sma(close, params.ma_touch)
-    qv = quarterly_vwap(df)
+    vw = anchored_vwap(df, params.vwap_period)
 
     last = n - 1
 
@@ -81,16 +82,16 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
         return not pd.isna(m_entry.iloc[i]) and close.iloc[i] < m_entry.iloc[i]
 
     def is_trigger_state(i: int) -> bool:
-        """이탈선 아래 + (qvwap_condition이면) 종가가 분기 VWAP 위인 상태.
+        """이탈선 아래 + (vwap_condition이면) 종가가 앵커드 VWAP 위인 상태.
 
-        이탈 봉이 아직 QVWAP 아래면 발화하지 않고 대기 — QVWAP 선이
+        이탈 봉이 아직 VWAP 아래면 발화하지 않고 대기 — VWAP 선이
         내려와 종가가 그 위가 되는 첫 봉에서 발화한다.
         """
         if not below_entry(i):
             return False
-        if not params.qvwap_condition or qv is None or pd.isna(qv.iloc[i]):
+        if not params.vwap_condition or vw is None or pd.isna(vw.iloc[i]):
             return True
-        return bool(close.iloc[i] > qv.iloc[i])
+        return bool(close.iloc[i] > vw.iloc[i])
 
     events = []
     for t in range(max(need, last - params.grace_bars), last + 1):
@@ -110,10 +111,10 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
             continue
         if any(is_trigger_state(j) for j in range(touch_idx + 1, t)):
             continue            # t가 터치 이후 "첫" 이탈 봉이 아님
-        qv_val = qv_above = None
-        if qv is not None and not pd.isna(qv.iloc[t]):
-            qv_val = float(qv.iloc[t])
-            qv_above = bool(close.iloc[t] > qv.iloc[t])
+        vw_val = vw_above = None
+        if vw is not None and not pd.isna(vw.iloc[t]):
+            vw_val = float(vw.iloc[t])
+            vw_above = bool(close.iloc[t] > vw.iloc[t])
         events.append(SignalEvent(
             symbol=symbol,
             signal=NAME,
@@ -126,8 +127,9 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
                 "ma240": float(m_touch.iloc[t]) if not pd.isna(m_touch.iloc[t]) else None,
                 "touch_time": df.index[touch_idx].isoformat(),
                 "touch_high": float(high.iloc[touch_idx]),
-                "qvwap": qv_val,
-                "above_qvwap": qv_above,
+                "vwap": vw_val,
+                "above_vwap": vw_above,
+                "vwap_period": params.vwap_period,
             },
         ))
     return events

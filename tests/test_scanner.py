@@ -242,17 +242,39 @@ def test_crypto_override_applies_only_to_crypto_detectors():
     """crypto_<키> 오버라이드는 크립토 목록에만 반영되고 ETF·주식은 공용 값."""
     from invest_signal import config as cfg_mod
 
-    cfg = {"signal": {"uptrend_onset": {"qvwap_condition": False,
-                                        "crypto_qvwap_condition": True}}}
+    cfg = {"signal": {"uptrend_onset": {"vwap_condition": False,
+                                        "crypto_vwap_condition": True}}}
     crypto = dict((m.NAME, p) for m, p in cfg_mod.detectors(cfg, crypto=True))
     yf = dict((m.NAME, p) for m, p in cfg_mod.detectors(cfg))
-    assert crypto["uptrend_onset"].qvwap_condition is True
-    assert yf["uptrend_onset"].qvwap_condition is False
+    assert crypto["uptrend_onset"].vwap_condition is True
+    assert yf["uptrend_onset"].vwap_condition is False
     # 오버라이드가 없으면 양쪽 다 공용 값을 쓴다
-    cfg2 = {"signal": {"uptrend_onset": {"qvwap_condition": False}}}
+    cfg2 = {"signal": {"uptrend_onset": {"vwap_condition": False}}}
     for c in (True, False):
         d = dict((m.NAME, p) for m, p in cfg_mod.detectors(cfg2, crypto=c))
-        assert d["uptrend_onset"].qvwap_condition is False
+        assert d["uptrend_onset"].vwap_condition is False
+
+
+def test_uptrend_vwap_period_defaults_to_monthly():
+    """상승초입 VWAP은 월간 앵커가 기본이고, 주기는 설정에서 바꾼다."""
+    from invest_signal import config as cfg_mod
+
+    assert cfg_mod.uptrend_params({}).vwap_period == "M"
+    p = cfg_mod.uptrend_params({"signal": {"uptrend_onset": {"vwap_period": "Q"}}})
+    assert p.vwap_period == "Q"
+
+
+def test_legacy_qvwap_keys_still_honored():
+    """분기 전용이던 시절의 qvwap_condition 키가 남아 있어도 그 값을 따른다."""
+    from invest_signal import config as cfg_mod
+
+    cfg = {"signal": {"uptrend_onset": {"qvwap_condition": False,
+                                        "crypto_qvwap_condition": True}}}
+    assert cfg_mod.uptrend_params(cfg).vwap_condition is False
+    assert cfg_mod.uptrend_params(cfg, crypto=True).vwap_condition is True
+    # 새 키가 함께 있으면 새 키가 이긴다
+    cfg["signal"]["uptrend_onset"]["vwap_condition"] = True
+    assert cfg_mod.uptrend_params(cfg).vwap_condition is True
 
 
 def test_uptrend_ma_align_read_from_config():

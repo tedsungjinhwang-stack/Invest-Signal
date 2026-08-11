@@ -35,8 +35,24 @@ def uptrend_params(cfg: dict, crypto: bool = False) -> uptrend_onset.Params:
         touch_window_bars=int(s.get("touch_window_bars", 60)),
         grace_bars=int(s.get("grace_bars", 1)),
         ma_align=tuple(s.get("ma_align", (120, 240, 480))),
-        qvwap_condition=bool(market_value(s, "qvwap_condition", True, crypto)),
+        vwap_condition=bool(market_value(_vwap_aliases(s), "vwap_condition",
+                                         True, crypto)),
+        vwap_period=str(s.get("vwap_period", "M")),
     )
+
+
+def _vwap_aliases(s: dict) -> dict:
+    """분기 전용이던 시절의 `qvwap_condition` 키를 새 이름으로 옮겨 준다.
+
+    설정 파일을 갱신하지 않은 채 배포되면 조건이 조용히 기본값(켬)으로
+    돌아가 ETF·주식 알림이 몇 배로 늘어난다 — 옛 키를 그대로 존중한다.
+    """
+    out = dict(s)
+    for old, new in (("qvwap_condition", "vwap_condition"),
+                     ("crypto_qvwap_condition", "crypto_vwap_condition")):
+        if new not in out and old in out:
+            out[new] = out[old]
+    return out
 
 
 def pullback_params(cfg: dict) -> pullback.Params:

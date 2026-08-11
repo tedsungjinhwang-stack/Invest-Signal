@@ -8,8 +8,13 @@ from invest_signal.signals.uptrend_onset import Params
 
 DECLINE = 600           # 역배열을 만들 하락 구간 봉 수
 
-# 기본 파라미터 — 합성 데이터에 Volume이 없으면 QVWAP 조건은 자동 통과
+# 기본 파라미터 — 합성 데이터에 Volume이 없으면 VWAP 조건은 자동 통과
 P = Params()
+
+
+def QP(on: bool) -> Params:
+    """분기 앵커 VWAP 파라미터 — 픽스처가 한 분기 안에 들어가 리셋이 없다."""
+    return Params(vwap_condition=on, vwap_period="Q")
 
 
 def make_df(closes, highs, volumes=None, start="2025-01-01"):
@@ -201,9 +206,9 @@ def test_ma_align_three_lines_still_fires_on_full_bearish():
     assert len(evs) == 1 and evs[0].bar_time == df.index[-1]
 
 
-def test_qvwap_condition_gates_signal():
-    """트리거 봉 종가가 분기 VWAP 위여야 발화 — 아래면 대기."""
-    # 522봉(≈87일) — 2025-01-01 시작이라 전 구간이 1분기 안 (분기 리셋 없음)
+def test_vwap_condition_gates_signal():
+    """트리거 봉 종가가 앵커드 VWAP 위여야 발화 — 아래면 대기."""
+    # 522봉(≈87일). VWAP 리셋이 픽스처를 흔들지 않도록 분기 앵커로 고정한다
     dec = 495
     closes, highs = base_decline(bars=dec)
     add_sideways(closes, highs, bars=25, level=120.0)   # 이탈선(MA20)을 ~120으로
@@ -211,46 +216,46 @@ def test_qvwap_condition_gates_signal():
     # 트리거 후보: 직전 저점(100)보다 위지만 20선(≈120)보다는 아래로 마감
     add_drop(closes, highs, 110.0)
     n = len(closes)
-    # 평평한 120 구간에 거래량 몰빵 → QVWAP(≈121) > 종가 110 → 아직 아래 → 대기
+    # 평평한 120 구간에 거래량 몰빵 → VWAP(≈121) > 종가 110 → 아직 아래 → 대기
     vols_high = [1.0] * n
     for i in range(dec, n):
         vols_high[i] = 5000.0
     df_below = make_df(closes, highs, volumes=vols_high)
-    assert uptrend_onset.detect(df_below, "TEST", Params(qvwap_condition=True)) == []
+    assert uptrend_onset.detect(df_below, "TEST", QP(True)) == []
     # 같은 데이터라도 조건을 끄면 이탈선 하회만으로 발화
-    evs = uptrend_onset.detect(df_below, "TEST", Params(qvwap_condition=False))
-    assert len(evs) == 1 and evs[0].detail["above_qvwap"] is False
-    # 저가 구간(~100)에 거래량 몰빵 → QVWAP(≈109)이 종가(110) 아래로 → 발화
+    evs = uptrend_onset.detect(df_below, "TEST", QP(False))
+    assert len(evs) == 1 and evs[0].detail["above_vwap"] is False
+    # 저가 구간(~100)에 거래량 몰빵 → VWAP(≈109)이 종가(110) 아래로 → 발화
     vols_low = [1.0] * n
     for i in range(dec - 30, dec):
         vols_low[i] = 5000.0
     df_above = make_df(closes, highs, volumes=vols_low)
-    evs = uptrend_onset.detect(df_above, "TEST", Params(qvwap_condition=True))
-    assert len(evs) == 1 and evs[0].detail["above_qvwap"] is True
+    evs = uptrend_onset.detect(df_above, "TEST", QP(True))
+    assert len(evs) == 1 and evs[0].detail["above_vwap"] is True
 
 
-def test_fires_when_qvwap_line_drops_below_price():
-    """이탈 봉이 QVWAP 아래면 대기 — QVWAP 선이 내려와 종가가 그 위가
+def test_fires_when_vwap_line_drops_below_price():
+    """이탈 봉이 VWAP 아래면 대기 — VWAP 선이 내려와 종가가 그 위가
     되는 첫 봉에서 발화한다 (선이 위에 있다가 확 내려오는 케이스)."""
     closes, highs = base_decline(bars=520)
     add_touch(closes, highs)
-    add_drop(closes, highs, 102.0)          # 이탈선 아래·QVWAP(≈105) 아래 → 대기
+    add_drop(closes, highs, 102.0)          # 이탈선 아래·VWAP(≈105) 아래 → 대기
     vols = [1.0] * len(closes)
     for i, c in enumerate(closes):
-        if 104.0 <= c <= 106.0:             # 저가 구간 몰빵 → QVWAP ≈ 105
+        if 104.0 <= c <= 106.0:             # 저가 구간 몰빵 → VWAP ≈ 105
             vols[i] = 100000.0
     df_wait = make_df(closes, highs, volumes=vols)
-    assert uptrend_onset.detect(df_wait, "TEST", Params(qvwap_condition=True)) == []
-    # 대량 저가 거래로 QVWAP 선이 ~101로 확 내려옴 (이 봉 자체는 98 < QVWAP → 여전히 대기)
+    assert uptrend_onset.detect(df_wait, "TEST", QP(True)) == []
+    # 대량 저가 거래로 VWAP 선이 ~101로 확 내려옴 (이 봉 자체는 98 < VWAP → 여전히 대기)
     add_drop(closes, highs, 98.0)
     vols.append(500000.0)
-    # 다음 봉 종가 101.5 > QVWAP(≈101) — 선이 캔들 아래로 온 첫 봉 → 발화
+    # 다음 봉 종가 101.5 > VWAP(≈101) — 선이 캔들 아래로 온 첫 봉 → 발화
     add_drop(closes, highs, 101.5)
     vols.append(1.0)
     df_fire = make_df(closes, highs, volumes=vols)
-    evs = uptrend_onset.detect(df_fire, "TEST", Params(qvwap_condition=True))
+    evs = uptrend_onset.detect(df_fire, "TEST", QP(True))
     assert len(evs) == 1 and evs[0].bar_time == df_fire.index[-1]
-    assert evs[0].detail["above_qvwap"] is True
+    assert evs[0].detail["above_vwap"] is True
 
 
 def test_insufficient_data_returns_empty():

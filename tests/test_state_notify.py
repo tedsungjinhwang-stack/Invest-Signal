@@ -64,14 +64,14 @@ def test_state_survives_corrupt_file(tmp_path):
 
 def test_format_events_sections_and_links():
     msg = format_events(
-        [_event("BTCUSDT", {"label": "상승초입", "entry_ma": 130.0, "above_qvwap": True,
+        [_event("BTCUSDT", {"label": "상승초입", "entry_ma": 130.0, "above_vwap": True,
                             "touch_time": "2026-07-19T12:00:00+00:00"})],
         [_event("122630"), _event("SOXL")],
         {"122630": "KODEX 레버리지", "SOXL": "반도체 3x"})
     assert "크립토" in msg and "ETF" in msg
     assert "binance.com/en/futures/BTCUSDT" in msg
     assert "KRX-122630" in msg                 # 한국 종목은 KRX 차트 링크
-    assert "QVWAP" not in msg              # QVWAP은 조건으로만 쓰고 표시하지 않음
+    assert "VWAP" not in msg               # VWAP은 조건으로만 쓰고 표시하지 않음
     assert ">KODEX 레버리지</a>" in msg    # 한국 종목은 코드 없이 종목명만 표시
 
 
