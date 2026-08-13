@@ -15,6 +15,7 @@ import requests
 from . import config as cfg_mod
 from . import data_binance, data_etf, data_qp, indicators, notify
 from .signals import SignalEvent, leader_break
+from . import sent_log
 from .state import AlertState
 
 ONGOING_LOOKBACK_BARS = 42      # '유지 중' 판정 시 트리거를 찾아볼 범위 — 42봉 = 7일
@@ -497,6 +498,16 @@ def run(config_path: str, state_path: str, only: str | None = None,
         for ev in fresh_crypto + fresh_yf:
             state.mark(ev.dedup_key)
         state.save()
+        # 보낸 메시지 원문도 남긴다 — 상태 파일엔 종목·시그널·봉시각만 남아서
+        # 나중에 "그때 알림이 뭐라고 왔었지"를 되짚을 수가 없다. 30일 경과분은
+        # append 안에서 자동으로 정리된다.
+        sent_log.append(
+            sent_log.default_path(state_path), msg,
+            mode="intrabar" if intrabar else "close",
+            counts={"crypto": len(show_crypto), "etf": len(show_etf),
+                    "stock": len(show_stock),
+                    "hold": len(hold_crypto) + len(hold_yf)},
+            log=log)
     else:
         errors.append("telegram: 발송 실패 또는 토큰/챗ID 미설정 — 상태 미저장, 다음 스캔에서 재시도")
         log("[telegram] 발송 실패/미설정 — 상태를 저장하지 않음(다음 4h 스캔에서 재시도)")

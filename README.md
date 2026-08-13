@@ -364,6 +364,34 @@ BTC·ETH·SOL 등 주요 코인은 전부 커버된다. 진짜 무기한 데이�
 중복 알림은 `state/alerts_state.json`으로 방지하며 실행 후 자동 커밋된다.
 `scan.yml`을 수정해 푸시하면 즉시 1회 실행된다(수동 실행 대용).
 
+#### 발송 기록 (`state/sent_log.jsonl`)
+
+**보낸 메시지 원문을 30일치 남긴다.** 상태 파일에는 `종목|시그널|봉시각`만
+들어 있어서 "무엇이 언제 잡혔나"까지만 알 수 있다 — 가격·수익률 태그·
+📈순위표·추적(↳) 줄은 렌더링 결과라 어디에도 안 남는다. 나중에 되짚으려면
+원문이 필요해서 따로 기록한다.
+
+```bash
+python -m invest_signal --history        # 최근 5건 (HTML 태그 제거)
+python -m invest_signal --history 20     # 최근 20건
+python -m invest_signal --history --raw  # 태그 그대로
+```
+
+```
+═══ 2026-08-13 16:20 KST · close · crypto 1 hold 102
+🚨 4h 시그널 · 08-13 16:20 KST
+🟢 상승초입
+🪙 크립토
+• ORDI  3.466 · 1h -0.1% · 4h -0.6% · 24h -0.6% · 혼조
+```
+
+JSONL 한 줄이 발송 한 건이다(`ts`·`mode`·`counts`·`text`). **발송이 확인된
+경우에만** 쌓이므로 dry-run이나 발송 실패는 안 들어간다. 30일이 지났거나
+500건을 넘으면 다음 기록 때 오래된 것부터 자동으로 정리된다. 커밋 스텝이
+`git add state/`로 디렉터리째 담으므로 워크플로 수정 없이 함께 올라간다.
+기록 실패는 로그만 남기고 넘어간다 — 알림은 이미 나간 뒤라 사본 때문에
+스캔을 실패시킬 이유가 없다.
+
 #### 크론 지연과 외부 트리거
 
 **`schedule` 실행은 정시에 오지 않는다.** `:01`분에 걸었을 때 최근 20회가
@@ -423,6 +451,7 @@ PAT는 fine-grained로 이 레포에만, **Actions: Read and write** 권한 하�
 pip install -r requirements.txt
 python -m invest_signal --dry-run          # 발송 없이 결과만 출력
 python -m invest_signal --only crypto      # 크립토만
+python -m invest_signal --history 10       # 최근 발송된 알림 원문 10건
 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... python -m invest_signal
 ```
 
