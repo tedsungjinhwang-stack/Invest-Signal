@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..indicators import alignment, sma
+from ..indicators import alignment, pct_over, sma
 from . import SignalEvent
 
 NAME = "leader_break"
@@ -145,6 +145,10 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
                 "ma": float(m.iloc[t]),
                 "ma_period": params.ma,
                 "interval": INTERVAL,
+                # 15m봉이라 1h=4봉·4h=16봉. 24h는 스캐너가 티커에서 붙인다
+                # (gain_24h) — 캔들 역산보다 지연이 없다.
+                "ret_1h": pct_over(close, 4, t),
+                "ret_4h": pct_over(close, 16, t),
             },
         ))
     return events

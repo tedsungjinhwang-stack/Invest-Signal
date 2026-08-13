@@ -61,6 +61,34 @@ def _age_days(bar_time) -> int:
     return max(0, (pd.Timestamp.now(tz="UTC") - t).days)
 
 
+def _pct(x: float) -> str:
+    """수익률 표기 — 10% 미만은 소수 첫째 자리까지, 그 이상은 정수."""
+    v = x * 100
+    return f"{v:+.1f}%" if abs(v) < 10 else f"{v:+.0f}%"
+
+
+RETURN_SIGNALS = {"uptrend_onset", "leader_break"}   # 줄에 수익률을 붙일 시그널
+
+
+def _returns_tag(d: dict) -> str | None:
+    """1h·4h·24h 종목 수익률 — 구할 수 있는 것만 이어 붙인다.
+
+    24h는 바이낸스 24hr 티커 값(gain_24h)이 있으면 그쪽을 쓴다. 캔들 역산은
+    마지막 마감봉 기준이라 최대 4시간 묵는데, 티커는 호출 시점 롤링이다.
+    """
+    parts = []
+    for label, key in (("1h", "ret_1h"), ("4h", "ret_4h")):
+        v = d.get(key)
+        if v is not None:
+            parts.append(f"{label} {_pct(v)}")
+    day = d.get("gain_24h")
+    if day is None:
+        day = d.get("ret_24h")
+    if day is not None:
+        parts.append(f"24h {_pct(day)}")
+    return " · ".join(parts) if parts else None
+
+
 def _event_line(e, url: str, name: str, kind: str) -> str:
     d = e.detail
     head = (f"• <a href=\"{url}\">{_short_symbol(e.symbol, kind, name)}</a>"
@@ -68,6 +96,10 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     tags = []
     if d.get("intrabar"):
         tags.append("⏳진행봉")     # 봉 미마감 잠정 판정 — 마감 때 되돌릴 수 있음
+    if e.signal in RETURN_SIGNALS:
+        rt = _returns_tag(d)
+        if rt:
+            tags.append(rt)
     if e.signal == "mss" or d.get("label") == "MSS":
         # MSS는 MSS 태그만 — 배열 상태는 붙이지 않는다
         tags.append(f"⚠️MSS 저점 {_fmt_price(d['broken_low'])} 이탈"
@@ -80,8 +112,7 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
             tags.append(f"직전저점 {_fmt_price(d['broken_low'])} 이탈")
         if e.signal == "leader_break":
             # 24h 상승률 순위로 뽑힌 종목이 15m 추세선을 깬 자리
-            if d.get("gain_24h") is not None:
-                tags.append(f"24h {d['gain_24h'] * 100:+.0f}%")
+            # (24h 상승률은 위 수익률 태그에 이미 들어간다)
             tags.append(f"{d.get('interval', '15m')} "
                         f"{d.get('ma_period', 60)}SMA {_fmt_price(d['ma'])} 이탈")
             if d.get("watch_days") is not None:

@@ -103,14 +103,18 @@ def _download(syms: list[str]):
                        auto_adjust=False, progress=False, threads=True)
 
 
-def fetch_all(tickers: list[dict], log=print) -> dict[str, pd.DataFrame]:
-    """티커 목록 전체를 받아 {코드: 4h OHLC}를 돌려준다.
+def fetch_all(tickers: list[dict], log=print) -> tuple[dict, dict]:
+    """티커 목록 전체를 받아 ({코드: 4h OHLC}, {코드: 1h OHLC})를 돌려준다.
+
+    원본이 1h봉이라 4h는 리샘플 결과다. 1h 프레임은 알림에 붙일 1시간
+    수익률을 계산하는 데만 쓰므로 시그널 판정에는 들어가지 않는다.
 
     KR(.KS)로 조회했는데 데이터가 없는 6자리 코드는 코스닥(.KQ)으로
     재시도한다 — 퀀트포트폴리오 리포트에는 코스피/코스닥 구분이 없어서.
     """
     data = _download([yahoo_symbol(t["code"], t["market"]) for t in tickers])
     out: dict[str, pd.DataFrame] = {}
+    hourly: dict[str, pd.DataFrame] = {}
     retry_kq = []
     for t in tickers:
         sym = yahoo_symbol(t["code"], t["market"])
@@ -118,6 +122,7 @@ def fetch_all(tickers: list[dict], log=print) -> dict[str, pd.DataFrame]:
         d4 = resample_4h(df1h) if df1h is not None else None
         if d4 is not None and len(d4):
             out[t["code"]] = d4
+            hourly[t["code"]] = df1h
         elif t["market"] == "KR":
             retry_kq.append(t)
         else:
@@ -129,6 +134,7 @@ def fetch_all(tickers: list[dict], log=print) -> dict[str, pd.DataFrame]:
             d4 = resample_4h(df1h) if df1h is not None else None
             if d4 is not None and len(d4):
                 out[t["code"]] = d4
+                hourly[t["code"]] = df1h
             else:
                 log(f"[etf] {t['code']} 데이터 없음(KS/KQ 모두) — 건너뜀")
-    return out
+    return out, hourly

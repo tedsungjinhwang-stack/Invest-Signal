@@ -238,6 +238,37 @@ def _filter_ranked(items: list, eligible: set, signals: frozenset) -> list:
     return [e for e in items if e.signal not in signals or e.symbol in eligible]
 
 
+def _fill_hourly_return(events: list, hourly: dict, signals=("uptrend_onset",)) -> None:
+    """4h봉으로는 못 구하는 ret_1h를 1h 프레임에서 채운다(제자리 수정).
+
+    이벤트 봉 시각 기준이 아니라 **1h 프레임의 마지막 봉** 기준이다 —
+    발생 봉이 최대 grace_bars만큼 지났을 수 있고, 알림을 받는 시점의
+    '지금 1시간 수익률'이 보기에 더 쓸모 있다.
+    """
+    for e in events:
+        if e.signal not in signals:
+            continue
+        df = hourly.get(e.symbol)
+        if df is None or "Close" not in df:
+            continue
+        e.detail["ret_1h"] = indicators.pct_over(df["Close"], 1)
+
+
+def _crypto_hourly(session, source: str, symbols, log=print) -> dict:
+    """알림 대상 종목만 1h 캔들을 받아 온다.
+
+    전 종목이 아니라 실제로 발화한 몇 종뿐이라 요청량이 미미하다.
+    실패해도 수익률 한 줄이 빠질 뿐이므로 조용히 건너뛴다.
+    """
+    out = {}
+    for sym in symbols:
+        try:
+            out[sym] = data_binance.klines(session, sym, source, "1h", limit=3)
+        except Exception as exc:                       # noqa: BLE001
+            log(f"[binance] {sym} 1h 수익률 조회 실패 — 생략 ({exc})")
+    return out
+
+
 def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
                 state=None) -> tuple[list, list, list]:
     """intrabar=True: 진행 중인 4h봉을 포함해 인트라바 판정이 안전한
@@ -298,6 +329,12 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         after = sum(1 for e in events if e.signal in signals)
         log(f"[binance] {RANK_FILTER_LABEL[key]} 랭크 필터: "
             f"대상 {len(eligible)}종 — 신규 {before}→{after}건")
+
+    # 상승초입 줄에 붙일 1h 수익률 — 랭크 필터를 통과한 종목만 따로 받는다
+    need_1h = sorted({e.symbol for e in events if e.signal == "uptrend_onset"})
+    if need_1h:
+        with requests.Session() as s2:
+            _fill_hourly_return(events, _crypto_hourly(s2, source, need_1h, log))
 
     # 크립토 모멘텀 눌림목/이탈은 자체 선정(24h 상승률 상위)이라 위 랭크 필터를 타지 않는다
     events.extend(leader_events)
@@ -370,10 +407,11 @@ def scan_yfinance(cfg: dict, detectors, log=print) -> tuple[list, list, dict, di
     data_etf.fill_missing_kr_names(tickers, log)    # 리포트가 이름을 빠뜨린 국장 종목 보충
     names = {t["code"]: t.get("name", "") for t in tickers}
     log(f"[yfinance] ETF·주식 {len(tickers)}종 스캔 시작")
-    frames = data_etf.fetch_all(tickers, log=log)
+    frames, hourly = data_etf.fetch_all(tickers, log=log)
     dets = [(m, p) for m, p in detectors
             if not getattr(m, "CRYPTO_ONLY", False)]   # 크립토 전용 시그널 제외
     events, ongoing = _detect_all(frames, dets, log, show_choch=True)
+    _fill_hourly_return(events, hourly)   # 원본이 1h봉이라 따로 받을 필요가 없다
     log(f"[yfinance] 시그널 {len(events)}건 · 유지 중 {len(ongoing)}건")
     return events, ongoing, names, groups
 

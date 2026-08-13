@@ -158,3 +158,21 @@ def supertrend(df: pd.DataFrame, period: int = 22,
         lower, upper = lo, up
         dirs[i] = trend
     return pd.Series(dirs, index=df.index)
+
+
+def pct_over(close: pd.Series, bars: int, at: int = -1) -> float | None:
+    """at 위치 종가의 bars봉 전 대비 변화율. 데이터가 모자라면 None.
+
+    at은 파이썬 인덱스 규칙을 따른다(-1 = 마지막 봉). 기준 봉이나 비교 봉이
+    NaN이거나 이력이 짧으면 None을 준다 — 0으로 채우면 '변화 없음'과
+    구분이 안 돼서 알림에 거짓 정보가 실린다.
+    """
+    n = len(close)
+    i = at if at >= 0 else n + at
+    j = i - bars
+    if j < 0 or i >= n:
+        return None
+    a, b = close.iloc[i], close.iloc[j]
+    if pd.isna(a) or pd.isna(b) or b == 0:
+        return None
+    return float(a) / float(b) - 1.0

@@ -238,3 +238,49 @@ def test_no_board_leaves_message_unchanged():
                      bar_time=pd.Timestamp("2026-08-06T06:00:00Z"), price=1.0,
                      detail={"label": "상승초입"})
     assert "24h 상승률 TOP" not in format_events([ev], [], {})
+
+
+def test_returns_tag_on_uptrend_and_leader_lines():
+    """상승초입·크립토 모멘텀 줄에 1h·4h·24h 수익률이 붙는다."""
+    t = pd.Timestamp("2026-08-13T12:00:00Z")
+    up = SignalEvent(symbol="KITEUSDT", signal="uptrend_onset", bar_time=t,
+                     price=0.1017,
+                     detail={"label": "상승초입", "align": "역배열",
+                             "ret_1h": 0.004, "ret_4h": -0.021, "ret_24h": 0.083})
+    msg = format_events([up], [], {})
+    assert "1h +0.4% · 4h -2.1% · 24h +8.3%" in msg
+
+    # leader_break는 24h를 티커 값(gain_24h)으로 쓰고, 중복 표기하지 않는다
+    lb = SignalEvent(symbol="COTIUSDT", signal="leader_break", bar_time=t,
+                     price=0.0632,
+                     detail={"label": "크립토 모멘텀 눌림목/이탈", "ma": 0.0641,
+                             "ma_period": 20, "interval": "15m",
+                             "gain_24h": 0.31, "ret_1h": -0.012, "ret_4h": -0.034,
+                             "ret_24h": 0.99})
+    msg = format_events([lb], [], {})
+    assert "1h -1.2% · 4h -3.4% · 24h +31%" in msg
+    assert msg.count("24h") == 1          # ret_24h(+99%)는 무시된다
+    assert "15m 20SMA" in msg
+
+
+def test_returns_tag_omits_missing_values():
+    """구할 수 없는 구간은 빼고 나머지만 붙인다 — 0%로 채우지 않는다."""
+    t = pd.Timestamp("2026-08-13T12:00:00Z")
+    ev = SignalEvent(symbol="XUSDT", signal="uptrend_onset", bar_time=t, price=1.0,
+                     detail={"label": "상승초입", "ret_1h": None, "ret_4h": 0.05,
+                             "ret_24h": None})
+    msg = format_events([ev], [], {})
+    assert "4h +5.0%" in msg
+    assert "1h " not in msg and "24h " not in msg
+    # 셋 다 없으면 태그 자체가 안 붙는다
+    bare = SignalEvent(symbol="YUSDT", signal="uptrend_onset", bar_time=t, price=1.0,
+                       detail={"label": "상승초입"})
+    assert "%" not in format_events([bare], [], {})
+
+
+def test_returns_not_added_to_other_signals():
+    """눌림목·하락전환 줄은 그대로 — 수익률 태그는 두 시그널에만 붙는다."""
+    t = pd.Timestamp("2026-08-13T12:00:00Z")
+    ev = SignalEvent(symbol="SOXL", signal="pullback", bar_time=t, price=22.0,
+                     detail={"label": "눌림목", "ret_1h": 0.01, "ret_4h": 0.02})
+    assert "1h " not in format_events([], [ev], {"SOXL": ""})

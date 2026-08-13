@@ -26,7 +26,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..indicators import anchored_vwap, sma, supertrend
+from ..indicators import anchored_vwap, pct_over, sma, supertrend
 from . import SignalEvent
 
 NAME = "uptrend_onset"
@@ -187,6 +187,10 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
                 "vwap_mode": params.vwap_mode,
                 "supertrend": (None if st is None or pd.isna(st.iloc[t])
                                else int(st.iloc[t])),
+                # 알림 줄에 붙일 종목 수익률 — 1h는 4h봉으로 못 구하므로
+                # 스캐너가 따로 받아서 채운다(ret_1h).
+                "ret_4h": pct_over(close, 1, t),
+                "ret_24h": pct_over(close, 6, t),
             },
         ))
     return events
