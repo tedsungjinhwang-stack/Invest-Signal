@@ -363,3 +363,27 @@ def test_vwap_mode_touch_vs_above():
     assert uptrend_onset.detect(hit, "TEST", Params(vwap_mode="above")) == []
     assert len(uptrend_onset.detect(hit, "TEST", Params(vwap_mode="touch"))) == 1
     assert len(uptrend_onset.detect(hit, "TEST", Params(vwap_mode="any"))) == 1
+
+
+def test_bearish_alignment_required_without_touch_condition():
+    """터치 조건을 꺼도 ①역배열은 그대로 요구된다.
+
+    240 터치를 없앨 때 bearish()가 터치 경로에서만 불리는 바람에 역배열이
+    조용히 빠졌던 적이 있다 — 발화 봉이 실제로 역배열인지 직접 확인한다.
+    """
+    df = rebound_with_supertrend_up()
+    c = df["Close"]
+    ma = {k: float(c.rolling(k).mean().iloc[-1]) for k in (120, 240, 480)}
+    assert ma[120] < ma[240]                       # 전제: 120·240은 역배열
+    assert len(uptrend_onset.detect(df, "TEST", Params())) == 1
+
+    # 반등을 길게 끌어 MA120을 MA240 위로 올리면(역배열 붕괴) 발화가 사라져야 한다
+    up = rebound_with_supertrend_up(rise=90, step=4.0)
+    c2 = up["Close"]
+    ma2 = {k: float(c2.rolling(k).mean().iloc[-1]) for k in (120, 240)}
+    assert ma2[120] > ma2[240]                     # 전제: 역배열 깨짐
+    assert uptrend_onset.detect(up, "TEST", Params(grace_bars=3)) == []
+    # 역배열을 안 보는 설정은 없으므로, 확인은 ma_align을 바꿔서 한다 —
+    # (240,480)로 보면 여전히 역배열이라 통과한다
+    assert len(uptrend_onset.detect(
+        up, "TEST", Params(grace_bars=3, ma_align=(240, 480)))) == 1

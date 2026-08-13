@@ -1,7 +1,7 @@
 """상승초입 시그널 (4h봉).
 
 조건:
-  ① ma_align 이동평균이 역배열(기본 MA120 < MA240 < MA480)인 상태에서
+  ① ma_align 이동평균이 역배열(기본 MA120 < MA240)인 상태에서
   ② 종가가 ma_entry(기본 20)선 아래이고
   ③ 앵커드 VWAP(기본 월간 MVWAP) 조건을 만족하고
        above — 종가가 VWAP 위 (선 위로 올라선 것을 확인)
@@ -37,7 +37,7 @@ INTRABAR_OK = True   # 진행봉 현재가를 잠정 종가로 판정 — 알림
 @dataclass(frozen=True)
 class Params:
     ma_entry: int = 20          # 이탈 판정 기준선 (4h×20 = 약 3.3일)
-    ma_align: tuple = (120, 240, 480)   # 역배열 판정선 (짧은 것부터)
+    ma_align: tuple = (120, 240)        # 역배열 판정선 (짧은 것부터)
     touch_condition: bool = False  # 240선 터치를 추가로 요구할지 (아래 설명 참고)
     ma_touch: int = 240         # 터치 판정 기준선 (추적 해제 판정에도 쓰인다)
     touch_window_bars: int = 60  # 터치 유효기간(봉 수). 4h×60 = 10일
@@ -80,7 +80,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     def bearish(i: int) -> bool:
         """ma_align 선들이 짧은 것부터 오름차순 — 역배열.
 
-        선 개수는 설정에 따라 다르다(기본 120·240·480 세 선). MA를 못
+        선 개수는 설정에 따라 다르다(기본 120·240 두 선). MA를 못
         구하는 구간은 판정하지 않는다.
         """
         vals = [m.iloc[i] for m in aligns]
@@ -138,21 +138,16 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
         return not pd.isna(v) and v > 0
 
     def is_trigger_state(i: int) -> bool:
-        """이탈선 아래 + VWAP 조건 + 수퍼트렌드 상승을 모두 만족하는 상태.
+        """①역배열 + 이탈선 아래 + VWAP 조건 + 수퍼트렌드 상승을 모두 만족.
 
         조건을 아직 못 채운 이탈 봉은 발화하지 않고 대기 — 조건이 성립하는
-        첫 봉에서 발화한다.
+        첫 봉에서 발화한다. 역배열이 깨졌다 다시 성립해도 새 셋업이 된다.
         """
-        return below_entry(i) and vwap_ok(i) and uptrend_st(i)
+        return bearish(i) and below_entry(i) and vwap_ok(i) and uptrend_st(i)
 
     events = []
     for t in range(max(need, last - params.grace_bars), last + 1):
         if not is_trigger_state(t):
-            continue
-        # 가장 긴 두 선이 뒤집혔으면(짧은 쪽이 위) 이미 상승 국면 —
-        # 역배열 반전을 잡는 시그널이라 대상이 아니다
-        long2, long1 = aligns[-2].iloc[t], aligns[-1].iloc[t]
-        if not pd.isna(long1) and not pd.isna(long2) and long2 > long1:
             continue
         touch_idx = None
         if params.touch_condition:
