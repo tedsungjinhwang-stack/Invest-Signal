@@ -62,9 +62,14 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     스캔을 한 번 놓쳐도 직전 봉에서 발생한 시그널을 소급해 잡는다.
     중복 발송 방지는 호출 측(state)이 dedup_key로 처리한다.
     """
-    need = max(*params.ma_align, params.ma_entry, params.ma_touch)
+    # 실제로 쓰는 선만 최소 이력에 넣는다 — 터치 조건이 꺼져 있으면 ma_touch는
+    # 계산에 안 들어가므로, 그것 때문에 신규 상장을 걸러낼 이유가 없다.
+    lines = [*params.ma_align, params.ma_entry]
+    if params.touch_condition:
+        lines.append(params.ma_touch)
+    need = max(lines)
     n = len(df)
-    if n < need + 2:            # 최장 MA가 유효한 봉이 최소 2개는 있어야 터치→이탈이 가능
+    if n < need + 2:            # 최장 MA가 유효한 봉이 최소 2개는 있어야 판정이 가능
         return []
 
     close, high, low = df["Close"], df["High"], df["Low"]
