@@ -1,8 +1,9 @@
 """크립토 모멘텀 눌림목/이탈 시그널 (15m봉) — 크립토 선물 전용.
 
-24시간 상승률 **상위 top_n종**만 대상으로, 15분봉 종가가 ma(기본 20)선을
-**하향 이탈하는 첫 봉**에서 알린다. 하루 사이 가장 많이 오른 종목들이
-단기 추세선을 깨는 자리 — 주도주의 모멘텀이 꺾이는 지점을 잡는다.
+24시간 상승률 **상위 top_n종** 중 **4h가 정배열인 종목**만 대상으로,
+15분봉 종가가 ma(기본 20)선을 **하향 이탈하는 첫 봉**에서 알린다.
+하루 사이 가장 많이 오른 주도주가 단기 추세선을 깨는 자리를 잡는다.
+제외 규칙은 blocked() 참고.
 
 다른 시그널과 두 가지가 다르다:
   · 4h봉이 아니라 **15m봉**으로 판정한다 (20봉 = 5시간).
@@ -38,9 +39,11 @@ class Params:
     min_turnover_usd: float = 1_000_000   # 24h 거래대금 하한(유동성)
     watch_days: int = 7         # 상위권에서 밀려난 뒤에도 계속 볼 기간
     max_watch: int = 60         # 한 스캔에서 15m 캔들을 받을 최대 종목 수
-    exhausted_filter: bool = True        # 아래 exhausted() 조건에 걸리면 대상에서 제외
+    exhausted_filter: bool = True        # 아래 blocked() 조건에 걸리면 대상에서 제외
+    require_aligned: bool = True         # 4h 정배열이 아니면 제외 (역배열·혼조 컷)
+    allow_short_history: bool = False    # 이력이 짧아 배열 판정 불가면 통과시킬지
     exhausted_mas: tuple = (120, 240, 480)   # 4h봉 정배열 판정 3선
-    exhausted_below: int = 480               # 4h 종가가 이 선 아래면 제외
+    exhausted_below: int = 480               # 정배열이어도 종가가 이 선 아래면 제외
 
 
 def leaders(ticker: dict[str, dict], symbols: set[str],
@@ -75,20 +78,26 @@ def watch_list(top: list[tuple[str, dict]], recent: dict, symbols: set[str],
     return out
 
 
-def exhausted(df4h: pd.DataFrame, params: Params = Params()) -> bool:
-    """4h가 정배열인데 종가가 exhausted_below선 아래 — 대상에서 뺄 자리.
+def blocked(df4h: pd.DataFrame, params: Params = Params()) -> bool:
+    """대상에서 뺄 자리인지 — True면 제외. 조건 두 개를 함께 본다.
 
-    정배열(MA120 > MA240 > MA480)은 상승 구조가 이미 완성됐다는 뜻이고,
-    그 상태에서 종가가 480선까지 밀렸으면 오를 만큼 오른 뒤 꺾인 것이다.
-    새로 잡을 눌림이 아니라서 제외한다. 역배열·혼조는 이 조건과 무관하게
-    통과한다 — 아직 구조가 만들어지는 중이라 판단할 자리가 아니다.
+    ① **정배열이 아니면 제외**(require_aligned). 24h 상승률 상위라도 4h
+       구조가 역배열·혼조면 그 상승은 하락 추세 안의 반등이거나 방향이
+       아직 안 잡힌 것이다 — 주도주의 눌림으로 볼 자리가 아니다.
+    ② **정배열이어도 종가가 exhausted_below선 아래면 제외**
+       (exhausted_filter). 상승 구조가 완성된 상태에서 480선까지 밀렸으면
+       오를 만큼 오른 뒤 꺾인 것이라 새로 잡을 눌림이 아니다.
 
-    MA를 못 구할 만큼 이력이 짧으면(신규 상장) alignment가 None을 주므로
-    제외하지 않는다 — 판단 불가는 통과로 둔다.
+    MA480을 못 구할 만큼 이력이 짧으면(상장 80일 미만) alignment가 None을
+    주므로 ①에서 걸린다. 신규 상장이 24h 상승률 상위를 자주 차지하는
+    만큼 이 컷은 체감이 크다 — 통과시키려면 allow_short_history를 켠다.
     """
-    if not params.exhausted_filter:
-        return False
-    if alignment(df4h, tuple(params.exhausted_mas)) != "정배열":
+    aligned = alignment(df4h, tuple(params.exhausted_mas))
+    if params.require_aligned and aligned != "정배열":
+        if aligned is None and params.allow_short_history:
+            return False        # 판단 불가는 통과 (설정으로 켰을 때만)
+        return True
+    if not params.exhausted_filter or aligned != "정배열":
         return False
     ref = sma(df4h["Close"], params.exhausted_below)
     if pd.isna(ref.iloc[-1]):

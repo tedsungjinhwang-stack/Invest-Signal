@@ -170,37 +170,56 @@ def _df4h(closes):
     return pd.DataFrame({"Open": c, "High": c, "Low": c, "Close": c, "Volume": 1.0})
 
 
-def test_exhausted_excludes_bullish_stack_that_fell_under_the_long_ma():
+def test_blocked_excludes_bullish_stack_that_fell_under_the_long_ma():
     """정배열인데 종가가 480선 아래 — 오를 만큼 오르고 꺾인 자리라 제외."""
     up = list(np.linspace(100.0, 400.0, 600))    # 우상향 → MA120>MA240>MA480 정배열
     df = _df4h(up)
     assert alignment_of(df) == "정배열"
-    assert leader_break.exhausted(df, P) is False   # 아직 480선 위
+    assert leader_break.blocked(df, P) is False     # 아직 480선 위 → 통과
 
     ma480 = float(pd.Series(up).rolling(480).mean().iloc[-1])
     df_down = _df4h(up + [ma480 - 20])           # 480선 아래로 밀린 봉
     assert alignment_of(df_down) == "정배열"       # 배열은 아직 정배열
-    assert leader_break.exhausted(df_down, P) is True
+    assert leader_break.blocked(df_down, P) is True
 
 
-def test_exhausted_ignores_bearish_and_mixed_alignment():
-    """역배열은 480선 아래여도 제외 대상이 아니다 — 구조가 다른 국면."""
+def test_blocked_excludes_bearish_and_mixed_alignment():
+    """정배열만 통과 — 역배열·혼조는 24h 상승률 상위여도 제외."""
     down = list(np.linspace(400.0, 100.0, 600))  # 우하향 → 역배열
     df = _df4h(down)
     assert alignment_of(df) == "역배열"
-    assert leader_break.exhausted(df, P) is False
+    assert leader_break.blocked(df, P) is True
+    # require_aligned를 끄면 예전 동작 — 역배열은 통과한다
+    assert leader_break.blocked(df, Params(require_aligned=False)) is False
+
+    mixed = list(np.linspace(400.0, 100.0, 480)) + list(np.linspace(100.0, 300.0, 120))
+    df_mixed = _df4h(mixed)
+    assert alignment_of(df_mixed) == "혼조"
+    assert leader_break.blocked(df_mixed, P) is True
 
 
-def test_exhausted_passes_when_history_too_short():
-    """MA480을 못 구하는 신규 상장은 판단 불가 — 제외하지 않는다."""
-    assert leader_break.exhausted(_df4h(np.linspace(100.0, 200.0, 300)), P) is False
+def test_blocked_excludes_short_history_unless_allowed():
+    """상장 80일 미만은 MA480이 없어 배열 판정 불가 — 기본은 제외."""
+    new_listing = _df4h(np.linspace(100.0, 200.0, 300))
+    assert alignment_of(new_listing) is None
+    assert leader_break.blocked(new_listing, P) is True
+    assert leader_break.blocked(
+        new_listing, Params(allow_short_history=True)) is False
+    # 판정이 되는데 정배열이 아닌 경우는 allow_short_history와 무관하게 제외
+    down = _df4h(np.linspace(400.0, 100.0, 600))
+    assert leader_break.blocked(down, Params(allow_short_history=True)) is True
 
 
-def test_exhausted_filter_can_be_turned_off():
+def test_filters_can_be_turned_off_independently():
     up = list(np.linspace(100.0, 400.0, 600))
     ma480 = float(pd.Series(up).rolling(480).mean().iloc[-1])
-    df = _df4h(up + [ma480 - 20])
-    assert leader_break.exhausted(df, Params(exhausted_filter=False)) is False
+    fell = _df4h(up + [ma480 - 20])              # 정배열 + 480선 아래
+    assert leader_break.blocked(fell, Params(exhausted_filter=False)) is False
+    down = _df4h(np.linspace(400.0, 100.0, 600))  # 역배열
+    assert leader_break.blocked(down, Params(require_aligned=False)) is False
+    # 둘 다 끄면 아무것도 안 걸린다
+    off = Params(require_aligned=False, exhausted_filter=False)
+    assert leader_break.blocked(fell, off) is False and leader_break.blocked(down, off) is False
 
 
 def alignment_of(df):

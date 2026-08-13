@@ -137,6 +137,8 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         watch_days=int(s.get("watch_days", 7)),
         max_watch=int(s.get("max_watch", 60)),
         exhausted_filter=bool(s.get("exhausted_filter", True)),
+        require_aligned=bool(s.get("require_aligned", True)),
+        allow_short_history=bool(s.get("allow_short_history", False)),
         exhausted_mas=tuple(s.get("exhausted_mas", (120, 240, 480))),
         exhausted_below=int(s.get("exhausted_below", 480)),
     )
@@ -167,14 +169,15 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         log(f"[binance] 크립토 모멘텀 눌림목/이탈: max_watch={params.max_watch} 초과분 "
             f"{dropped}종은 이번 스캔에서 제외 (최근 등재 순으로 남김)")
 
-    def is_exhausted(sym: str) -> bool:
-        """4h 정배열 + 480선 아래면 제외 — 이미 오를 만큼 오르고 꺾인 자리.
+    def is_blocked(sym: str) -> bool:
+        """4h 구조로 걸러낼 종목인지 — 정배열이 아니거나, 정배열인데 480선 아래.
 
         4h 프레임이 이미 있으면 그걸 쓰고(스캔이 받아온 750봉), 없으면
         (인트라바에 4h 대상 시그널이 없는 경우) 해당 종목만 따로 받는다.
-        조회 실패는 제외하지 않는다 — 판단 불가는 통과.
+        **조회 실패는 제외하지 않는다** — 네트워크 문제로 주도주가 통째로
+        사라지면 안 되니, 판단 자체가 불가능한 경우만 통과로 둔다.
         """
-        if not params.exhausted_filter:
+        if not (params.require_aligned or params.exhausted_filter):
             return False
         need = max(params.exhausted_mas + (params.exhausted_below,))
         df4 = (frames or {}).get(sym)
@@ -186,13 +189,13 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             except Exception as e:              # noqa: BLE001
                 log(f"[binance] {sym} 4h 수집 실패: {data_binance._safe(e)}")
                 return False
-        return leader_break.exhausted(df4, params)
+        return leader_break.blocked(df4, params)
 
     now = pd.Timestamp.now(tz="UTC")
     rank = {sym: i + 1 for i, (sym, _) in enumerate(top)}
     events, ongoing, spent = [], [], []
     for sym, since in watch:
-        if is_exhausted(sym):
+        if is_blocked(sym):
             spent.append(sym)
             continue
         try:
@@ -225,8 +228,13 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                 bar_time=pd.Timestamp(since) if since is not None else now,
                 price=snap["last_price"], detail=annotate(snap)))
     if spent:
-        log(f"[binance] 크립토 모멘텀 눌림목/이탈 제외 {len(spent)}종 "
-            f"(4h 정배열 + {params.exhausted_below}선 아래): {', '.join(spent)}")
+        why = []
+        if params.require_aligned:
+            why.append("4h 정배열 아님")
+        if params.exhausted_filter:
+            why.append(f"정배열이나 {params.exhausted_below}선 아래")
+        log(f"[binance] 크립토 모멘텀 눌림목/이탈 제외 {len(spent)}/{len(watch)}종 "
+            f"({' 또는 '.join(why)}): {', '.join(spent)}")
     # 알림 맨 위에 실을 순위표 — 조건(60선 이탈·제외 필터)과 무관하게 상위 그대로
     board = [{"symbol": sym, "rank": i + 1, "gain_24h": t["change_pct"],
               "price": t.get("last"), "turnover_24h": t.get("quote_volume")}
