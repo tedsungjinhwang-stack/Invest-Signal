@@ -48,8 +48,8 @@ class Params:
     #   above  — 트리거 봉 종가가 VWAP 위 (선 위로 올라선 것을 확인하고 진입)
     #   touch  — 최근 vwap_touch_bars봉 안에 VWAP이 캔들 범위 안 (선까지 눌린 자리)
     #   any    — 둘 중 하나면 통과
-    vwap_mode: str = "touch"
-    vwap_touch_bars: int = 1     # touch/any에서 터치를 인정할 소급 봉 수
+    vwap_mode: str = "any"
+    vwap_touch_bars: int = 5     # touch/any 소급 창 — 5봉 = 20시간
     supertrend_condition: bool = True   # 수퍼트렌드가 상승추세일 때만 발화
     st_period: int = 22          # 수퍼트렌드 ATR 기간
     st_mult: float = 3.0         # 수퍼트렌드 ATR 배수
