@@ -1,16 +1,25 @@
 # Invest-Signal 설정
 
 signal:
-  uptrend_onset:            # 상승초입 (4h봉): 역배열 + 240터치 → 20선 이탈
+  uptrend_onset:            # 상승초입 (4h봉): 역배열 + 수퍼트렌드 상승 → 20선 이탈
     enabled: true
     ma_align: [120, 240, 480]  # 역배열 판정선 (짧은 것부터). 120을 빼면 더 느슨해진다
     ma_entry: 20            # 이탈 판정 기준선 — 4h×20 = 약 3.3일
-    touch_window_bars: 60   # 240선 터치 후 이탈을 기다리는 기간 — 60봉 = 10일
     grace_bars: 1           # 직전 스캔을 놓쳤을 때 소급 허용할 봉 수
-    # VWAP 조건: 종가가 앵커드 VWAP 위일 때까지 기다릴지.
-    # ETF·주식은 끄고(이탈 즉시 알림), 크립토는 켠다 —
+    # 240선 터치 조건 — 껐다. 켜면 '역배열 상태에서 캔들이 240선을 걸친 봉'이
+    # touch_window_bars 안에 있어야 하고, '첫 봉' 기준점도 그 터치가 된다.
+    touch_condition: false
+    touch_window_bars: 60   # (touch_condition을 켤 때만 의미 있음) 60봉 = 10일
+    # 수퍼트렌드(4h) 상승추세 요구 — 역배열과 함께 걸면 "장기 구조는 아직
+    # 하락인데 단기 추세는 이미 위로 돌아선" 구간만 남는다.
+    supertrend_condition: true
+    st_period: 22           # 수퍼트렌드 ATR 기간
+    st_mult: 3.0            # 수퍼트렌드 ATR 배수
+    # VWAP 조건. ETF·주식은 끄고(이탈 즉시 알림), 크립토는 켠다 —
     # 크립토는 종목이 373개라 끄면 알림이 몇 배로 늘어난다.
     vwap_period: M          # 앵커드 VWAP 리셋 주기 — M(월간)/Q(분기)/W(주간)
+    vwap_mode: above        # above(종가가 선 위) / touch(최근 선을 찍음) / any
+    vwap_touch_bars: 6      # touch·any에서 터치를 인정할 소급 봉 수 — 6봉 = 하루
     vwap_condition: false
     crypto_vwap_condition: true
     crypto_rank_filter:     # 크립토 전용 — 3파 전 초입이라 눌림목보다 낮은 기준

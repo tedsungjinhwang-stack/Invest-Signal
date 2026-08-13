@@ -158,7 +158,9 @@ def test_leaders_persist_and_expire_after_watch_window(tmp_path):
     from invest_signal.state import AlertState
 
     p = tmp_path / "s.json"
-    now = datetime(2026, 8, 6, tzinfo=timezone.utc)
+    # save()의 prune은 실제 시계로 돈다 — 고정 날짜를 쓰면 그 날짜가 과거가
+    # 되는 순간 등재분이 통째로 잘려 테스트가 시한폭탄이 된다.
+    now = datetime.now(timezone.utc)
     st = AlertState(str(p))
     st.touch_leaders(["AUSDT", "BUSDT"], when=now - timedelta(days=1))
     st.touch_leaders(["OLDUSDT"], when=now - timedelta(days=9))

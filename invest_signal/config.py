@@ -32,9 +32,15 @@ def uptrend_params(cfg: dict, crypto: bool = False) -> uptrend_onset.Params:
     s = (cfg.get("signal") or {}).get("uptrend_onset") or {}
     return uptrend_onset.Params(
         ma_entry=int(s.get("ma_entry", 20)),
-        touch_window_bars=int(s.get("touch_window_bars", 60)),
         grace_bars=int(s.get("grace_bars", 1)),
         ma_align=tuple(s.get("ma_align", (120, 240, 480))),
+        touch_condition=bool(s.get("touch_condition", False)),
+        touch_window_bars=int(s.get("touch_window_bars", 60)),
+        vwap_mode=str(s.get("vwap_mode", "above")),
+        vwap_touch_bars=int(s.get("vwap_touch_bars", 6)),
+        supertrend_condition=bool(s.get("supertrend_condition", True)),
+        st_period=int(s.get("st_period", 22)),
+        st_mult=float(s.get("st_mult", 3.0)),
         vwap_condition=bool(market_value(_vwap_aliases(s), "vwap_condition",
                                          True, crypto)),
         vwap_period=str(s.get("vwap_period", "M")),

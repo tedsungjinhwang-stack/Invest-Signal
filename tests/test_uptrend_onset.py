@@ -8,13 +8,17 @@ from invest_signal.signals.uptrend_onset import Params
 
 DECLINE = 600           # 역배열을 만들 하락 구간 봉 수
 
-# 기본 파라미터 — 합성 데이터에 Volume이 없으면 VWAP 조건은 자동 통과
-P = Params()
+# 아래 픽스처는 대부분 단조 하락이라 수퍼트렌드가 계속 하락추세다.
+# ①역배열·②터치·③이탈 로직만 떼어 보려고 수퍼트렌드는 꺼 두고,
+# 240 터치 경로는 명시적으로 켠다(기본값은 꺼짐).
+# 합성 데이터에 Volume이 없으면 VWAP 조건은 자동 통과한다.
+LEGACY = dict(touch_condition=True, supertrend_condition=False)
+P = Params(**LEGACY)
 
 
 def QP(on: bool) -> Params:
     """분기 앵커 VWAP 파라미터 — 픽스처가 한 분기 안에 들어가 리셋이 없다."""
-    return Params(vwap_condition=on, vwap_period="Q")
+    return Params(vwap_condition=on, vwap_period="Q", **LEGACY)
 
 
 def make_df(closes, highs, volumes=None, start="2025-01-01"):
@@ -95,13 +99,13 @@ def test_stale_trigger_respects_grace():
     add_drop(closes, highs)                      # 트리거 봉
     add_drop(closes, highs)                      # 그 뒤 1봉 경과
     df = make_df(closes, highs)
-    evs = uptrend_onset.detect(df, "TEST", Params(grace_bars=1))
+    evs = uptrend_onset.detect(df, "TEST", Params(grace_bars=1, **LEGACY))
     assert len(evs) == 1 and evs[0].bar_time == df.index[-2]   # 트리거 봉 기준
-    assert uptrend_onset.detect(df, "TEST", Params(grace_bars=0)) == []
+    assert uptrend_onset.detect(df, "TEST", Params(grace_bars=0, **LEGACY)) == []
 
     add_drop(closes, highs)                      # 2봉 경과 → grace=1로도 stale
     df = make_df(closes, highs)
-    assert uptrend_onset.detect(df, "TEST", Params(grace_bars=1)) == []
+    assert uptrend_onset.detect(df, "TEST", Params(grace_bars=1, **LEGACY)) == []
 
 
 def test_touch_window_boundary_exact():
@@ -113,7 +117,7 @@ def test_touch_window_boundary_exact():
         add_drop(closes, highs, 90.0)
         return make_df(closes, highs)
 
-    p = Params(touch_window_bars=60)
+    p = Params(touch_window_bars=60, **LEGACY)
     df60 = build(59)                             # 터치→트리거 간격 = 60봉
     evs = uptrend_onset.detect(df60, "TEST", p)
     assert len(evs) == 1 and evs[0].bar_time == df60.index[-1]
@@ -146,7 +150,7 @@ def test_missed_bar_trigger_found_even_if_it_touches():
     highs.append(ma240 + 1.0)
     add_sideways(closes, highs, bars=1)          # 다음 봉은 이탈선 위 복귀
     df = make_df(closes, highs)
-    evs = uptrend_onset.detect(df, "TEST", Params(grace_bars=1))
+    evs = uptrend_onset.detect(df, "TEST", Params(grace_bars=1, **LEGACY))
     assert len(evs) == 1 and evs[0].bar_time == df.index[-2]
 
 
@@ -192,8 +196,8 @@ def test_ma_align_two_lines_admits_what_three_lines_reject():
     c = df["Close"]
     ma = {k: float(c.rolling(k).mean().iloc[-1]) for k in (120, 240, 480)}
     assert ma[120] > ma[240] < ma[480]          # 전제: 120선만 뒤집힌 상태
-    assert len(uptrend_onset.detect(df, "TEST", Params(ma_align=(240, 480)))) == 1
-    assert uptrend_onset.detect(df, "TEST", Params(ma_align=(120, 240, 480))) == []
+    assert len(uptrend_onset.detect(df, "TEST", Params(ma_align=(240, 480), **LEGACY))) == 1
+    assert uptrend_onset.detect(df, "TEST", Params(ma_align=(120, 240, 480), **LEGACY)) == []
 
 
 def test_ma_align_three_lines_still_fires_on_full_bearish():
@@ -202,7 +206,7 @@ def test_ma_align_three_lines_still_fires_on_full_bearish():
     add_touch(closes, highs)
     add_drop(closes, highs)
     df = make_df(closes, highs)
-    evs = uptrend_onset.detect(df, "TEST", Params(ma_align=(120, 240, 480)))
+    evs = uptrend_onset.detect(df, "TEST", Params(ma_align=(120, 240, 480), **LEGACY))
     assert len(evs) == 1 and evs[0].bar_time == df.index[-1]
 
 
@@ -277,3 +281,81 @@ def test_still_active_tracks_until_240_refail():
     assert uptrend_onset.still_active(make_df(closes, highs), ev, P)
     add_drop(closes, highs, 140.0)                     # 240선 아래 재마감 → 실패
     assert not uptrend_onset.still_active(make_df(closes, highs), ev, P)
+
+
+def rebound_with_supertrend_up(rise=25, step=4.0, flat=15, dip=0.01, dip_bars=2):
+    """하락 → 반등 → 횡보 → 얕은 눌림.
+
+    끝 봉에서 역배열(MA120<MA240<MA480)은 그대로인데 수퍼트렌드는 상승으로
+    뒤집혀 있고, 종가는 MA20 아래다 — 이 시그널이 노리는 바로 그 상태다.
+    눌림을 깊게 잡으면 수퍼트렌드가 도로 하락으로 뒤집혀 픽스처가 깨진다.
+    """
+    closes, highs = base_decline()
+    for _ in range(rise):                        # 반등 — 수퍼트렌드를 상승으로
+        closes.append(closes[-1] + step)
+        highs.append(closes[-1])
+    for _ in range(flat):                        # 횡보 — MA20이 따라붙는다
+        closes.append(closes[-1] + 0.01)
+        highs.append(closes[-1])
+    for _ in range(dip_bars):                    # 얕은 눌림 — 종가 < MA20
+        closes.append(closes[-1] * (1 - dip))
+        highs.append(closes[-1])
+    return make_df(closes, highs)
+
+
+def test_supertrend_condition_gates_signal():
+    """수퍼트렌드가 상승일 때만 발화 — 같은 가격에서 배수만 조여 하락으로
+    뒤집으면 다른 조건이 다 맞아도 안 뜬다."""
+    from invest_signal.indicators import supertrend
+
+    df = rebound_with_supertrend_up()
+    c = df["Close"]
+    ma = {k: float(c.rolling(k).mean().iloc[-1]) for k in (20, 120, 240, 480)}
+    assert ma[120] < ma[240] < ma[480]                   # 전제: 아직 역배열
+    assert c.iloc[-1] < ma[20]                           # 전제: MA20 아래
+    assert supertrend(df, 22, 3.0).iloc[-1] == 1         # 전제: 수퍼트렌드 상승
+    evs = uptrend_onset.detect(df, "TEST", Params())
+    assert len(evs) == 1 and evs[0].detail["supertrend"] == 1
+
+    # 배수를 조이면 같은 가격인데 수퍼트렌드가 하락으로 뒤집힌다 → 차단
+    assert supertrend(df, 22, 1.0).iloc[-1] == -1
+    assert uptrend_onset.detect(df, "TEST", Params(st_mult=1.0)) == []
+    # 조건 자체를 끄면 다시 발화 — 수퍼트렌드가 유일한 차단 사유였다
+    assert len(uptrend_onset.detect(
+        df, "TEST", Params(st_mult=1.0, supertrend_condition=False))) == 1
+
+
+def test_without_touch_condition_fires_on_state_entry():
+    """터치 조건이 꺼진 기본값은 '상태에 막 들어선 봉'만 알린다 —
+    이어지는 봉은 같은 이탈이라 재알림하지 않는다."""
+    df = rebound_with_supertrend_up()
+    evs = uptrend_onset.detect(df, "TEST", Params(grace_bars=3))
+    assert len(evs) == 1                          # 눌림 2봉이지만 첫 봉만
+    assert evs[0].bar_time == df.index[-2]
+    assert evs[0].detail["touch_time"] is None    # 터치 기준점이 없다
+    # 240 터치를 다시 요구하면 이 픽스처엔 터치가 없어 걸러진다
+    assert uptrend_onset.detect(df, "TEST",
+                                Params(grace_bars=3, touch_condition=True)) == []
+
+
+def test_vwap_mode_touch_vs_above():
+    """종가가 VWAP 아래인 눌림 — above는 거르고, 캔들이 선을 찍었으면 touch는 통과."""
+    from invest_signal.indicators import anchored_vwap
+
+    df = rebound_with_supertrend_up()
+    vol = [1.0] * len(df)
+    for i in range(DECLINE + 25, DECLINE + 40):   # 횡보 구간 몰빵 → VWAP을 위로
+        vol[i] = 1e7
+    df = df.assign(Volume=vol)
+    vw = float(anchored_vwap(df, "M").iloc[-1])
+    assert df["Close"].iloc[-1] < vw                    # 전제: 종가가 VWAP 아래
+    assert df["High"].iloc[-1] < vw                     # 전제: 선을 찍지도 않음
+    for mode in ("above", "touch", "any"):
+        assert uptrend_onset.detect(df, "TEST", Params(vwap_mode=mode)) == []
+
+    # 윗꼬리가 선을 찍게 하면 touch·any만 통과 — above는 종가 기준이라 그대로 차단
+    hit = df.copy()
+    hit.iloc[-1, hit.columns.get_loc("High")] = vw + 1.0
+    assert uptrend_onset.detect(hit, "TEST", Params(vwap_mode="above")) == []
+    assert len(uptrend_onset.detect(hit, "TEST", Params(vwap_mode="touch"))) == 1
+    assert len(uptrend_onset.detect(hit, "TEST", Params(vwap_mode="any"))) == 1

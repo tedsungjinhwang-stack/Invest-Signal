@@ -2,23 +2,31 @@
 
 조건:
   ① ma_align 이동평균이 역배열(기본 MA120 < MA240 < MA480)인 상태에서
-  ② 캔들 고가가 240선에 닿음(터치)
-  ③ 터치 후 touch_window_bars(기본 60봉 = 10일) 이내에
-  ④ 종가가 ma_entry(기본 20)선 아래이면서 앵커드 VWAP(기본 월간 MVWAP)
-     "위"에 있는 "첫" 봉 → 그 봉에서 시그널 발생. VWAP 선이 캔들 위에
-     있다가 (월 리셋 등으로) 아래로 확 내려와 종가가 그 위로 올라선
-     순간을 잡는다 — 이탈선을 깼는데 아직 VWAP 아래면 대기하고, 종가가
-     VWAP 위가 되는 봉에서 알린다.
+  ② 종가가 ma_entry(기본 20)선 아래이고
+  ③ 앵커드 VWAP(기본 월간 MVWAP) 조건을 만족하고
+       above — 종가가 VWAP 위 (선 위로 올라선 것을 확인)
+       touch — 최근 vwap_touch_bars봉 안에 VWAP이 캔들 범위 안 (선까지 눌림)
+       any   — 둘 중 하나
+  ④ 수퍼트렌드(4h, ATR 22 × 3)가 상승추세인
+     "첫" 봉 → 그 봉에서 시그널 발생. 조건을 아직 못 채운 이탈 봉은
+     발화하지 않고 대기하다가, 조건이 성립하는 첫 봉에서 알린다.
 
-같은 터치에 대해 그 상태가 계속 유지돼도 첫 봉에서만 발생한다.
-새로운 240 터치가 나오면 다시 발생할 수 있다.
+①과 ④를 함께 걸면 "장기 구조는 아직 하락(역배열)인데 단기 추세는 이미
+위로 돌아선" 구간만 남는다 — 그 상태에서의 첫 눌림이 이 시그널의 타깃이다.
+
+touch_condition을 켜면 ① 앞에 **240선 터치**가 추가된다 — 역배열 상태에서
+캔들이 240선을 걸친 봉이 touch_window_bars 안에 있어야 하고, '첫 봉'의
+기준점도 그 터치가 된다. 기본은 꺼져 있다.
+
+조건이 계속 유지돼도 첫 봉에서만 발생하고, 상태를 벗어났다 다시 들어오면
+새 시그널로 다시 발생한다.
 """
 
 from dataclasses import dataclass
 
 import pandas as pd
 
-from ..indicators import anchored_vwap, sma
+from ..indicators import anchored_vwap, sma, supertrend
 from . import SignalEvent
 
 NAME = "uptrend_onset"
@@ -30,11 +38,21 @@ INTRABAR_OK = True   # 진행봉 현재가를 잠정 종가로 판정 — 알림
 class Params:
     ma_entry: int = 20          # 이탈 판정 기준선 (4h×20 = 약 3.3일)
     ma_align: tuple = (120, 240, 480)   # 역배열 판정선 (짧은 것부터)
-    ma_touch: int = 240         # 터치 판정 기준선
+    touch_condition: bool = False  # 240선 터치를 추가로 요구할지 (아래 설명 참고)
+    ma_touch: int = 240         # 터치 판정 기준선 (추적 해제 판정에도 쓰인다)
     touch_window_bars: int = 60  # 터치 유효기간(봉 수). 4h×60 = 10일
     grace_bars: int = 1         # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
-    vwap_condition: bool = True  # ④ 트리거 종가 > VWAP 요구 (Volume 없으면 자동 통과)
+    vwap_condition: bool = True  # ④ VWAP 조건 사용 여부 (Volume 없으면 자동 통과)
     vwap_period: str = "M"       # 앵커드 VWAP 리셋 주기 — M(월간)/Q(분기)/W(주간)
+    # ④의 판정 방식:
+    #   above  — 트리거 봉 종가가 VWAP 위 (선 위로 올라선 것을 확인하고 진입)
+    #   touch  — 최근 vwap_touch_bars봉 안에 VWAP이 캔들 범위 안 (선까지 눌린 자리)
+    #   any    — 둘 중 하나면 통과
+    vwap_mode: str = "above"
+    vwap_touch_bars: int = 6     # touch/any에서 터치를 인정할 소급 봉 수 (6봉 = 하루)
+    supertrend_condition: bool = True   # 수퍼트렌드가 상승추세일 때만 발화
+    st_period: int = 22          # 수퍼트렌드 ATR 기간
+    st_mult: float = 3.0         # 수퍼트렌드 ATR 배수
 
 
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
@@ -54,6 +72,8 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     aligns = [sma(close, k) for k in params.ma_align]   # 선 개수는 설정에 따라 2~N
     m_touch = sma(close, params.ma_touch)
     vw = anchored_vwap(df, params.vwap_period)
+    st = (supertrend(df, params.st_period, params.st_mult)
+          if params.supertrend_condition else None)
 
     last = n - 1
 
@@ -81,17 +101,49 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     def below_entry(i: int) -> bool:
         return not pd.isna(m_entry.iloc[i]) and close.iloc[i] < m_entry.iloc[i]
 
-    def is_trigger_state(i: int) -> bool:
-        """이탈선 아래 + (vwap_condition이면) 종가가 앵커드 VWAP 위인 상태.
+    def vwap_touched(i: int) -> bool:
+        """최근 vwap_touch_bars봉 안에 VWAP선이 캔들 범위 안에 들어왔는지.
 
-        이탈 봉이 아직 VWAP 아래면 발화하지 않고 대기 — VWAP 선이
-        내려와 종가가 그 위가 되는 첫 봉에서 발화한다.
+        240선 터치와 같은 정의(저가 ≤ 선 ≤ 고가)를 VWAP에 적용한 것이다.
+        선을 '위에서 눌러 닿은' 자리를 잡으려는 조건이라, 종가가 선 위든
+        아래든 상관하지 않는다.
         """
-        if not below_entry(i):
-            return False
+        for j in range(max(0, i - params.vwap_touch_bars + 1), i + 1):
+            if pd.isna(vw.iloc[j]):
+                continue
+            if high.iloc[j] >= vw.iloc[j] >= low.iloc[j]:
+                return True
+        return False
+
+    def vwap_ok(i: int) -> bool:
+        """④ VWAP 조건 — vwap_mode에 따라 '위'/'터치'/'둘 중 하나'."""
         if not params.vwap_condition or vw is None or pd.isna(vw.iloc[i]):
             return True
-        return bool(close.iloc[i] > vw.iloc[i])
+        above = bool(close.iloc[i] > vw.iloc[i])
+        if params.vwap_mode == "above":
+            return above
+        if params.vwap_mode == "touch":
+            return vwap_touched(i)
+        return above or vwap_touched(i)          # any
+
+    def uptrend_st(i: int) -> bool:
+        """수퍼트렌드가 상승추세(+1)인지. ATR이 아직 없는 구간은 불통과.
+
+        역배열과 함께 걸면 '장기 구조는 아직 하락이지만 단기 추세는 이미
+        위로 돌아선' 구간만 남는다 — 그 상태에서의 첫 눌림이 타깃이다.
+        """
+        if st is None:
+            return True
+        v = st.iloc[i]
+        return not pd.isna(v) and v > 0
+
+    def is_trigger_state(i: int) -> bool:
+        """이탈선 아래 + VWAP 조건 + 수퍼트렌드 상승을 모두 만족하는 상태.
+
+        조건을 아직 못 채운 이탈 봉은 발화하지 않고 대기 — 조건이 성립하는
+        첫 봉에서 발화한다.
+        """
+        return below_entry(i) and vwap_ok(i) and uptrend_st(i)
 
     events = []
     for t in range(max(need, last - params.grace_bars), last + 1):
@@ -102,15 +154,20 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
         long2, long1 = aligns[-2].iloc[t], aligns[-1].iloc[t]
         if not pd.isna(long1) and not pd.isna(long2) and long2 > long1:
             continue
-        touch_idx = None        # t 직전 touch_window 안에서 가장 최근 터치
-        for i in range(t - 1, max(need - 1, t - params.touch_window_bars) - 1, -1):
-            if is_touch(i):
-                touch_idx = i
-                break
-        if touch_idx is None:
+        touch_idx = None
+        if params.touch_condition:
+            for i in range(t - 1, max(need - 1, t - params.touch_window_bars) - 1, -1):
+                if is_touch(i):     # t 직전 touch_window 안에서 가장 최근 터치
+                    touch_idx = i
+                    break
+            if touch_idx is None:
+                continue
+            if any(is_trigger_state(j) for j in range(touch_idx + 1, t)):
+                continue        # t가 터치 이후 "첫" 이탈 봉이 아님
+        # 터치 조건이 없으면 기준 시점이 없으므로 '상태에 막 들어선 봉'을
+        # 첫 봉으로 본다 — 직전 봉이 이미 같은 상태면 이어지는 중이다
+        elif is_trigger_state(t - 1):
             continue
-        if any(is_trigger_state(j) for j in range(touch_idx + 1, t)):
-            continue            # t가 터치 이후 "첫" 이탈 봉이 아님
         vw_val = vw_above = None
         if vw is not None and not pd.isna(vw.iloc[t]):
             vw_val = float(vw.iloc[t])
@@ -125,11 +182,16 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
                 "entry_ma": float(m_entry.iloc[t]),
                 "entry_ma_period": params.ma_entry,
                 "ma240": float(m_touch.iloc[t]) if not pd.isna(m_touch.iloc[t]) else None,
-                "touch_time": df.index[touch_idx].isoformat(),
-                "touch_high": float(high.iloc[touch_idx]),
+                "touch_time": (df.index[touch_idx].isoformat()
+                               if touch_idx is not None else None),
+                "touch_high": (float(high.iloc[touch_idx])
+                               if touch_idx is not None else None),
                 "vwap": vw_val,
                 "above_vwap": vw_above,
                 "vwap_period": params.vwap_period,
+                "vwap_mode": params.vwap_mode,
+                "supertrend": (None if st is None or pd.isna(st.iloc[t])
+                               else int(st.iloc[t])),
             },
         ))
     return events
