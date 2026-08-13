@@ -387,3 +387,38 @@ def test_bearish_alignment_required_without_touch_condition():
     # (240,480)로 보면 여전히 역배열이라 통과한다
     assert len(uptrend_onset.detect(
         up, "TEST", Params(grace_bars=3, ma_align=(240, 480)))) == 1
+
+
+def test_tracking_drops_when_supertrend_flips_down():
+    """진입 전제가 수퍼트렌드 상승이므로, 꺾이면 추적에서도 빠진다.
+
+    수퍼트렌드를 진입 조건으로 넣으면서 해제 조건에 반영하지 않아,
+    추세가 뒤집힌 종목이 계속 추적 목록에 남던 적이 있다(EIGEN).
+    """
+    from invest_signal.indicators import supertrend
+
+    df = rebound_with_supertrend_up()
+    ev = uptrend_onset.detect(df, "TEST", Params())[0]
+    assert supertrend(df, 22, 3.0).iloc[-1] == 1
+    assert uptrend_onset.still_active(df, ev, Params())      # 아직 상승추세 — 유지
+
+    # 같은 데이터에서 배수만 조여 하락으로 뒤집으면 제거된다
+    assert supertrend(df, 22, 1.0).iloc[-1] == -1
+    assert not uptrend_onset.still_active(df, ev, Params(st_mult=1.0))
+    # 조건을 끄면 예전처럼 240선 규칙만 본다 — 그대로 유지
+    assert uptrend_onset.still_active(
+        df, ev, Params(st_mult=1.0, supertrend_condition=False))
+
+
+def test_tracking_still_drops_on_failed_240_breakout():
+    """수퍼트렌드가 살아 있어도 240선 돌파 실패는 그대로 제거 사유다."""
+    closes, highs = base_decline()
+    add_touch(closes, highs)
+    add_drop(closes, highs)
+    df = make_df(closes, highs)
+    ev = uptrend_onset.detect(df, "TEST", P)[0]        # LEGACY: 수퍼트렌드 끔
+    p = Params(supertrend_condition=False)
+    add_sideways(closes, highs, bars=2, level=200.0)   # 240선(≈160) 위 마감
+    assert uptrend_onset.still_active(make_df(closes, highs), ev, p)
+    add_drop(closes, highs, 140.0)                     # 240선 아래 재마감 → 실패
+    assert not uptrend_onset.still_active(make_df(closes, highs), ev, p)

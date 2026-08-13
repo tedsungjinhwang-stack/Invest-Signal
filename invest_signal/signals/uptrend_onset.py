@@ -204,14 +204,24 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:
     """상승초입은 발생 후 상승 과정을 계속 추적한다(이탈선 위 복귀해도 유지).
 
-    제거 조건: 종가가 240선 위로 올라섰다가 다시 240선 아래로 마감하면
-    돌파 실패로 제거. 아직 240선을 넘지 못한 동안은 계속 유지되고,
+    제거 조건 두 가지:
+      · **수퍼트렌드가 하락으로 뒤집히면 제거.** 이 시그널의 전제가
+        "구조는 아직 하락인데 추세는 위로 돌아섰다"이므로, 그 추세가
+        꺾이면 셋업 자체가 사라진 것이다. 진입 조건이면서 해제 조건이다.
+      · 종가가 240선 위로 올라섰다가 다시 240선 아래로 마감하면 돌파
+        실패로 제거. 아직 240선을 넘지 못한 동안은 계속 유지된다.
+
     CHoCH(하락전환)로는 제거하지 않는다. 조회 범위(7일) 경과 시 자동 제거.
     """
     try:
         t = df.index.get_loc(event.bar_time)
     except KeyError:
         return False
+    if params.supertrend_condition:
+        st = supertrend(df, params.st_period, params.st_mult).iloc[t:]
+        st = st.dropna()
+        if len(st) and st.iloc[-1] <= 0:
+            return False             # 추세가 꺾였다 — 셋업 종료
     c = df["Close"].iloc[t:]
     m240 = sma(df["Close"], params.ma_touch).iloc[t:]
     above = c > m240
