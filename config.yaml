@@ -18,8 +18,11 @@ signal:
     supertrend_condition: true
     st_period: 22           # 수퍼트렌드 ATR 기간
     st_mult: 3.0            # 수퍼트렌드 ATR 배수
-    # VWAP 조건. ETF·주식은 끄고(이탈 즉시 알림), 크립토는 켠다 —
-    # 크립토는 종목이 373개라 끄면 알림이 몇 배로 늘어난다.
+    # VWAP 조건 — 크립토·ETF·주식 모두 켠다.
+    # 예전엔 ETF·주식만 껐다("종목이 적어 알림이 안 넘친다"는 이유였다).
+    # 유니버스가 47종이라 켜고 끄고의 알림 차이가 하루 1건 수준인데,
+    # 역배열 조건이 실제로 걸리게 고친 뒤 재보니 게이트가 승률을 6%p 올렸다.
+    # 시장별로 다시 가르려면 crypto_vwap_condition을 추가하면 된다.
     vwap_period: M          # 앵커드 VWAP 리셋 주기 — M(월간)/Q(분기)/W(주간)
     # 판정 방식 — any: 최근 vwap_touch_bars봉 안에 캔들이 선을 걸쳤거나(터치),
     # 종가가 선 위에 있거나 둘 중 하나면 통과. touch/above 단독도 고를 수 있다.
@@ -28,8 +31,7 @@ signal:
     # 파묻혀(1일 첫봉 100%, 첫날 76%) 위/아래 자체가 노이즈이기 때문이다.
     vwap_mode: any
     vwap_touch_bars: 5      # 터치 소급 창 — 5봉 = 20시간
-    vwap_condition: false
-    crypto_vwap_condition: true
+    vwap_condition: true
     crypto_rank_filter:     # 크립토 전용 — 3파 전 초입이라 눌림목보다 낮은 기준
       enabled: true
       volume_top: 200       # 24h 거래대금 상위 N위 이내, 또는

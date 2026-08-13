@@ -70,11 +70,16 @@
    또는 최근 3일 상승률 상위 `gain_top`(기본 100)에 들고, 24h 거래대금
    `min_turnover_usd`(기본 $1M) 이상. ETF·주식에는 적용하지 않는다
 
-   > **VWAP 조건은 시장별로 다르다** — 크립토는 켜고
-   > (`crypto_vwap_condition: true`), ETF·주식은 끈다
-   > (`vwap_condition: false`). 크립토만 켜는 이유는 종목 수다 — 랭크 필터를
-   > 통과한 뒤에도 끄면 알림이 몇 할 더 늘어난다. ETF·주식은 40종 안팎이라
-   > 꺼도 감당된다.
+   > **④ VWAP 조건은 세 시장 모두 켜져 있다**(`vwap_condition: true`).
+   > 예전엔 ETF·주식만 껐는데(종목이 적어 알림이 안 넘친다는 이유),
+   > 유니버스가 47종이라 켜고 끄고의 알림 차이가 하루 1건 수준이다 —
+   > 종목당으로 환산하면 켬 4.7건/일·승률 68.6% vs 끔 5.7건/일·62.5%.
+   > 알림 부담은 사실상 같고 승률만 6%p 벌어져서 켜는 쪽으로 통일했다.
+   > 시장별로 다시 가르려면 `crypto_vwap_condition`을 추가하면 된다.
+   >
+   > 단 위 수치는 **크립토 데이터를 종목당으로 환산한 추정치**다. 주식·ETF는
+   > 장 마감과 갭 때문에 4h봉이 세션을 온전히 못 채우고 거래량 분포도 달라,
+   > 앵커드 VWAP이 같은 정도로 작동한다는 보장은 없다.
 
 ### 눌림목 (pullback) — ETF·주식 전용
 
@@ -427,7 +432,7 @@ signal:
     vwap_period: M             # 앵커드 VWAP 리셋 주기 — M/Q/W
     vwap_mode: any             # any / touch / above
     vwap_touch_bars: 5         # 터치 소급 창(봉) — 5봉 = 20시간
-    vwap_condition: true       # VWAP 조건 사용 여부
+    vwap_condition: true       # VWAP 조건 사용 여부 (세 시장 공통)
   pullback:
     enabled: true
     ma_entry: 120              # 하회 판정 기준선
