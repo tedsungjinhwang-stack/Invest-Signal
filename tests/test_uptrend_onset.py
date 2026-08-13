@@ -17,8 +17,12 @@ P = Params(**LEGACY)
 
 
 def QP(on: bool) -> Params:
-    """분기 앵커 VWAP 파라미터 — 픽스처가 한 분기 안에 들어가 리셋이 없다."""
-    return Params(vwap_condition=on, vwap_period="Q", **LEGACY)
+    """분기 앵커 + above 모드 — 픽스처가 한 분기 안에 들어가 리셋이 없다.
+
+    아래 두 테스트는 '종가가 선 위로 올라서는 순간'을 검증하므로 판정
+    방식을 above로 고정한다(기본값은 touch).
+    """
+    return Params(vwap_condition=on, vwap_period="Q", vwap_mode="above", **LEGACY)
 
 
 def make_df(closes, highs, volumes=None, start="2025-01-01"):
