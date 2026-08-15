@@ -1,7 +1,7 @@
 """상승초입 시그널 (4h봉).
 
 조건:
-  ① ma_align 이동평균이 역배열(기본 MA120 < MA240)인 상태에서
+  ① ma_align 이동평균이 역배열(기본 MA120 < MA240 < MA480)인 상태에서
   ② 종가가 ma_entry(기본 20)선 아래이고
   ③ 앵커드 VWAP(기본 월간 MVWAP) 조건을 만족하고
        above — 종가가 VWAP 위 (선 위로 올라선 것을 확인)
@@ -37,7 +37,7 @@ INTRABAR_OK = True   # 진행봉 현재가를 잠정 종가로 판정 — 알림
 @dataclass(frozen=True)
 class Params:
     ma_entry: int = 20          # 이탈 판정 기준선 (4h×20 = 약 3.3일)
-    ma_align: tuple = (120, 240)        # 역배열 판정선 (짧은 것부터)
+    ma_align: tuple = (120, 240, 480)   # 역배열 판정선 (짧은 것부터)
     touch_condition: bool = False  # 240선 터치를 추가로 요구할지 (아래 설명 참고)
     ma_touch: int = 240         # 터치 판정 기준선 (touch_condition을 켤 때만 쓰인다)
     touch_window_bars: int = 60  # 터치 유효기간(봉 수). 4h×60 = 10일

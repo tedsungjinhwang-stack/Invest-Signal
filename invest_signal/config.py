@@ -34,7 +34,7 @@ def uptrend_params(cfg: dict, crypto: bool = False) -> uptrend_onset.Params:
     return uptrend_onset.Params(
         ma_entry=int(s.get("ma_entry", 20)),
         grace_bars=int(s.get("grace_bars", 1)),
-        ma_align=tuple(s.get("ma_align", (120, 240))),
+        ma_align=tuple(s.get("ma_align", (120, 240, 480))),
         touch_condition=bool(s.get("touch_condition", False)),
         touch_window_bars=int(s.get("touch_window_bars", 60)),
         vwap_mode=str(s.get("vwap_mode", "any")),
