@@ -124,3 +124,25 @@ def test_lookback_expiry():
     df = make_df(closes, lows)
     assert downtrend_reversal.detect(df, "TEST", Params(lookback_bars=40)) == []
     assert len(downtrend_reversal.detect(df, "TEST", Params(lookback_bars=180))) == 1
+
+
+def test_still_active_drops_when_supertrend_flips_up():
+    """하락전환은 거울이다 — 수퍼트렌드가 **상승**으로 뒤집히면 추적 해제."""
+    from invest_signal.indicators import supertrend
+    from invest_signal.signals.downtrend_reversal import Params as DParams
+
+    closes, lows, level = uptrend_with_completed_dip()
+    closes.append(level - 1)                       # 직전저점 하향돌파
+    lows.append(level - 2)
+    df = make_df(closes, lows)
+    p = DParams(qvwap_condition=False, supertrend_exit=False)
+    ev = downtrend_reversal.detect(df, "TEST", p)[0]
+    assert downtrend_reversal.still_active(df, ev, p)   # 조건 끔 — 유지
+
+    # 급등 봉을 붙여 수퍼트렌드를 상승으로 뒤집는다
+    closes.append(level * 1.6)
+    lows.append(level - 2)
+    up = make_df(closes, lows)
+    assert supertrend(up, 22, 3.0).dropna().iloc[-1] == 1
+    assert not downtrend_reversal.still_active(
+        up, ev, DParams(qvwap_condition=False))        # 켜면 제거

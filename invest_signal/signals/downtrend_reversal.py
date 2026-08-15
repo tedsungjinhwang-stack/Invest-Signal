@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..indicators import quarterly_vwap, sma
+from ..indicators import quarterly_vwap, sma, supertrend
 from . import SignalEvent
 
 NAME = "downtrend_reversal"
@@ -33,6 +33,9 @@ class Params:
     ma_ref: int = 60            # 눌림 판정 기준선
     lookback_bars: int = 180    # 직전저점 유효기간(봉 수). 4h×180 = 30일
     grace_bars: int = 1         # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
+    supertrend_exit: bool = True   # 수퍼트렌드가 **상승**으로 뒤집히면 추적 해제
+    st_period: int = 22            # 수퍼트렌드 ATR 기간
+    st_mult: float = 3.0           # 수퍼트렌드 ATR 배수
     qvwap_condition: bool = True  # ④ 돌파 봉 종가 < 분기VWAP 요구 (Volume 없으면 자동 통과)
 
 
@@ -105,9 +108,18 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
 
 
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:
-    """트리거 이후 종가가 계속 깨진 직전저점 아래에 머물러 있으면 '유지 중'."""
+    """트리거 이후 종가가 계속 깨진 직전저점 아래에 머물러 있으면 '유지 중'.
+
+    수퍼트렌드 해제 조건은 **거울 방향**이다 — 이 시그널의 전제가 하락
+    전환이므로, 추세가 **상승**으로 뒤집히면 셋업이 끝난 것이다.
+    (상승초입·눌림목은 반대로 하락 전환 시 해제한다.)
+    """
     try:
         t = df.index.get_loc(event.bar_time)
     except KeyError:
         return False
+    if params.supertrend_exit:
+        st = supertrend(df, params.st_period, params.st_mult).dropna()
+        if len(st) and st.iloc[-1] > 0:
+            return False
     return bool((df["Close"].iloc[t:] < event.detail["broken_low"]).all())

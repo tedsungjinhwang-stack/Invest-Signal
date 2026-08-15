@@ -315,12 +315,14 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
             return leader_events, leader_ongoing, board
     events, ongoing = _detect_all(frames, detectors, log)
     if intrabar:
-        ongoing = []                        # 인트라바 스캔은 신규 알림만
         # 진행 중인 봉에서 잡힌 이벤트는 '미확정' 표시 — 마감 때 되돌릴 수 있음
         live_open = pd.Timestamp.now(tz="UTC").floor("4h")
         for e in events:
             if e.bar_time == live_open:
                 e.detail["intrabar"] = True
+        # 추적 목록도 그대로 싣는다. 판정이 진행봉 기준이라 4h봉 안에서
+        # 들락날락할 수 있지만, 조건이 깨진 항목을 마감까지 최대 4시간
+        # 남겨 두는 쪽이 더 나쁘다 — 수퍼트렌드가 꺾인 상승초입이 그렇다.
 
     # 크립토 전용 랭크 필터 — 주도주(거래대금·상승률 상위)만 남긴다.
     # 눌림목 칸(눌림목+MSS 줄)과 상승초입이 각자 기준을 갖는다 —

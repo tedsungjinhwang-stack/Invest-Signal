@@ -12,7 +12,9 @@ from invest_signal.indicators import quarterly_vwap_bands, sma
 from invest_signal.signals import pullback
 from invest_signal.signals.pullback import Params
 
-P = Params()
+# 밴드·480선 로직만 떼어 보려고 수퍼트렌드 해제 조건은 꺼 둔다 —
+# 합성 픽스처는 마지막에 깊게 눌러서 수퍼트렌드가 하락으로 뒤집힌다.
+P = Params(supertrend_exit=False)
 PREV_Q_BARS = 552           # 2024-10-01 + 552봉(4h) = 2025-01-01 (분기 경계)
 
 
@@ -132,7 +134,7 @@ def test_deeper_band_needs_deeper_dip():
     """band_mult를 키우면 밴드가 내려가 같은 눌림이 타점이 아닌 대기가 된다."""
     df = make_df(base_bars() + [(150.0, 150.0, 108.0, 118.0, 0.001)])
     assert pullback.detect(df, "TEST", P)[0].detail["stage"] == "타점"
-    evs = pullback.detect(df, "TEST", Params(band_mult=2.0))
+    evs = pullback.detect(df, "TEST", Params(band_mult=2.0, supertrend_exit=False))
     assert len(evs) == 1 and evs[0].detail["stage"] == "대기"
 
 
@@ -172,3 +174,18 @@ def test_params_from_config():
     # 기본값은 새 스펙 — 60선 하회 / 480선 위 / 1σ 밴드
     d = cfg_mod.pullback_params({"signal": {}})
     assert (d.ma_entry, d.ma_above, d.band_mult) == (60, 480, 1.0)
+
+
+def test_still_active_drops_when_supertrend_flips_down():
+    """추세 자체가 꺾이면 조정이 아니라 전환이다 — 추적에서 뺀다."""
+    from invest_signal.indicators import supertrend
+
+    trigger = (150.0, 150.0, 108.0, 118.0, 0.001)
+    df = make_df(base_bars() + [trigger])
+    ev = pullback.detect(df, "TEST", P)[0]
+    hold = make_df(base_bars() + [trigger, (118.0, 140.0, 118.0, 135.0, 0.001)])
+    assert pullback.still_active(hold, ev, P)                  # 조건 끔 — 유지
+
+    st = supertrend(hold, 22, 3.0).dropna()
+    assert st.iloc[-1] == -1                                   # 전제: 하락추세
+    assert not pullback.still_active(hold, ev, Params())       # 켜면 제거

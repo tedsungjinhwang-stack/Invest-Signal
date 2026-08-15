@@ -69,6 +69,9 @@ def pullback_params(cfg: dict) -> pullback.Params:
         band_mult=float(s.get("band_mult", 1.0)),
         band_condition=bool(s.get("band_condition", True)),
         grace_bars=int(s.get("grace_bars", 1)),
+        supertrend_exit=bool(s.get("supertrend_exit", True)),
+        st_period=int(s.get("st_period", 22)),
+        st_mult=float(s.get("st_mult", 3.0)),
     )
 
 
@@ -79,6 +82,9 @@ def downtrend_params(cfg: dict) -> downtrend_reversal.Params:
         ma_ref=int(s.get("ma_ref", 60)),
         lookback_bars=int(s.get("lookback_bars", 180)),
         grace_bars=int(s.get("grace_bars", 1)),
+        supertrend_exit=bool(s.get("supertrend_exit", True)),
+        st_period=int(s.get("st_period", 22)),
+        st_mult=float(s.get("st_mult", 3.0)),
     )
 
 

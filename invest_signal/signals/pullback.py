@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..indicators import quarterly_vwap_bands, sma
+from ..indicators import quarterly_vwap_bands, sma, supertrend
 from . import SignalEvent
 
 NAME = "pullback"
@@ -36,7 +36,10 @@ class Params:
     ma_above: int = 480         # ① 종가가 이 선 위여야 한다 (장기 추세)
     band_mult: float = 1.0      # ③ 하단 밴드 = 분기VWAP − mult×표준편차
     band_condition: bool = True  # ③ 밴드 조건 사용 (Volume 없으면 자동 통과)
-    grace_bars: int = 1         # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
+    grace_bars: int = 1
+    supertrend_exit: bool = True   # 수퍼트렌드가 하락으로 뒤집히면 추적 해제
+    st_period: int = 22            # 수퍼트렌드 ATR 기간
+    st_mult: float = 3.0           # 수퍼트렌드 ATR 배수         # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
 
 
 class Gate:
@@ -142,13 +145,21 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
 
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:
     """발생 후에도 계속 추적한다 — 60선 위로 복귀해 올라가는 동안에도 남는다.
-    제거는 네 경로:
+    제거는 다섯 경로:
     ① 하락전환(CHoCH) 발생 시 스캐너가 걷어냄 ② 조회 범위(7일) 경과
     ③ 종가가 분기 VWAP 하단 밴드 아래로 마감 ④ 종가가 480선 아래로 마감
-    (③④는 셋업의 전제가 깨진 것)
+    ⑤ 수퍼트렌드가 하락으로 뒤집힘
+    (③④⑤는 셋업의 전제가 깨진 것)
+
+    ⑤는 진입 조건이 아니라 해제 조건으로만 쓴다 — 눌림목은 "장기 추세가
+    살아 있는 동안의 조정"이므로, 추세 자체가 꺾이면 조정이 아니라 전환이다.
     """
     if event.bar_time not in df.index:
         return False
+    if params.supertrend_exit:
+        st = supertrend(df, params.st_period, params.st_mult).dropna()
+        if len(st) and st.iloc[-1] <= 0:
+            return False
     close = df["Close"]
     m_above = sma(close, params.ma_above)
     if pd.isna(m_above.iloc[-1]) or close.iloc[-1] <= m_above.iloc[-1]:
