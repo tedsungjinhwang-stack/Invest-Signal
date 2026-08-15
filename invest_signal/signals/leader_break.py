@@ -39,6 +39,7 @@ class Params:
     min_turnover_usd: float = 1_000_000   # 24h 거래대금 하한(유동성)
     watch_days: int = 7         # 상위권에서 밀려난 뒤에도 계속 볼 기간
     max_watch: int = 60         # 한 스캔에서 15m 캔들을 받을 최대 종목 수
+    track_break_only: bool = True   # 추적도 '20선 아래'인 동안만 (복귀하면 제외)
     exhausted_filter: bool = True        # 아래 blocked() 조건에 걸리면 대상에서 제외
     require_aligned: bool = True         # 4h 정배열이 아니면 제외 (역배열·혼조 컷)
     allow_short_history: bool = False    # 이력이 짧아 배열 판정 불가면 통과시킬지
@@ -60,7 +61,8 @@ def leaders(ticker: dict[str, dict], symbols: set[str],
 
 
 def watch_list(top: list[tuple[str, dict]], recent: dict, symbols: set[str],
-               params: Params = Params()) -> list[tuple[str, dict | None]]:
+               params: Params = Params(),
+               ticker: dict[str, dict] | None = None) -> list[tuple[str, dict | None]]:
     """이번 스캔에서 15m을 확인할 종목 — 현재 상위권 + 최근 상위권 잔류분.
 
     상위권은 하루에도 여러 번 바뀌므로, 한 번 뽑힌 종목이 순위에서 밀렸다고
@@ -68,11 +70,23 @@ def watch_list(top: list[tuple[str, dict]], recent: dict, symbols: set[str],
     남아 있는 종목을 최근 등재 순으로 이어 붙이되, 매 스캔 캔들을 받아야
     하므로 max_watch로 총량을 묶는다. 반환값의 두 번째 항목은 마지막 등재
     시각(현재 상위권이면 None)이라 호출 측이 '추적 N일차'를 붙일 수 있다.
+
+    **이월분에도 거래대금 하한을 적용한다.** 상위권에 들 때는 하한을
+    넘었어도 그 뒤 거래가 말라붙는 종목이 많은데, 그대로 두면 max_watch
+    슬롯을 차지해 더 최근 상위권 종목을 밀어낸다. ticker를 안 주면
+    (테스트 등) 하한 검사를 건너뛴다.
     """
     out: list[tuple[str, dict | None]] = [(s, None) for s, _ in top]
     in_top = {s for s, _ in top}
     room = max(0, params.max_watch - len(out))
-    carried = sorted((s for s in recent if s not in in_top and s in symbols),
+
+    def liquid(sym: str) -> bool:
+        if ticker is None:
+            return True
+        return (ticker.get(sym) or {}).get("quote_volume", 0) >= params.min_turnover_usd
+
+    carried = sorted((s for s in recent
+                      if s not in in_top and s in symbols and liquid(s)),
                      key=lambda s: recent[s], reverse=True)
     out.extend((s, recent[s]) for s in carried[:room])
     return out
@@ -108,9 +122,9 @@ def blocked(df4h: pd.DataFrame, params: Params = Params()) -> bool:
 def tracking(df: pd.DataFrame, params: Params = Params()) -> dict | None:
     """현재 상태 스냅샷 — 종가가 ma선 위인지 아래인지.
 
-    감시 창(watch_days) 안의 종목은 이탈했든 안 했든 이 상태를 '유지 중'
-    목록에 계속 표시한다. 선 위로 복귀해도 목록에서 빼지 않는다 —
-    한 번 상위권에 들었으면 창이 끝날 때까지 지켜보자는 취지다.
+    track_break_only(기본 켬)면 **지금 ma선 아래인 종목만** 돌려준다 —
+    추적 목록도 이탈 조건을 그대로 받는다는 뜻이다. 끄면 감시 창 안의
+    전 종목을 선 위/아래 상관없이 상태만 보여준다(예전 동작).
     데이터가 모자라 ma선을 못 구하면 None.
     """
     if len(df) < params.ma:
@@ -119,6 +133,8 @@ def tracking(df: pd.DataFrame, params: Params = Params()) -> dict | None:
     if pd.isna(m.iloc[-1]):
         return None
     close, ma = float(df["Close"].iloc[-1]), float(m.iloc[-1])
+    if params.track_break_only and close >= ma:
+        return None                  # 선 위로 복귀 — 이탈 상태가 아니다
     return {"label": LABEL, "last_price": close, "ma": ma,
             "above_ma": bool(close >= ma), "ma_period": params.ma,
             "interval": INTERVAL}

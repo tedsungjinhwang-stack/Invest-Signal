@@ -136,6 +136,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
         watch_days=int(s.get("watch_days", 7)),
         max_watch=int(s.get("max_watch", 60)),
+        track_break_only=bool(s.get("track_break_only", True)),
         exhausted_filter=bool(s.get("exhausted_filter", True)),
         require_aligned=bool(s.get("require_aligned", True)),
         allow_short_history=bool(s.get("allow_short_history", False)),
@@ -156,7 +157,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     if state is not None:
         state.touch_leaders(sym for sym, _ in top)
         recent = state.recent_leaders(days=params.watch_days)
-    watch = leader_break.watch_list(top, recent, universe, params)
+    watch = leader_break.watch_list(top, recent, universe, params, ticker)
     log("[binance] 크립토 모멘텀 눌림목/이탈 상위 — " + ", ".join(
         f"{sym}({t['change_pct'] * 100:+.0f}%)" for sym, t in top))
     carried = len(watch) - len(top)
@@ -219,7 +220,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         for ev in leader_break.detect(df, sym, params):
             annotate(ev.detail)
             events.append(ev)
-        # 유지 중 — 감시 창 안이면 60선 위로 복귀했어도 상태를 계속 보여준다.
+        # 유지 중 — 감시 창 안에서 **아직 ma선 아래인** 종목만 (track_break_only).
         # bar_time은 마지막 상위권 등재 시각이라 최신 등재 순으로 정렬된다.
         snap = leader_break.tracking(df, params)
         if snap is not None:

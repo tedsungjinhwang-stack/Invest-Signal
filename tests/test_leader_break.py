@@ -145,23 +145,34 @@ def test_watch_list_skips_symbols_no_longer_in_universe():
 
 
 def test_tracking_reports_state_on_both_sides_of_the_ma():
-    """유지 중 스냅샷 — 60선 위로 복귀해도 상태만 바뀌고 계속 만들어진다."""
-    above = leader_break.tracking(make_df(rising()), P)
+    """유지 중 스냅샷 — 기본은 '선 아래'인 동안만, 끄면 양쪽 다."""
+    loose = Params(track_break_only=False)
+    above = leader_break.tracking(make_df(rising()), loose)
     assert above["above_ma"] is True
     assert above["last_price"] > above["ma"]
     assert above["ma_period"] == P.ma and above["interval"] == "15m"
 
     closes = rising()
-    closes.append(closes[-1] - 200)          # 60선 아래로 이탈
-    below = leader_break.tracking(make_df(closes), P)
-    assert below["above_ma"] is False        # 빠지지 않고 '아래'로 표시될 뿐
+    closes.append(closes[-1] - 200)          # ma선 아래로 이탈
+    below = leader_break.tracking(make_df(closes), loose)
+    assert below["above_ma"] is False
     assert below["last_price"] < below["ma"]
+
+
+def test_tracking_only_while_below_the_ma():
+    """기본값은 이탈 조건을 추적에도 적용 — 선 위로 복귀하면 목록에서 빠진다."""
+    assert leader_break.tracking(make_df(rising()), P) is None   # 선 위 → 제외
+    closes = rising()
+    closes.append(closes[-1] - 200)                              # 이탈
+    snap = leader_break.tracking(make_df(closes), P)
+    assert snap is not None and snap["above_ma"] is False
 
 
 def test_tracking_needs_enough_bars():
     """ma선을 못 구할 만큼 봉이 적으면 스냅샷을 만들지 않는다."""
-    assert leader_break.tracking(make_df(rising(bars=P.ma - 5)), P) is None
-    assert leader_break.tracking(make_df(rising(bars=P.ma + 5)), P) is not None
+    loose = Params(track_break_only=False)
+    assert leader_break.tracking(make_df(rising(bars=P.ma - 5)), loose) is None
+    assert leader_break.tracking(make_df(rising(bars=P.ma + 5)), loose) is not None
 
 
 def _df4h(closes):
@@ -225,3 +236,24 @@ def test_filters_can_be_turned_off_independently():
 def alignment_of(df):
     from invest_signal.indicators import alignment
     return alignment(df, (120, 240, 480))
+
+
+def test_watch_list_drops_illiquid_carryovers():
+    """이월분에도 거래대금 하한 적용 — 거래가 마른 종목이 슬롯을 못 차지한다."""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    top = [("AUSDT", {"change_pct": 0.5, "quote_volume": 9e6})]
+    recent = {"DRYUSDT": now - timedelta(hours=1),   # 이월인데 거래대금 급감
+              "OKUSDT": now - timedelta(hours=2)}    # 이월이고 유동성 유지
+    ticker = {"AUSDT": {"quote_volume": 9e6}, "DRYUSDT": {"quote_volume": 2e5},
+              "OKUSDT": {"quote_volume": 5e6}}
+    uni = {"AUSDT", "DRYUSDT", "OKUSDT"}
+
+    got = leader_break.watch_list(top, recent, uni, P, ticker)
+    assert [s for s, _ in got] == ["AUSDT", "OKUSDT"]
+    # ticker를 안 주면 하한 검사를 건너뛴다 (예전 동작)
+    got2 = leader_break.watch_list(top, recent, uni, P)
+    assert [s for s, _ in got2] == ["AUSDT", "DRYUSDT", "OKUSDT"]
+    # 현재 상위권은 leaders()에서 이미 하한을 통과했으므로 다시 안 거른다
+    assert got[0][0] == "AUSDT"
