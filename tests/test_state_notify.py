@@ -284,3 +284,51 @@ def test_returns_not_added_to_other_signals():
     ev = SignalEvent(symbol="SOXL", signal="pullback", bar_time=t, price=22.0,
                      detail={"label": "눌림목", "ret_1h": 0.01, "ret_4h": 0.02})
     assert "1h " not in format_events([], [ev], {"SOXL": ""})
+
+
+def _hold(symbol, gain=None, days_ago=0, extra=None):
+    """추적 줄 하나 — 24h 수익률과 발생 시각을 따로 준다."""
+    d = {"label": "상승초입", "last_price": 100.0}
+    if gain is not None:
+        d["gain_24h"] = gain
+    d.update(extra or {})
+    return SignalEvent(symbol=symbol, signal="uptrend_onset",
+                       bar_time=pd.Timestamp.now(tz="UTC") - timedelta(days=days_ago),
+                       price=100.0, detail=d)
+
+
+def test_hold_list_sorted_by_daily_gain():
+    """추적 리스트는 24h 수익률 내림차순 — 발생 시각 순이 아니다.
+
+    가장 오래된 셋업(C)이 제일 잘 가고 있으면 맨 위로 온다. 시간순이면
+    맨 아래에 묻혀서, 스무 줄 중 지금 먹히는 줄을 찾을 수 없다.
+    """
+    evs = [_hold("AUSDT", gain=0.01, days_ago=0),
+           _hold("BUSDT", gain=-0.05, days_ago=1),
+           _hold("CUSDT", gain=0.30, days_ago=5)]
+    out = format_events([], [], {}, ongoing_crypto=evs)
+    order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳")]
+    assert order == ["C", "A", "B"]
+    assert "↳ C  100 · 5d·24h +30%" in out    # 정렬 기준을 줄에도 적는다
+
+
+def test_hold_line_without_gain_sinks_to_bottom():
+    """24h를 못 구한 항목은 0%로 채우지 않고 맨 아래로 — 그 안에서는 최신 순."""
+    evs = [_hold("NOGAINUSDT", gain=None, days_ago=3),
+           _hold("FRESHUSDT", gain=None, days_ago=0),
+           _hold("LOSSUSDT", gain=-0.20, days_ago=1)]
+    out = format_events([], [], {}, ongoing_crypto=evs)
+    order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳")]
+    assert order == ["LOSS", "FRESH", "NOGAIN"]
+    assert "24h" not in [ln for ln in out.splitlines() if "NOGAIN" in ln][0]
+
+
+def test_hold_line_falls_back_to_candle_return():
+    """티커 값이 없으면 캔들 역산(ret_24h)을 쓴다 — 둘 다 있으면 티커 우선."""
+    only_candle = _hold("XUSDT", gain=None, extra={"ret_24h": 0.08})
+    both = _hold("YUSDT", gain=0.02, extra={"ret_24h": 0.99})
+    out = format_events([], [], {}, ongoing_crypto=[only_candle, both])
+    assert "↳ X  100 · 0d·24h +8.0%" in out
+    assert "↳ Y  100 · 0d·24h +2.0%" in out     # 99%가 아니라 티커 값
+    order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳")]
+    assert order == ["X", "Y"]

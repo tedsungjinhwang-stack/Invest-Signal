@@ -67,7 +67,28 @@ def _pct(x: float) -> str:
     return f"{v:+.1f}%" if abs(v) < 10 else f"{v:+.0f}%"
 
 
-RETURN_SIGNALS = {"uptrend_onset", "leader_break"}   # 줄에 수익률을 붙일 시그널
+RETURN_SIGNALS = {"uptrend_onset", "leader_break"}   # 신규 줄에 1h·4h·24h를 붙일 시그널
+
+
+def _daily_gain(e) -> float | None:
+    """추적 줄의 24h 수익률 — 티커 값 우선, 없으면 캔들 역산."""
+    d = e.detail
+    g = d.get("gain_24h")
+    return d.get("ret_24h") if g is None else g
+
+
+def _hold_order(e):
+    """추적 리스트 정렬 키 — **24h 수익률 내림차순**.
+
+    거래대금은 이미 랭크 필터의 하드 하한(min_turnover_usd)을 통과한 종목만
+    남아 있어 다시 줄 세워도 새 정보가 없다. 반면 24h 수익률은 or 모드에서
+    거래대금으로 통과한 종목은 보지도 않으므로, 화면에서 처음 드러나는
+    정보이고 "이 셋업이 지금 먹히는가"에 직접 답한다.
+
+    수익률을 못 구한 항목은 맨 아래로, 그 안에서는 최신 발생 순.
+    """
+    g = _daily_gain(e)
+    return (g is not None, g if g is not None else 0.0, e.bar_time)
 
 
 def _returns_tag(d: dict) -> str | None:
@@ -187,6 +208,9 @@ def format_events(events_crypto: list, events_etf: list,
                     + (f"  {_fmt_price(d['last_price'])}" if d.get("last_price") else "")
                     + " · " + "·".join(tags))
         tags = [f"{_age_days(e.bar_time)}d"]
+        day = _daily_gain(e)
+        if day is not None:
+            tags.append(f"24h {_pct(day)}")     # 정렬 기준을 줄에도 드러낸다
         if e.signal == "mss" or d.get("label") == "MSS":
             # MSS는 신규 줄과 같은 형식으로 — 깨진 저점 레벨 포함
             tags.append(f"⚠️MSS 저점 {_fmt_price(d['broken_low'])} 이탈"
@@ -209,7 +233,7 @@ def format_events(events_crypto: list, events_etf: list,
             new_sel = sorted((e for e in new if label_of(e) == label),
                              key=lambda x: x.symbol)
             hold_sel = sorted((e for e in hold if label_of(e) == label),
-                              key=lambda x: x.bar_time, reverse=True)   # 최신 순
+                              key=_hold_order, reverse=True)   # 24h 수익률 순
             board = crypto_board if (label == LEADER_LABEL and kind == "crypto") else ()
             if not new_sel and not hold_sel and not board:
                 continue

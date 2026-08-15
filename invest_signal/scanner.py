@@ -19,6 +19,7 @@ from . import sent_log
 from .state import AlertState
 
 ONGOING_LOOKBACK_BARS = 42      # '유지 중' 판정 시 트리거를 찾아볼 범위 — 42봉 = 7일
+DAILY_BARS = 6                  # 4h봉 6개 = 24시간 — 추적 줄의 24h 수익률 역산 폭
 
 
 CHOCH_EVICTS = {"pullback"}     # CHoCH 발생 시 리스트에서 걷어낼 셋업 (상승초입은 240선 재이탈로만 제거)
@@ -70,8 +71,13 @@ def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[l
                     e.detail["align"] = align
             if len(df):
                 last = float(df["Close"].iloc[-1])
+                # 추적 줄은 24h 수익률 순으로 정렬·표기한다. detect가 붙여 둔
+                # ret_24h는 **발생 봉에 얼어붙은 값**이라(사흘 전 셋업이면 사흘
+                # 전 수익률) 마지막 봉 기준으로 다시 계산해 덮어쓴다.
+                day = indicators.pct_over(df["Close"], DAILY_BARS)
                 for e in sym_ongoing:       # 추적 리스트에 현재가(최근 4h 종가) 표시용
                     e.detail["last_price"] = last
+                    e.detail["ret_24h"] = day
         events.extend(sym_events)
         ongoing.extend(sym_ongoing)
     return events, ongoing
@@ -113,7 +119,8 @@ def _crypto_rank_eligible(frames: dict, rcfg: dict) -> set:
 
 
 def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
-                       state=None, log=print, frames: dict | None = None) -> tuple[list, list]:
+                       state=None, log=print, frames: dict | None = None,
+                       ticker: dict | None = None) -> tuple[list, list]:
     """크립토 모멘텀 눌림목/이탈 — 24h 상승률 상위 N종을 15m봉으로 따로 판정한다.
 
     나머지 시그널과 달리 4h 프레임을 쓰지 않는다: 대상 선정은 24hr 티커
@@ -145,10 +152,10 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         exhausted_mas=tuple(s.get("exhausted_mas", (120, 240, 480))),
         exhausted_below=int(s.get("exhausted_below", 480)),
     )
-    try:
-        ticker = data_binance.ticker_24h(session, source)
-    except Exception as e:                      # noqa: BLE001
-        log(f"[binance] 24h 티커 조회 실패({data_binance._safe(e)}) — 크립토 모멘텀 눌림목/이탈 건너뜀")
+    if ticker is None:              # 호출 측이 미리 받아두지 않았을 때만 직접 조회
+        ticker = _crypto_ticker(session, source, log)
+    if ticker is None:
+        log("[binance] 크립토 모멘텀 눌림목/이탈 건너뜀 — 24h 티커 없음")
         return [], [], []
     universe = set(symbols)
     top = leader_break.leaders(ticker, universe, params)
@@ -245,6 +252,30 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     return events, ongoing, board
 
 
+def _crypto_ticker(session, source: str, log=print) -> dict | None:
+    """24hr 티커 — 실패하면 None. 호출 측이 그 시그널만 비우거나 캔들로 대체한다."""
+    try:
+        return data_binance.ticker_24h(session, source)
+    except Exception as e:                      # noqa: BLE001
+        log(f"[binance] 24h 티커 조회 실패({data_binance._safe(e)})")
+        return None
+
+
+def _fill_daily_return(items: list, ticker: dict | None) -> None:
+    """추적 줄의 24h 수익률을 티커 값으로 덮어쓴다.
+
+    캔들 역산(ret_24h)은 마지막 봉 기준이라 마감 스캔에서 최대 4시간 묵지만
+    티커는 호출 시점 롤링이다. 같은 종목이 ⚡ 칸과 🟢 칸에 동시에 뜰 때
+    24h 숫자가 서로 달라 보이는 것도 이 통일로 사라진다.
+    """
+    if not ticker:
+        return
+    for e in items:
+        g = (ticker.get(e.symbol) or {}).get("change_pct")
+        if g is not None:
+            e.detail["gain_24h"] = g
+
+
 def _filter_ranked(items: list, eligible: set, signals: frozenset) -> list:
     """대상 시그널은 랭크 필터 통과 종목만 남긴다 (나머지 시그널은 그대로)."""
     return [e for e in items if e.signal not in signals or e.symbol in eligible]
@@ -310,13 +341,17 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         if detectors:
             frames = data_binance.fetch_all(s, symbols, source, limit=limit, log=log,
                                             workers=workers, include_live=intrabar)
+        # 24hr 티커는 두 군데서 쓴다 — 크립토 모멘텀의 상위권 선정과, 모든
+        # 추적 줄의 24h 수익률. 한 번만 받아 양쪽에 넘긴다.
+        ticker = _crypto_ticker(s, source, log)
         # 15m 판정이라 마감·인트라바 양쪽에서 매번 돈다. 4h 프레임은 제외 조건
         # (정배열 + 480선 아래) 판정에만 쓰고, 없으면 대상 종목만 따로 받는다.
         leader_events, leader_ongoing, board = _scan_leader_break(
-            s, source, symbols, cfg, state, log, frames)
+            s, source, symbols, cfg, state, log, frames, ticker)
         if not detectors:           # 인트라바인데 4h 대상 시그널이 없을 때
             return leader_events, leader_ongoing, board
     events, ongoing = _detect_all(frames, detectors, log)
+    _fill_daily_return(ongoing, ticker)     # 추적 줄 정렬·표기용 24h 수익률
     if intrabar:
         # 진행 중인 봉에서 잡힌 이벤트는 '미확정' 표시 — 마감 때 되돌릴 수 있음
         live_open = pd.Timestamp.now(tz="UTC").floor("4h")
