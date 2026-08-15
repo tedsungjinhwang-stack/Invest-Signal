@@ -39,7 +39,7 @@ class Params:
     ma_entry: int = 20          # 이탈 판정 기준선 (4h×20 = 약 3.3일)
     ma_align: tuple = (120, 240)        # 역배열 판정선 (짧은 것부터)
     touch_condition: bool = False  # 240선 터치를 추가로 요구할지 (아래 설명 참고)
-    ma_touch: int = 240         # 터치 판정 기준선 (추적 해제 판정에도 쓰인다)
+    ma_touch: int = 240         # 터치 판정 기준선 (touch_condition을 켤 때만 쓰인다)
     touch_window_bars: int = 60  # 터치 유효기간(봉 수). 4h×60 = 10일
     grace_bars: int = 1         # 직전 실행을 놓쳤을 때 허용할 지각 봉 수
     vwap_condition: bool = True  # ④ VWAP 조건 사용 여부 (Volume 없으면 자동 통과)
@@ -204,29 +204,21 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:
     """상승초입은 발생 후 상승 과정을 계속 추적한다(이탈선 위 복귀해도 유지).
 
-    제거 조건 두 가지:
-      · **수퍼트렌드가 하락으로 뒤집히면 제거.** 이 시그널의 전제가
-        "구조는 아직 하락인데 추세는 위로 돌아섰다"이므로, 그 추세가
-        꺾이면 셋업 자체가 사라진 것이다. 진입 조건이면서 해제 조건이다.
-      · 종가가 240선 위로 올라섰다가 다시 240선 아래로 마감하면 돌파
-        실패로 제거. 아직 240선을 넘지 못한 동안은 계속 유지된다.
+    제거는 **수퍼트렌드가 하락으로 뒤집힐 때** 하나뿐이다. 이 시그널의
+    전제가 "구조는 아직 하락인데 추세는 위로 돌아섰다"이므로, 그 추세가
+    꺾이면 셋업 자체가 사라진 것이다 — 진입 조건이면서 해제 조건이다.
+    그 외에는 조회 범위(7일)가 지나면 자동으로 빠진다.
 
-    CHoCH(하락전환)로는 제거하지 않는다. 조회 범위(7일) 경과 시 자동 제거.
+    240선 돌파 실패는 더 이상 보지 않는다. 240선은 원래 진입 조건(터치)의
+    기준선이었는데 그 조건을 끄면서 해제 판정에만 남아 있었고, 240선을
+    넘었다 밀리는 건 상승 과정에서 흔한 되돌림이라 셋업이 끝났다는 근거로
+    쓰기엔 약하다. 추세 판단은 수퍼트렌드에 맡긴다.
+    CHoCH(하락전환)로도 제거하지 않는다.
     """
-    try:
-        t = df.index.get_loc(event.bar_time)
-    except KeyError:
+    if event.bar_time not in df.index:
         return False
     if params.supertrend_condition:
-        st = supertrend(df, params.st_period, params.st_mult).iloc[t:]
-        st = st.dropna()
+        st = supertrend(df, params.st_period, params.st_mult).dropna()
         if len(st) and st.iloc[-1] <= 0:
             return False             # 추세가 꺾였다 — 셋업 종료
-    c = df["Close"].iloc[t:]
-    m240 = sma(df["Close"], params.ma_touch).iloc[t:]
-    above = c > m240
-    if not above.any():
-        return True                  # 240선 재도전 전 — 계속 추적
-    first_above = above.idxmax()     # 첫 240선 상향 마감 시점
-    fail = c.loc[first_above:] < m240.loc[first_above:]
-    return not bool(fail.any())      # 돌파 후 재이탈했으면 실패로 제거
+    return True

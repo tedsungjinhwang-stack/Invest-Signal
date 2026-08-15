@@ -272,19 +272,20 @@ def test_insufficient_data_returns_empty():
     assert uptrend_onset.detect(df, "TEST", P) == []
 
 
-def test_still_active_tracks_until_240_refail():
-    """상승초입은 이탈선 복귀·240선 돌파까지 유지하고, 240선 재이탈 시 제거."""
+def test_still_active_ignores_ma240_reclaim_and_failure():
+    """240선 돌파 실패로는 더 이상 빠지지 않는다 — 추세 판단은 수퍼트렌드가 한다."""
+    p = Params(supertrend_condition=False)      # 240 규칙만 떼어 본다
     closes, highs = base_decline()
     add_touch(closes, highs)
     add_drop(closes, highs)                            # 트리거
     df = make_df(closes, highs)
     ev = uptrend_onset.detect(df, "TEST", P)[0]
     add_sideways(closes, highs, bars=2, level=130.0)   # 이탈선 위 복귀 — 유지
-    assert uptrend_onset.still_active(make_df(closes, highs), ev, P)
-    add_sideways(closes, highs, bars=2, level=200.0)   # 240선(≈160) 위 마감 — 유지
-    assert uptrend_onset.still_active(make_df(closes, highs), ev, P)
-    add_drop(closes, highs, 140.0)                     # 240선 아래 재마감 → 실패
-    assert not uptrend_onset.still_active(make_df(closes, highs), ev, P)
+    assert uptrend_onset.still_active(make_df(closes, highs), ev, p)
+    add_sideways(closes, highs, bars=2, level=200.0)   # 240선(≈160) 위 마감
+    assert uptrend_onset.still_active(make_df(closes, highs), ev, p)
+    add_drop(closes, highs, 140.0)                     # 240선 아래 재마감
+    assert uptrend_onset.still_active(make_df(closes, highs), ev, p)   # 그래도 유지
 
 
 def rebound_with_supertrend_up(rise=25, step=4.0, flat=15, dip=0.01, dip_bars=2):
@@ -408,17 +409,3 @@ def test_tracking_drops_when_supertrend_flips_down():
     # 조건을 끄면 예전처럼 240선 규칙만 본다 — 그대로 유지
     assert uptrend_onset.still_active(
         df, ev, Params(st_mult=1.0, supertrend_condition=False))
-
-
-def test_tracking_still_drops_on_failed_240_breakout():
-    """수퍼트렌드가 살아 있어도 240선 돌파 실패는 그대로 제거 사유다."""
-    closes, highs = base_decline()
-    add_touch(closes, highs)
-    add_drop(closes, highs)
-    df = make_df(closes, highs)
-    ev = uptrend_onset.detect(df, "TEST", P)[0]        # LEGACY: 수퍼트렌드 끔
-    p = Params(supertrend_condition=False)
-    add_sideways(closes, highs, bars=2, level=200.0)   # 240선(≈160) 위 마감
-    assert uptrend_onset.still_active(make_df(closes, highs), ev, p)
-    add_drop(closes, highs, 140.0)                     # 240선 아래 재마감 → 실패
-    assert not uptrend_onset.still_active(make_df(closes, highs), ev, p)
