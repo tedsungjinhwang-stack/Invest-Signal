@@ -25,12 +25,14 @@ CHOCH_EVICTS = {"pullback"}     # CHoCH 발생 시 리스트에서 걷어낼 셋
 
 # 크립토 랭크 필터 적용 범위 — signal.<키>.crypto_rank_filter 설정별로 걸러낼
 # 시그널 집합. 눌림목 칸은 진입 게이트를 공유하는 MSS 줄까지 함께 거르고,
-# 상승초입은 성격이 달라 자체 기준을 쓴다.
+# 상승초입·펌핑초기는 성격이 달라 각자 기준을 쓴다.
 RANK_FILTER_SCOPE = {
     "pullback": frozenset({"pullback", "mss"}),
     "uptrend_onset": frozenset({"uptrend_onset"}),
+    "pump_early": frozenset({"pump_early"}),
 }
-RANK_FILTER_LABEL = {"pullback": "눌림목·MSS", "uptrend_onset": "상승초입"}
+RANK_FILTER_LABEL = {"pullback": "눌림목·MSS", "uptrend_onset": "상승초입",
+                     "pump_early": "펌핑초기"}
 
 
 def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[list, list]:

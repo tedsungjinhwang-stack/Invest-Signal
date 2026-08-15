@@ -14,9 +14,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import requests
 
 from invest_signal import data_binance, indicators
-from invest_signal.signals import pullback, uptrend_onset
+from invest_signal.signals import pullback, pump_early, uptrend_onset
 
-PROBES = (uptrend_onset, pullback)   # 4h 종가 시그널 — 모듈을 늘리면 그대로 재현된다
+PROBES = (uptrend_onset, pullback, pump_early)   # 4h 종가 시그널 — 모듈을 늘리면 그대로 재현된다
 
 symbols = [s.strip().upper() for s in
            os.environ.get("PROBE_SYMBOLS", "BTCUSDT").split(",") if s.strip()]

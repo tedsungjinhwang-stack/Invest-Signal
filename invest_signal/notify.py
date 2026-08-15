@@ -36,9 +36,9 @@ def chart_url(symbol: str, kind: str, market: str = "US") -> str:
     return f"https://www.tradingview.com/symbols/{symbol}/"
 
 
-SIGNAL_EMOJI = {"상승초입": "🟢", "눌림목": "🔵",
+SIGNAL_EMOJI = {"상승초입": "🟢", "눌림목": "🔵", "펌핑초기": "🌱",
                 "크립토 모멘텀 눌림목/이탈": "⚡", "하락전환": "🔻"}
-SIGNAL_ORDER = ["상승초입", "눌림목", "크립토 모멘텀 눌림목/이탈", "하락전환"]
+SIGNAL_ORDER = ["상승초입", "눌림목", "펌핑초기", "크립토 모멘텀 눌림목/이탈", "하락전환"]
 DISPLAY_GROUP = {"MSS": "눌림목", "풀백": "눌림목"}   # MSS는 눌림목 칸에 태그로 표시
 MARKET_EMOJI = {"크립토": "🪙", "ETF": "📊", "주식": "🏛"}
 DIVIDER = "─" * 16
@@ -108,6 +108,11 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         if d.get("stage"):
             # 눌림목 — 타점(밴드 터치)과 대기(밴드 위)를 한눈에 구분
             tags.append("🎯타점" if d["stage"] == "타점" else "대기")
+        if e.signal == "pump_early" and d.get("rise") is not None:
+            hours = int(d.get("rise_bars", 1)) * 4
+            tags.append(f"{hours}h +{d['rise'] * 100:.1f}%"
+                        + (f" · 저점대비 +{d['total_gain'] * 100:.0f}%"
+                           if d.get("total_gain") is not None else ""))
         if e.signal == "downtrend_reversal" and d.get("broken_low"):
             tags.append(f"직전저점 {_fmt_price(d['broken_low'])} 이탈")
         if e.signal == "leader_break":

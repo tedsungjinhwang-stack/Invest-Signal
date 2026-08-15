@@ -2,7 +2,8 @@
 
 import yaml
 
-from .signals import downtrend_reversal, mss, pullback, uptrend_onset
+from .signals import (downtrend_reversal, mss, pullback, pump_early,
+                      uptrend_onset)
 
 DEFAULT_PATH = "config.yaml"
 
@@ -88,6 +89,21 @@ def downtrend_params(cfg: dict) -> downtrend_reversal.Params:
     )
 
 
+def pump_early_params(cfg: dict) -> pump_early.Params:
+    s = (cfg.get("signal") or {}).get("pump_early") or {}
+    return pump_early.Params(
+        rise_bars=int(s.get("rise_bars", 1)),
+        min_gain=float(s.get("min_gain", 0.05)),
+        lookback_bars=int(s.get("lookback_bars", 42)),
+        pump_window_bars=int(s.get("pump_window_bars", 6)),
+        max_pump_gain=float(s.get("max_pump_gain", 0.30)),
+        max_gain=float(s.get("max_gain", 0.30)),
+        ma_ref=int(s.get("ma_ref", 480)),
+        below_ma_condition=bool(s.get("below_ma_condition", True)),
+        grace_bars=int(s.get("grace_bars", 1)),
+    )
+
+
 def mss_params(cfg: dict) -> mss.Params:
     s = (cfg.get("signal") or {}).get("mss") or {}
     return mss.Params(
@@ -111,6 +127,8 @@ def detectors(cfg: dict, crypto: bool = False) -> list:
         out.append((pullback, pullback_params(cfg)))
     if (s.get("downtrend_reversal") or {}).get("enabled", True):
         out.append((downtrend_reversal, downtrend_params(cfg)))
+    if (s.get("pump_early") or {}).get("enabled", True):
+        out.append((pump_early, pump_early_params(cfg)))
     if (s.get("mss") or {}).get("enabled", True):
         out.append((mss, mss_params(cfg)))
     return out
