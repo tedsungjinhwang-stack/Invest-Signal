@@ -91,7 +91,7 @@ def test_format_events_ongoing_section():
     assert "↳ SOL  68.2 · " in msg
     assert "⚠️MSS 저점 70 이탈" in msg        # 추적 MSS도 신규와 같은 형식
     assert "blockquote" not in msg            # 접힘·들여쓰기 없이 전부 표시
-    assert "눌림목" in msg and "·⚠️MSS" in msg  # MSS는 눌림목 칸에 태그로 병합
+    assert "눌림목" in msg and " · ⚠️MSS" in msg  # MSS는 눌림목 칸에 태그로 병합
     # 추적 목록이 없으면 ↳ 줄도 없다
     assert "↳" not in format_events([_event("BTCUSDT")], [], {})
 
@@ -144,8 +144,8 @@ def test_align_tag_shown_in_lines_and_ongoing():
     mss = _event("XRPUSDT", {"label": "MSS", "align": "정배열", "last_price": 3.0})
     msg = format_events([new], [], {}, ongoing_crypto=[hold, mixed, mss])
     assert "역배열" in msg
-    assert "·정배열" in msg
-    assert "·혼조" in msg                             # 혼조도 배열 태그로 표시
+    assert " · 정배열" in msg
+    assert " · 혼조" in msg                           # 혼조도 배열 태그로 표시
     assert "↳ XRP  3 · " in msg and "MSS" in msg
     xrp_line = next(l for l in msg.split("\n") if l.startswith("↳ XRP"))
     assert "정배열" not in xrp_line                   # MSS 항목은 MSS만
@@ -199,8 +199,8 @@ def test_hold_line_shows_leader_break_rank_and_ma_side():
                                  "ma": 3155.0, "above_ma": True, "watch_days": 3,
                                  "gain_24h": -0.02})
     out = format_events([], [], {}, ongoing_crypto=[top, lapsed])
-    assert "↳ HFT  0.0174 · 2위·🔻60선 아래·24h +41%" in out
-    assert "↳ ETH  3,200.0 · 추적 3일차·60선 위·24h -2.0%" in out
+    assert "↳ HFT  0.0174 · 2위 · 🔻60선 아래 · 24h +41%" in out
+    assert "↳ ETH  3,200.0 · 추적 3일차 · 60선 위 · 24h -2.0%" in out
     # 60선 위로 복귀한 종목도 목록에 남아 있어야 한다
     assert "ETH" in out
 
@@ -309,7 +309,7 @@ def test_hold_list_sorted_by_daily_gain():
     out = format_events([], [], {}, ongoing_crypto=evs)
     order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳")]
     assert order == ["C", "A", "B"]
-    assert "↳ C  100 · 5d·24h +30%" in out    # 정렬 기준을 줄에도 적는다
+    assert "↳ C  100 · 5d · 24h +30%" in out    # 정렬 기준을 줄에도 적는다
 
 
 def test_hold_line_without_gain_sinks_to_bottom():
@@ -328,8 +328,8 @@ def test_hold_line_falls_back_to_candle_return():
     only_candle = _hold("XUSDT", gain=None, extra={"ret_24h": 0.08})
     both = _hold("YUSDT", gain=0.02, extra={"ret_24h": 0.99})
     out = format_events([], [], {}, ongoing_crypto=[only_candle, both])
-    assert "↳ X  100 · 0d·24h +8.0%" in out
-    assert "↳ Y  100 · 0d·24h +2.0%" in out     # 99%가 아니라 티커 값
+    assert "↳ X  100 · 0d · 24h +8.0%" in out
+    assert "↳ Y  100 · 0d · 24h +2.0%" in out     # 99%가 아니라 티커 값
     order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳")]
     assert order == ["X", "Y"]
 
@@ -412,3 +412,27 @@ def test_only_wave_hold_lines_carry_the_full_span_set():
     assert "24h +13%" in line
     assert "·4h " not in line and " 4h " not in line
     assert "7d " not in line
+
+
+def test_wave_tracking_gets_one_subheader_per_variant():
+    """변형 이름은 소제목에 한 번만 — 줄마다 반복하지 않는다."""
+    evs = [_wave("AUSDT", "ABC", 0.20), _wave("BUSDT", "ABC", 0.10),
+           _wave("CUSDT", "임펄스", 0.30), _wave("DUSDT", "임펄스", 0.05)]
+    out = format_events([], [], {}, ongoing_crypto=evs)
+    body = [ln for ln in out.splitlines() if ln.startswith("↳ ") or "ⓐ" in ln or "ⓑ" in ln]
+    assert body[0].strip().startswith("ⓐ") and "4h 돌파" in body[0]
+    assert [ln.split()[1] for ln in body[1:3]] == ["A", "B"]
+    assert body[3].strip().startswith("ⓑ") and "일봉 터치" in body[3]
+    assert [ln.split()[1] for ln in body[4:6]] == ["C", "D"]
+    # 소제목이 말해 주므로 추적 줄에는 변형 이름이 없다
+    assert "ABC 돌파" not in "\n".join(body[1:3])
+    assert out.count("ⓐ") == 1 and out.count("ⓑ") == 1
+
+
+def test_hold_lines_use_one_separator_everywhere():
+    """추적 줄 구분자는 신규 줄과 같은 ' · ' — 붙여 쓴 '·'가 섞이지 않는다."""
+    e = _hold("XUSDT", gain=0.13)
+    e.detail["align"] = "역배열"
+    line = [ln for ln in format_events([], [], {}, ongoing_crypto=[e]).splitlines()
+            if ln.startswith("↳ ")][0]
+    assert line == "↳ X  100 · 0d · 24h +13% · 역배열"

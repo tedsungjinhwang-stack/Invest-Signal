@@ -139,6 +139,10 @@ def _returns_tag(d: dict) -> str | None:
     return " · ".join(parts) if parts else None
 
 
+WAVE_HEADERS = {"ABC": "  ⓐ <b>ABC</b> · 4h 돌파",
+                "임펄스": "  ⓑ <b>임펄스</b> · 일봉 터치"}
+
+
 def _wave_tag(d: dict) -> str:
     """파동 — 어느 변형인지와 단기 추세선 값.
 
@@ -252,7 +256,7 @@ def format_events(events_crypto: list, events_etf: list,
                 tags.append(f"24h {_pct(day)}")
             return (f"↳ {_short_symbol(e.symbol, kind, name)}"
                     + (f"  {_fmt_price(d['last_price'])}" if d.get("last_price") else "")
-                    + " · " + "·".join(tags))
+                    + " · " + " · ".join(tags))
         tags = [f"{_age_days(e.bar_time)}d"]
         if e.signal == "wave_setup":
             # 파동만 구간 세트를 싣는다 — refresh_detail이 매 스캔 갱신하므로
@@ -272,14 +276,15 @@ def format_events(events_crypto: list, events_etf: list,
         else:
             if d.get("stage") in PULLBACK_STAGES:
                 tags.append("🎯타점" if d["stage"] == "타점" else "대기")
-            elif e.signal == "wave_setup":
-                tags.append(_wave_tag(d))
+            elif e.signal == "wave_setup" and d.get("fast_line") is not None:
+                # 변형 이름은 위 소제목에 한 번만 — 여기는 무효화 선만 적는다
+                tags.append(f"선 {_fmt_price(d['fast_line'])}")
             if d.get("align"):
                 tags.append(d["align"])
         price = d.get("last_price")
         return (f"↳ {_short_symbol(e.symbol, kind, name)}"
                 + (f"  {_fmt_price(price)}" if price else "")
-                + " · " + "·".join(tags))
+                + " · " + " · ".join(tags))
 
     for label in ordered:
         lines.append("")
@@ -300,13 +305,22 @@ def format_events(events_crypto: list, events_etf: list,
                 continue
             lines.append("")
             lines.append(f"{MARKET_EMOJI.get(mtitle, '▪')} <b>{mtitle}</b>")
+            variant = None      # 파동 추적 블록의 변형 소제목 추적용
             for e in new_sel:
                 name = etf_names.get(e.symbol, "") if kind != "crypto" else ""
                 market = "KR" if (kind != "crypto" and e.symbol[:1].isdigit()) else "US"
                 lines.append(_event_line(e, chart_url(e.symbol, kind, market), name, kind))
             # 추적 리스트 — 종목마다 한 줄, 현재가 포함. 자르지 않고 전부 보여준다
             # (길어지면 split_chunks가 여러 메시지로 나눠 보낸다).
-            lines.extend(hold_line(e, kind) for e in hold_sel)
+            # 파동은 변형이 바뀌는 자리에 소제목을 넣는다 — 이미 변형별로
+            # 묶여 있으므로 줄마다 "ABC 돌파"를 반복할 이유가 없고, 서른 줄
+            # 내내 같은 말이 붙으면 정작 다른 값이 눈에 안 들어온다.
+            for e in hold_sel:
+                stage = e.detail.get("stage") if e.signal == "wave_setup" else None
+                if stage is not None and stage != variant:
+                    lines.append(WAVE_HEADERS.get(stage, f"  {stage}"))
+                    variant = stage
+                lines.append(hold_line(e, kind))
 
     return "\n".join(lines)
 
