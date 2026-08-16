@@ -18,7 +18,7 @@ from .signals import SignalEvent, leader_break
 from . import sent_log
 from .state import AlertState
 
-TRACK_DAYS = 3                  # 추적 리스트 보유 기간 — 이 기간이 지나면 자동으로 빠진다
+TRACK_DAYS = 5                  # 추적 리스트 보유 기간 — 이 기간이 지나면 자동으로 빠진다
 ONGOING_LOOKBACK_BARS = TRACK_DAYS * 6      # 4h봉 기준 조회 범위 (6봉 = 하루)
 DAILY_BARS = 6                  # 4h봉 6개 = 24시간 — 추적 줄의 24h 수익률 역산 폭
 
@@ -62,6 +62,11 @@ def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[l
                     continue
             sym_events.extend(mod.detect(df, sym, params))
             if latest is not None and mod.still_active(df, latest, params):
+                # 추적 줄에 실릴 값 중 트리거 시점에 얼어붙으면 안 되는 것은
+                # 시그널이 직접 다시 계산한다(선택 훅) — 파동의 추세선이 그렇다
+                refresh = getattr(mod, "refresh_detail", None)
+                if refresh is not None:
+                    refresh(df, latest, params)
                 sym_ongoing.append(latest)
         if choch_time is not None:      # CHoCH 이후에 만들어진 눌림목만 살아남는다
             sym_ongoing = [e for e in sym_ongoing

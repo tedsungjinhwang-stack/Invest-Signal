@@ -163,12 +163,37 @@ def _detect_impulse(df: pd.DataFrame, symbol: str, params: Params) -> list[Signa
     # 스캐너는 '유지 중'을 찾을 때 grace_bars를 4h봉 기준으로 넓혀서 부른다.
     # 그 폭을 일수로 환산해 여기에도 반영해야 임펄스 추적이 다른 시그널과
     # 같은 기간을 산다 — 안 그러면 daily_grace_bars(1)에 묶여 이틀만 남는다.
-    look = max(params.daily_grace_bars, params.grace_bars // BARS_PER_DAY)
+    #
+    # 환산에서 1을 빼는 이유: 아래 범위가 look+1개 봉을 보는데, 일봉은 완성
+    # 시점이 이미 하루 지난 봉이라 그대로 두면 추적 목록에 TRACK_DAYS보다
+    # 하루 많은 '6d' 줄이 남는다. 기본값(grace_bars=1)에서는 음수가 되므로
+    # daily_grace_bars가 이겨서 지각 1봉 허용이 그대로 유지된다.
+    look = max(params.daily_grace_bars, params.grace_bars // BARS_PER_DAY - 1)
     out = []
     for t in range(max(1, n - 1 - look), n):
         if touching(t) and not touching(t - 1):     # 연속 터치는 첫날만
             out.append(_event(df, symbol, t, IMPULSE, fast, slow, params))
     return out
+
+
+def refresh_detail(df: pd.DataFrame, event: SignalEvent,
+                   params: Params = Params()) -> None:
+    """추적 줄에 실릴 추세선 값을 **지금 값으로** 갱신한다.
+
+    detect가 붙인 fast_line은 트리거 봉의 값이라, 며칠 지난 셋업에서는
+    현재가와 나란히 놓였을 때 말이 안 되는 조합이 된다 — 6일 전 터치한
+    종목이 그 사이 크게 빠지면 '현재가 0.033 · 22×3선 0.241' 같은 줄이
+    나온다. 추세선은 지금 어디가 무효화 지점인지를 말해 줄 때 쓸모가
+    있으므로 매 스캔 다시 계산한다.
+    """
+    frame = df if event.detail.get("stage") == ABC else _daily(df)
+    if not len(frame):
+        return
+    fast, slow = _trends(frame, params)
+    for key, s in (("fast_line", fast), ("slow_line", slow)):
+        v = s["line"].iloc[-1]
+        if not pd.isna(v):
+            event.detail[key] = float(v)
 
 
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:

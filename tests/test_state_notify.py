@@ -332,3 +332,47 @@ def test_hold_line_falls_back_to_candle_return():
     assert "↳ Y  100 · 0d·24h +2.0%" in out     # 99%가 아니라 티커 값
     order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳")]
     assert order == ["X", "Y"]
+
+
+def _wave(symbol, stage, gain, days_ago=0):
+    return SignalEvent(symbol=symbol, signal="wave_setup",
+                       bar_time=pd.Timestamp.now(tz="UTC") - timedelta(days=days_ago),
+                       price=1.0,
+                       detail={"label": "파동", "stage": stage, "last_price": 1.0,
+                               "gain_24h": gain, "fast_line": 0.9, "fast_st": "22×3"})
+
+
+def test_wave_variants_are_grouped_not_interleaved():
+    """파동 칸에서 ABC와 임펄스가 섞이지 않는다 — 블록으로 묶이고 각자 수익률 순."""
+    evs = [_wave("AUSDT", "임펄스", 0.50), _wave("BUSDT", "ABC", 0.01),
+           _wave("CUSDT", "임펄스", 0.10), _wave("DUSDT", "ABC", 0.30)]
+    out = format_events(evs, [], {})
+    order = [ln.split(">")[1].split("<")[0] for ln in out.splitlines() if ln.startswith("• ")]
+    # ABC가 먼저(수익률 순 D→B), 그 다음 임펄스(A→C) — 50%인 A가 맨 위로 오지 않는다
+    assert order == ["D", "B", "A", "C"]
+
+
+def test_wave_tracking_groups_by_variant_too():
+    """추적 줄도 같은 규칙 — 변형별로 묶고 그 안에서 24h 수익률 순."""
+    evs = [_wave("AUSDT", "임펄스", 0.50, 1), _wave("BUSDT", "ABC", -0.20, 2),
+           _wave("CUSDT", "임펄스", 0.10, 3), _wave("DUSDT", "ABC", 0.30, 0)]
+    out = format_events([], [], {}, ongoing_crypto=evs)
+    order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳ ")]
+    assert order == ["D", "B", "A", "C"]
+
+
+def test_wave_line_shows_the_gain_it_is_sorted_by():
+    """정렬 기준인 24h가 파동 줄에도 나온다. 봉 주기는 태그에서 뺐다."""
+    out = format_events([_wave("XUSDT", "ABC", 0.083)], [], {})
+    line = [ln for ln in out.splitlines() if ln.startswith("• ")][0]
+    assert "24h +8.3%" in line
+    assert "ABC 돌파 · 22×3선 0.9" in line
+    assert "· 4h 22×3" not in line      # 수익률의 4h와 겹치던 표기는 없앴다
+
+
+def test_non_wave_signals_keep_a_single_group():
+    """파동이 아닌 칸은 변형 구분이 없으므로 순수 수익률 순 그대로다."""
+    evs = [_hold("AUSDT", gain=0.01), _hold("BUSDT", gain=0.40), _hold("CUSDT", gain=-0.1)]
+    out = format_events([], [], {}, ongoing_crypto=evs)
+    order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳ ")]
+    assert order == ["B", "A", "C"]

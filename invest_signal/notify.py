@@ -69,7 +69,9 @@ def _pct(x: float) -> str:
     return f"{v:+.1f}%" if abs(v) < 10 else f"{v:+.0f}%"
 
 
-RETURN_SIGNALS = {"uptrend_onset", "leader_break"}   # 신규 줄에 1h·4h·24h를 붙일 시그널
+# 신규 줄에 1h·4h·24h를 붙일 시그널. 파동은 24h가 정렬 기준이라 값을 보여야
+# 순서가 읽힌다(임펄스는 일봉이라 4h가 없어 24h만 붙는다).
+RETURN_SIGNALS = {"uptrend_onset", "leader_break", "wave_setup"}
 
 
 def _daily_gain(e) -> float | None:
@@ -79,18 +81,41 @@ def _daily_gain(e) -> float | None:
     return d.get("ret_24h") if g is None else g
 
 
-def _hold_order(e):
-    """추적 리스트 정렬 키 — **24h 수익률 내림차순**.
+WAVE_VARIANTS = ("ABC", "임펄스")   # 파동 칸 안에서 이 순서로 묶는다
+
+
+def _variant(e) -> int:
+    """같은 칸 안에서 먼저 갈라 놓을 하위 종류. 파동의 ABC/임펄스가 유일하다.
+
+    한 칸에 두 변형이 섞이면 4h 돌파와 일봉 터치가 번갈아 나와 읽기 어렵다 —
+    정렬 키의 맨 앞에 둬서 블록으로 묶는다.
+    """
+    if e.signal != "wave_setup":
+        return 0
+    stage = e.detail.get("stage")
+    return WAVE_VARIANTS.index(stage) if stage in WAVE_VARIANTS else len(WAVE_VARIANTS)
+
+
+def _by_gain_desc(e):
+    """24h 수익률 내림차순 정렬 조각 — 못 구한 항목은 뒤로.
 
     거래대금은 이미 랭크 필터의 하드 하한(min_turnover_usd)을 통과한 종목만
     남아 있어 다시 줄 세워도 새 정보가 없다. 반면 24h 수익률은 or 모드에서
     거래대금으로 통과한 종목은 보지도 않으므로, 화면에서 처음 드러나는
     정보이고 "이 셋업이 지금 먹히는가"에 직접 답한다.
-
-    수익률을 못 구한 항목은 맨 아래로, 그 안에서는 최신 발생 순.
     """
     g = _daily_gain(e)
-    return (g is not None, g if g is not None else 0.0, e.bar_time)
+    return (1, 0.0) if g is None else (0, -g)
+
+
+def _new_order(e):
+    """신규 줄 — 변형별로 묶고, 그 안에서 24h 수익률 순, 없으면 심볼 순."""
+    return (_variant(e), *_by_gain_desc(e), e.symbol)
+
+
+def _hold_order(e):
+    """추적 줄 — 변형별로 묶고, 그 안에서 24h 수익률 순, 동률이면 최신 발생 순."""
+    return (_variant(e), *_by_gain_desc(e), -e.bar_time.timestamp())
 
 
 def _returns_tag(d: dict) -> str | None:
@@ -113,12 +138,17 @@ def _returns_tag(d: dict) -> str | None:
 
 
 def _wave_tag(d: dict) -> str:
-    """파동 — 어느 변형인지와 단기 추세선 값. ABC는 4h 돌파, 임펄스는 일봉 터치."""
-    stage, iv = d.get("stage", ""), d.get("interval", "")
+    """파동 — 어느 변형인지와 단기 추세선 값.
+
+    봉 주기는 적지 않는다. ABC는 4h 돌파, 임펄스는 일봉 터치로 1:1이라
+    변형 이름이 이미 그 정보이고, 줄에 붙는 수익률 태그의 `4h`(4시간
+    수익률)와 글자가 겹쳐 서로 다른 뜻으로 두 번 나오는 게 더 헷갈린다.
+    """
+    stage = d.get("stage", "")
     how = "돌파" if stage == "ABC" else "터치"
     line = d.get("fast_line")
-    return (f"{stage} · {iv} {d.get('fast_st', '')}선 "
-            f"{_fmt_price(line) if line is not None else '?'} {how}")
+    return (f"{stage} {how} · {d.get('fast_st', '')}선 "
+            f"{_fmt_price(line) if line is not None else '?'}")
 
 
 def _event_line(e, url: str, name: str, kind: str) -> str:
@@ -246,9 +276,9 @@ def format_events(events_crypto: list, events_etf: list,
         lines.append(f"{SIGNAL_EMOJI.get(label, '▪')} <b>{label}</b>")
         for mtitle, new, hold, kind in markets:
             new_sel = sorted((e for e in new if label_of(e) == label),
-                             key=lambda x: x.symbol)
+                             key=_new_order)
             hold_sel = sorted((e for e in hold if label_of(e) == label),
-                              key=_hold_order, reverse=True)   # 24h 수익률 순
+                              key=_hold_order)
             board = crypto_board if (label == LEADER_LABEL and kind == "crypto") else ()
             if not new_sel and not hold_sel and not board:
                 continue

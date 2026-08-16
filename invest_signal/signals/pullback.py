@@ -146,7 +146,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:
     """발생 후에도 계속 추적한다 — 60선 위로 복귀해 올라가는 동안에도 남는다.
     제거는 다섯 경로:
-    ① 하락전환(CHoCH) 발생 시 스캐너가 걷어냄 ② 조회 범위(3일) 경과
+    ① 하락전환(CHoCH) 발생 시 스캐너가 걷어냄 ② 조회 범위(5일) 경과
     ③ 종가가 분기 VWAP 하단 밴드 아래로 마감 ④ 종가가 480선 아래로 마감
     ⑤ 수퍼트렌드가 하락으로 뒤집힘
     (③④⑤는 셋업의 전제가 깨진 것)

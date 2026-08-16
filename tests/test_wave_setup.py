@@ -180,3 +180,48 @@ def test_impulse_lookback_follows_the_widened_grace():
     wide = dataclasses.replace(p, grace_bars=ONGOING_LOOKBACK_BARS)
     evs = detect(df, "XUSDT", wide)
     assert len(evs) == 1 and evs[0].bar_time == day
+
+
+def test_refresh_detail_updates_the_line_to_now():
+    """추적 줄의 추세선은 트리거 시점이 아니라 현재 값이어야 한다.
+
+    6일 전 터치한 종목이 그 사이 폭락하면, 얼어붙은 값은 현재가의 몇 배가
+    되어 줄이 말이 안 되게 보인다.
+    """
+    closes = _falling_then_pop()
+    p = Params(impulse_enabled=False)
+    e = detect(_frame(closes), "XUSDT", p)[0]
+    at_trigger = e.detail["fast_line"]
+
+    later = _frame(closes + list(np.linspace(closes[-1], closes[-1] * 5, 12)))
+    wave_setup.refresh_detail(later, e, p)
+    now_line = e.detail["fast_line"]
+    assert now_line != at_trigger
+    assert now_line > at_trigger          # 상승 추세를 따라 선이 올라왔다
+
+
+def test_impulse_tracking_stays_inside_the_track_window():
+    """넓힌 창으로도 TRACK_DAYS보다 오래된 일봉은 잡지 않는다.
+
+    일봉은 완성 시점이 이미 하루 지난 봉이라, 환산에서 1을 빼지 않으면
+    추적 목록에 하루 많은 줄이 남는다.
+    """
+    import dataclasses
+
+    from invest_signal.scanner import ONGOING_LOOKBACK_BARS, TRACK_DAYS
+
+    df = _frame(list(np.linspace(100.0, 50.0, 6 * 120)))
+    p = Params(abc_enabled=False)
+    daily = wave_setup._daily(df)
+    fast = supertrend_full(daily, p.fast_period, p.fast_mult)
+    wide = dataclasses.replace(p, grace_bars=ONGOING_LOOKBACK_BARS)
+
+    # 마지막 완성 일봉이 이미 하루 전이므로, 벽시계로 TRACK_DAYS일 된 봉은
+    # 인덱스로 TRACK_DAYS-1칸 뒤다. 그보다 한 칸 더 뒤는 창 밖이어야 한다.
+    for back, inside in ((TRACK_DAYS - 1, True), (TRACK_DAYS, False)):
+        probe = df.copy()
+        day = daily.index[-1 - back]
+        line = float(fast["line"].loc[day])
+        probe.loc[probe.index.normalize() == day, "High"] = line + 1.0
+        got = [e.bar_time for e in detect(probe, "XUSDT", wide)]
+        assert (day in got) is inside, (back, inside, got)
