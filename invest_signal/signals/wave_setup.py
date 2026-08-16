@@ -205,25 +205,18 @@ def _detect_impulse(df: pd.DataFrame, symbol: str, params: Params,
 
 def refresh_detail(df: pd.DataFrame, event: SignalEvent,
                    params: Params = Params()) -> None:
-    """추적 줄에 실릴 추세선 값을 **지금 값으로** 갱신한다.
+    """추적 줄에 실릴 수익률을 **지금 값으로** 갱신한다.
 
-    detect가 붙인 fast_line은 트리거 봉의 값이라, 며칠 지난 셋업에서는
-    현재가와 나란히 놓였을 때 말이 안 되는 조합이 된다 — 6일 전 터치한
-    종목이 그 사이 크게 빠지면 '현재가 0.033 · 22×3선 0.241' 같은 줄이
-    나온다. 추세선은 지금 어디가 무효화 지점인지를 말해 줄 때 쓸모가
-    있으므로 매 스캔 다시 계산한다.
+    detect가 붙인 값은 트리거 봉 기준이라 며칠 지난 셋업이면 며칠 전
+    수익률이 현재가 옆에 박제된다. 알림에 실리는 4h·24h·7d는 매 스캔
+    다시 계산한다.
+
+    추세선(fast_line·slow_line)은 갱신하지 않는다 — 알림에 싣지 않으므로
+    종목마다 수퍼트렌드를 두 번 더 돌릴 이유가 없다. detail에 남아 있는
+    값은 트리거 시점 기록이다.
     """
-    frame = (df if event.detail.get("stage") == ABC
-             else _daily(df, params.include_live_day))
-    if not len(frame):
-        return
-    fast, slow = _trends(frame, params)
-    for key, series in (("fast_line", fast), ("slow_line", slow)):
-        v = series["line"].iloc[-1]
-        if not pd.isna(v):
-            event.detail[key] = float(v)
     if len(df):
-        event.detail.update(_returns(df))   # 수익률도 지금 값으로
+        event.detail.update(_returns(df))
 
 
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:

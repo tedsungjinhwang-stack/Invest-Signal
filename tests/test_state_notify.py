@@ -362,12 +362,12 @@ def test_wave_tracking_groups_by_variant_too():
 
 
 def test_wave_line_shows_the_gain_it_is_sorted_by():
-    """정렬 기준인 24h가 파동 줄에도 나온다. 봉 주기는 태그에서 뺐다."""
+    """정렬 기준인 24h가 파동 줄에 나오고, 수퍼트렌드선 값은 안 나온다."""
     out = format_events([_wave("XUSDT", "ABC", 0.083)], [], {})
     line = [ln for ln in out.splitlines() if ln.startswith("• ")][0]
     assert "24h +8.3%" in line
-    assert "ABC 돌파 · 22×3선 0.9" in line
-    assert "· 4h 22×3" not in line      # 수익률의 4h와 겹치던 표기는 없앴다
+    assert line.endswith("ABC 돌파")
+    assert "0.9" not in line and "수퍼트렌드선" not in line
 
 
 def test_non_wave_signals_keep_a_single_group():

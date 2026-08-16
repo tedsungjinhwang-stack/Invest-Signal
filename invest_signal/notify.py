@@ -144,17 +144,14 @@ WAVE_HEADERS = {"ABC": "  ⓐ <b>ABC</b> · 4h 돌파",
 
 
 def _wave_tag(d: dict) -> str:
-    """파동 — 어느 변형인지와 단기 추세선 값.
+    """파동 — 어느 변형인지만.
 
-    봉 주기는 적지 않는다. ABC는 4h 돌파, 임펄스는 일봉 터치로 1:1이라
-    변형 이름이 이미 그 정보이고, 줄에 붙는 수익률 태그의 `4h`(4시간
-    수익률)와 글자가 겹쳐 서로 다른 뜻으로 두 번 나오는 게 더 헷갈린다.
+    수퍼트렌드선 값은 싣지 않는다. 봉 주기도 적지 않는다 — ABC는 4h 돌파,
+    임펄스는 일봉 터치로 1:1이라 변형 이름이 이미 그 정보이고, 줄에 붙는
+    수익률의 `4h`와 글자가 겹쳐 서로 다른 뜻으로 두 번 나온다.
     """
     stage = d.get("stage", "")
-    how = "돌파" if stage == "ABC" else "터치"
-    line = d.get("fast_line")
-    return (f"{stage} {how} · {d.get('fast_st', '')}선 "
-            f"{_fmt_price(line) if line is not None else '?'}")
+    return f"{stage} {'돌파' if stage == 'ABC' else '터치'}"
 
 
 def _event_line(e, url: str, name: str, kind: str) -> str:
@@ -276,9 +273,6 @@ def format_events(events_crypto: list, events_etf: list,
         else:
             if d.get("stage") in PULLBACK_STAGES:
                 tags.append("🎯타점" if d["stage"] == "타점" else "대기")
-            elif e.signal == "wave_setup" and d.get("fast_line") is not None:
-                # 변형 이름은 위 소제목에 한 번만 — 여기는 무효화 선만 적는다
-                tags.append(f"선 {_fmt_price(d['fast_line'])}")
             if d.get("align"):
                 tags.append(d["align"])
         price = d.get("last_price")

@@ -182,22 +182,22 @@ def test_impulse_lookback_follows_the_widened_grace():
     assert len(evs) == 1 and evs[0].bar_time == day
 
 
-def test_refresh_detail_updates_the_line_to_now():
-    """추적 줄의 추세선은 트리거 시점이 아니라 현재 값이어야 한다.
+def test_refresh_detail_updates_the_returns_to_now():
+    """추적 줄의 수익률은 트리거 시점이 아니라 현재 값이어야 한다.
 
-    6일 전 터치한 종목이 그 사이 폭락하면, 얼어붙은 값은 현재가의 몇 배가
-    되어 줄이 말이 안 되게 보인다.
+    며칠 지난 셋업이면 며칠 전 수익률이 현재가 옆에 박제된다.
     """
     closes = _falling_then_pop()
     p = Params(impulse_enabled=False)
     e = detect(_frame(closes), "XUSDT", p)[0]
-    at_trigger = e.detail["fast_line"]
+    at_trigger = e.detail["ret_24h"]
 
     later = _frame(closes + list(np.linspace(closes[-1], closes[-1] * 5, 12)))
     wave_setup.refresh_detail(later, e, p)
-    now_line = e.detail["fast_line"]
-    assert now_line != at_trigger
-    assert now_line > at_trigger          # 상승 추세를 따라 선이 올라왔다
+    assert e.detail["ret_24h"] != at_trigger
+    assert e.detail["ret_24h"] > 0        # 그 사이 크게 올랐다
+    # 추세선은 알림에 안 실으므로 갱신하지 않는다 — 트리거 시점 기록 그대로
+    assert e.detail["fast_line"] == detect(_frame(closes), "XUSDT", p)[0].detail["fast_line"]
 
 
 def test_impulse_tracking_stays_inside_the_track_window():
