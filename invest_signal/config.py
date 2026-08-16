@@ -116,6 +116,10 @@ def wave_params(cfg: dict) -> wave_setup.Params:
         grace_bars=int(s.get("grace_bars", 1)),
         daily_grace_bars=int(s.get("daily_grace_bars", 1)),
         abc_track_days=int(s.get("abc_track_days", 3)),
+        vwap_condition=bool(s.get("vwap_condition", True)),
+        vwap_period=str(s.get("vwap_period", "M")),
+        vwap_mode=str(s.get("vwap_mode", "any")),
+        vwap_touch_bars=int(s.get("vwap_touch_bars", 5)),
     )
 
 

@@ -30,7 +30,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..indicators import pct_since, supertrend_full
+from ..indicators import anchored_vwap, pct_since, supertrend_full
 from . import SignalEvent
 
 NAME = "wave_setup"
@@ -68,6 +68,14 @@ class Params:
     grace_bars: int = 1         # 4h 지각 허용 봉 수 (스캔을 놓쳤을 때 소급)
     daily_grace_bars: int = 1   # 일봉 지각 허용 봉 수 — 하루 1봉이라 따로 둔다
     include_live_day: bool = False   # 진행 중인 오늘을 일봉에 포함 (인트라바 스캔)
+    # 월간 앵커드 VWAP 조건 — 상승초입과 같은 규칙(above/touch/any).
+    # 두 변형 모두 **4h 프레임**의 MVWAP으로 판정한다: 같은 선을 보는
+    # 조건이고, 일봉으로 다시 계산하면 하루치 대표가격 하나로 뭉쳐져
+    # 터치 판정이 무뎌진다. 임펄스는 그날의 마지막 4h봉을 기준점으로 쓴다.
+    vwap_condition: bool = True
+    vwap_period: str = "M"       # M(월간)/Q(분기)/W(주간)
+    vwap_mode: str = "any"       # above / touch / any
+    vwap_touch_bars: int = 5     # 터치 소급 창 — 4h 5봉 = 20시간
     # ABC만 추적 보유 기간을 따로 짧게 가져간다(일 단위, 0이면 제한 없음).
     # 스캐너가 넘겨 주는 공용 창(TRACK_DAYS)보다 짧을 때만 효력이 있다 —
     # 돌파는 4h짜리 사건이라 며칠 지나면 '방금 돌파한 자리'가 아니게 된다.
@@ -95,6 +103,41 @@ def _daily(df: pd.DataFrame, keep_partial: bool = False) -> pd.DataFrame:
     if not keep_partial and counts.iloc[-1] < BARS_PER_DAY:
         agg = agg.iloc[:-1]
     return agg
+
+
+def _vwap_gate(df: pd.DataFrame, params: Params):
+    """4h 프레임 기준 VWAP 조건 판정기 — `ok(i)` 하나를 돌려준다.
+
+    상승초입과 같은 정의다:
+      above — 그 봉 종가가 VWAP 위
+      touch — 최근 vwap_touch_bars봉 안에 VWAP이 캔들 범위 안(저가 ≤ 선 ≤ 고가)
+      any   — 둘 중 하나
+    조건을 껐거나 VWAP을 못 구하는 구간은 통과시킨다.
+    """
+    if not params.vwap_condition:
+        return lambda i: True
+    vw = anchored_vwap(df, params.vwap_period)
+    if vw is None:
+        return lambda i: True
+    high, low, close = df["High"], df["Low"], df["Close"]
+
+    def touched(i: int) -> bool:
+        for j in range(max(0, i - params.vwap_touch_bars + 1), i + 1):
+            if not pd.isna(vw.iloc[j]) and low.iloc[j] <= vw.iloc[j] <= high.iloc[j]:
+                return True
+        return False
+
+    def ok(i: int) -> bool:
+        if i < 0 or i >= len(df) or pd.isna(vw.iloc[i]):
+            return True
+        above = bool(close.iloc[i] > vw.iloc[i])
+        if params.vwap_mode == "above":
+            return above
+        if params.vwap_mode == "touch":
+            return touched(i)
+        return above or touched(i)          # any
+
+    return ok
 
 
 def _trends(df: pd.DataFrame, params: Params):
@@ -138,17 +181,24 @@ def _event(df, symbol, i, kind, fast, slow, params, rets) -> SignalEvent:
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
     """마감된 4h OHLC(오름차순, UTC 인덱스)에서 두 변형을 모두 찾는다."""
     events = []
-    rets = _returns(df) if len(df) else {}
+    if not len(df):
+        return events
+    rets = _returns(df)
+    vwap_ok = _vwap_gate(df, params)
     if params.abc_enabled:
-        events += _detect_abc(df, symbol, params, rets)
+        events += _detect_abc(df, symbol, params, rets, vwap_ok)
     if params.impulse_enabled:
-        events += _detect_impulse(_daily(df, params.include_live_day),
-                                  symbol, params, rets)
+        daily = _daily(df, params.include_live_day)
+        # 일봉 트리거를 4h 프레임 위치로 옮긴다 — 그날의 마지막 4h봉이 기준점
+        def day_ok(day) -> bool:
+            i = int(df.index.searchsorted(day + pd.Timedelta(days=1), "left")) - 1
+            return vwap_ok(i)
+        events += _detect_impulse(daily, symbol, params, rets, day_ok)
     return events
 
 
 def _detect_abc(df: pd.DataFrame, symbol: str, params: Params,
-                rets: dict) -> list[SignalEvent]:
+                rets: dict, vwap_ok) -> list[SignalEvent]:
     """ⓐ 4h — 둘 다 하락이던 상태에서 종가가 단기선을 돌파해 마감한 봉.
 
     돌파의 정의를 '종가 > 단기선'으로 따로 쓰지 않고 **단기 수퍼트렌드가
@@ -170,12 +220,14 @@ def _detect_abc(df: pd.DataFrame, symbol: str, params: Params,
             continue            # 직전 봉에 둘 다 하락이어야 '둘 다 하락인 시점'
         if not (_up(fast, t) and _down(slow, t)):
             continue            # 이 봉에서 단기만 뒤집히고 장기는 아직 하락
+        if not vwap_ok(t):
+            continue
         out.append(_event(df, symbol, t, ABC, fast, slow, params, rets))
     return out
 
 
 def _detect_impulse(df: pd.DataFrame, symbol: str, params: Params,
-                    rets: dict) -> list[SignalEvent]:
+                    rets: dict, vwap_ok) -> list[SignalEvent]:
     """ⓑ 일봉 — 둘 다 하락인 채로 캔들이 단기선을 터치한 날.
 
     방향이 하락이면 단기선은 상단 밴드다. 종가가 그 선을 넘었다면 방향이
@@ -206,7 +258,9 @@ def _detect_impulse(df: pd.DataFrame, symbol: str, params: Params,
     look = max(params.daily_grace_bars, params.grace_bars // BARS_PER_DAY - 1)
     out = []
     for t in range(max(1, n - 1 - look), n):
-        if touching(t) and not touching(t - 1):     # 연속 터치는 첫날만
+        if not (touching(t) and not touching(t - 1)):    # 연속 터치는 첫날만
+            continue
+        if vwap_ok(df.index[t]):
             out.append(_event(df, symbol, t, IMPULSE, fast, slow, params, rets))
     return out
 

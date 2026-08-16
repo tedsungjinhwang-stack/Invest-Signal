@@ -3,7 +3,9 @@
 import numpy as np
 import pandas as pd
 
-from invest_signal.indicators import supertrend_full
+from dataclasses import replace as dataclasses_replace
+
+from invest_signal.indicators import anchored_vwap, supertrend_full
 from invest_signal.signals import wave_setup
 from invest_signal.signals.wave_setup import ABC, IMPULSE, Params, detect, still_active
 
@@ -73,7 +75,7 @@ def test_impulse_fires_on_daily_touch():
     n = 6 * 120
     closes = list(np.linspace(100.0, 50.0, n))
     df = _frame(closes)
-    p = Params(abc_enabled=False)
+    p = Params(abc_enabled=False, vwap_condition=False)
     daily = wave_setup._daily(df)
     fast = supertrend_full(daily, p.fast_period, p.fast_mult)
     # 마지막 날의 고가를 단기선 위로 끌어올려 '터치'를 만든다 (종가는 그대로)
@@ -167,7 +169,7 @@ def test_impulse_lookback_follows_the_widened_grace():
 
     n = 6 * 120
     df = _frame(list(np.linspace(100.0, 50.0, n)))
-    p = Params(abc_enabled=False)
+    p = Params(abc_enabled=False, vwap_condition=False)
     daily = wave_setup._daily(df)
     fast = supertrend_full(daily, p.fast_period, p.fast_mult)
     # TRACK_DAYS만큼 거슬러 올라간 날에 터치를 만든다 — 좁은 창이면 못 잡는다
@@ -211,7 +213,7 @@ def test_impulse_tracking_stays_inside_the_track_window():
     from invest_signal.scanner import ONGOING_LOOKBACK_BARS, TRACK_DAYS
 
     df = _frame(list(np.linspace(100.0, 50.0, 6 * 120)))
-    p = Params(abc_enabled=False)
+    p = Params(abc_enabled=False, vwap_condition=False)
     daily = wave_setup._daily(df)
     fast = supertrend_full(daily, p.fast_period, p.fast_mult)
     wide = dataclasses.replace(p, grace_bars=ONGOING_LOOKBACK_BARS)
@@ -237,7 +239,7 @@ def test_impulse_can_use_the_running_day_when_asked():
 
     n = 6 * 120 + 2                      # 마지막 날은 4h봉 2개뿐 (진행 중)
     df = _frame(list(np.linspace(100.0, 50.0, n)))
-    p = Params(abc_enabled=False)
+    p = Params(abc_enabled=False, vwap_condition=False)
 
     live = wave_setup._daily(df, keep_partial=True)
     assert len(live) == len(wave_setup._daily(df)) + 1      # 오늘이 한 줄 더
@@ -298,3 +300,66 @@ def test_abc_cap_does_not_shorten_the_normal_grace():
     df = _frame(_falling_then_pop())
     p = Params(impulse_enabled=False)
     assert len(detect(df, "XUSDT", p)) == 1
+
+
+def _vwap_probe():
+    """VWAP 게이트만 떼어 보기 위한 최소 프레임.
+
+    꾸준히 오르는 구간이라 MVWAP(누적 평균)은 항상 종가보다 아래에 있고,
+    캔들 폭이 좁아 선에 닿지도 않는다 — 마지막 봉만 선 아래로 떨어뜨린다.
+    """
+    close = np.array([100.0 + 10 * i for i in range(9)] + [50.0])
+    idx = pd.date_range("2026-04-01", periods=len(close), freq="4h", tz="UTC")
+    df = pd.DataFrame({"Open": close, "High": close * 1.001, "Low": close * 0.999,
+                       "Close": close, "Volume": np.full(len(close), 1000.0)},
+                      index=idx)
+    return df, wave_setup._vwap_gate(df, Params())
+
+
+def test_vwap_gate_above_and_below():
+    """종가가 선 위면 통과, 아래면 불통과 (터치도 없을 때)."""
+    df, ok = _vwap_probe()
+    assert ok(len(df) - 2) is True       # 선 위
+    assert ok(len(df) - 1) is False      # 선 아래, 최근 터치 없음
+
+
+def test_vwap_gate_accepts_a_touch_inside_the_window():
+    """창 안에 캔들이 선을 걸쳤으면 종가가 아래여도 통과한다(any)."""
+    df, _ = _vwap_probe()
+    j = len(df) - 3
+    df.iloc[j, df.columns.get_loc("Low")] = 10.0     # 그 봉이 선을 관통
+    df.iloc[j, df.columns.get_loc("High")] = 200.0
+    ok = wave_setup._vwap_gate(df, Params(vwap_mode="any", vwap_touch_bars=5))
+    assert ok(len(df) - 1) is True
+
+    narrow = wave_setup._vwap_gate(df, Params(vwap_mode="any", vwap_touch_bars=2))
+    assert narrow(len(df) - 1) is False              # 창 밖이면 다시 막힌다
+
+
+def test_vwap_gate_modes_differ():
+    """above는 터치를 인정하지 않고, touch는 '선 위'만으로는 통과시키지 않는다."""
+    df, _ = _vwap_probe()
+    j = len(df) - 3
+    df.iloc[j, df.columns.get_loc("Low")] = 10.0
+    df.iloc[j, df.columns.get_loc("High")] = 200.0
+    last = len(df) - 1
+    assert wave_setup._vwap_gate(df, Params(vwap_mode="above"))(last) is False
+    assert wave_setup._vwap_gate(df, Params(vwap_mode="touch"))(last) is True
+    # 선 위이지만 터치는 없는 봉 — above는 통과, touch는 불통과.
+    # 창이 월 첫 봉에 닿지 않는 자리를 고른다: 리셋 직후 첫 봉은 정의상
+    # MVWAP = (고+저+종)/3이라 언제나 '터치'로 잡힌다.
+    assert wave_setup._vwap_gate(df, Params(vwap_mode="above"))(5) is True
+    assert wave_setup._vwap_gate(df, Params(vwap_mode="touch"))(5) is False
+
+
+def test_vwap_gate_blocks_an_abc_far_below_the_line():
+    """실제 발화 경로에서도 막힌다 — 한 달 내내 흘러내린 뒤의 돌파."""
+    import dataclasses
+
+    base = list(np.linspace(100.0, 40.0, 179))       # 한 달(30일) 안에서만
+    df = _frame(base + [base[-1] * 1.05], start="2026-03-01")
+    on = Params(impulse_enabled=False)
+    off = dataclasses.replace(on, vwap_condition=False)
+
+    assert len(detect(df, "XUSDT", off)) == 1        # 게이트만 빼면 잡히던 자리
+    assert detect(df, "XUSDT", on) == []             # 종가 42 vs MVWAP 70

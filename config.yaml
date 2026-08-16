@@ -118,6 +118,13 @@ signal:
     # '방금 돌파한 자리'가 아니게 된다. ⓑ는 일봉 터치라 성격이 달라
     # 공용 창(scanner.TRACK_DAYS = 5일)을 그대로 쓴다. 0이면 제한 없음.
     abc_track_days: 3
+    # 월간 앵커드 VWAP 조건 — 상승초입과 같은 규칙. 두 변형 모두 4h 프레임의
+    # MVWAP으로 재고(임펄스는 그날 마지막 4h봉이 기준점), 일봉으로 다시
+    # 계산하지 않는다 — 하루치가 대표가격 하나로 뭉쳐져 터치가 무뎌진다.
+    vwap_condition: true
+    vwap_period: M          # M(월간)/Q(분기)/W(주간)
+    vwap_mode: any          # any(터치 또는 위) / touch(터치만) / above(위만)
+    vwap_touch_bars: 5      # 터치 소급 창 — 4h 5봉 = 20시간
     crypto_rank_filter:     # 상승초입과 같은 기준 — 초입 성격이라 느슨하게
       enabled: true
       volume_top: 200
