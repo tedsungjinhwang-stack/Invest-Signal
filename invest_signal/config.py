@@ -115,6 +115,7 @@ def wave_params(cfg: dict) -> wave_setup.Params:
         impulse_enabled=bool(s.get("impulse_enabled", True)),
         grace_bars=int(s.get("grace_bars", 1)),
         daily_grace_bars=int(s.get("daily_grace_bars", 1)),
+        abc_track_days=int(s.get("abc_track_days", 3)),
     )
 
 

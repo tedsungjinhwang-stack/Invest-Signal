@@ -114,6 +114,10 @@ signal:
     impulse_enabled: true
     grace_bars: 1           # 4h 지각 허용 봉 수
     daily_grace_bars: 1     # 일봉 지각 허용 봉 수 — 하루 1봉이라 따로 둔다
+    # ⓐ만 추적 보유 기간을 짧게 — 돌파는 4h짜리 사건이라 며칠 지나면
+    # '방금 돌파한 자리'가 아니게 된다. ⓑ는 일봉 터치라 성격이 달라
+    # 공용 창(scanner.TRACK_DAYS = 5일)을 그대로 쓴다. 0이면 제한 없음.
+    abc_track_days: 3
     crypto_rank_filter:     # 상승초입과 같은 기준 — 초입 성격이라 느슨하게
       enabled: true
       volume_top: 200

@@ -265,3 +265,36 @@ def test_with_fields_only_sets_known_params():
     other = uptrend_onset.Params()       # 이 필드를 모르는 시그널
     assert _with_fields(other, include_live_day=True) == other
     assert not dataclasses.replace(other, grace_bars=1).__dict__.get("include_live_day")
+
+
+def test_abc_tracking_is_capped_shorter_than_the_shared_window():
+    """ABC는 공용 창(TRACK_DAYS)보다 짧은 abc_track_days까지만 추적한다.
+
+    임펄스는 같은 호출에서 공용 창을 그대로 쓴다 — 캡은 ABC 전용이다.
+    """
+    import dataclasses
+
+    from invest_signal.scanner import ONGOING_LOOKBACK_BARS, TRACK_DAYS
+
+    p = Params(impulse_enabled=False, abc_track_days=3)
+    wide = dataclasses.replace(p, grace_bars=ONGOING_LOOKBACK_BARS)
+    assert TRACK_DAYS > p.abc_track_days        # 캡이 실제로 좁히는 상황
+
+    closes = _falling_then_pop()
+    inside = _frame(closes + list(np.linspace(closes[-1], closes[-1] * 1.02,
+                                              3 * 6)))       # 전환 후 3일
+    outside = _frame(closes + list(np.linspace(closes[-1], closes[-1] * 1.02,
+                                               4 * 6)))      # 전환 후 4일
+    assert len(detect(inside, "XUSDT", wide)) == 1
+    assert detect(outside, "XUSDT", wide) == []
+
+    # 캡을 끄면 공용 창 안이므로 다시 잡힌다
+    assert len(detect(outside, "XUSDT",
+                      dataclasses.replace(wide, abc_track_days=0))) == 1
+
+
+def test_abc_cap_does_not_shorten_the_normal_grace():
+    """평소 스캔(grace_bars=1)에서는 캡이 아무것도 바꾸지 않는다."""
+    df = _frame(_falling_then_pop())
+    p = Params(impulse_enabled=False)
+    assert len(detect(df, "XUSDT", p)) == 1

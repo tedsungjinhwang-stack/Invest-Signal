@@ -68,6 +68,11 @@ class Params:
     grace_bars: int = 1         # 4h 지각 허용 봉 수 (스캔을 놓쳤을 때 소급)
     daily_grace_bars: int = 1   # 일봉 지각 허용 봉 수 — 하루 1봉이라 따로 둔다
     include_live_day: bool = False   # 진행 중인 오늘을 일봉에 포함 (인트라바 스캔)
+    # ABC만 추적 보유 기간을 따로 짧게 가져간다(일 단위, 0이면 제한 없음).
+    # 스캐너가 넘겨 주는 공용 창(TRACK_DAYS)보다 짧을 때만 효력이 있다 —
+    # 돌파는 4h짜리 사건이라 며칠 지나면 '방금 돌파한 자리'가 아니게 된다.
+    # 임펄스는 일봉 터치라 성격이 달라 공용 창을 그대로 쓴다.
+    abc_track_days: int = 3
 
 
 def _daily(df: pd.DataFrame, keep_partial: bool = False) -> pd.DataFrame:
@@ -156,8 +161,11 @@ def _detect_abc(df: pd.DataFrame, symbol: str, params: Params,
     if n < need + 1:
         return []
     fast, slow = _trends(df, params)
+    look = params.grace_bars
+    if params.abc_track_days > 0:
+        look = min(look, params.abc_track_days * BARS_PER_DAY)
     out = []
-    for t in range(max(1, n - 1 - params.grace_bars), n):
+    for t in range(max(1, n - 1 - look), n):
         if not (_down(fast, t - 1) and _down(slow, t - 1)):
             continue            # 직전 봉에 둘 다 하락이어야 '둘 다 하락인 시점'
         if not (_up(fast, t) and _down(slow, t)):
