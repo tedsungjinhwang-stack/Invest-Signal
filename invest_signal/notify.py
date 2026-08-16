@@ -139,8 +139,24 @@ def _returns_tag(d: dict) -> str | None:
     return " · ".join(parts) if parts else None
 
 
-WAVE_HEADERS = {"ABC": "  ⓐ <b>ABC</b> · 4h 돌파",
-                "임펄스": "  ⓑ <b>임펄스</b> · 일봉 터치"}
+# 소제목이 수익률 세 칸의 순서까지 말해 준다 — 줄에서는 숫자만 이어 붙여
+# 폭을 줄인다. 파동 줄은 라벨을 반복하면 62칸이 되어 폰에서 두 줄로 접힌다
+# (다른 칸은 41칸이라 한 줄에 들어간다).
+WAVE_HEADERS = {"ABC": "  ⓐ <b>ABC</b> · 4h 돌파 · 4h/24h/7d",
+                "임펄스": "  ⓑ <b>임펄스</b> · 일봉 터치 · 4h/24h/7d"}
+
+
+def _returns_compact(d: dict) -> str | None:
+    """4h·24h·7d를 라벨 없이 한 덩어리로 — `-0.3/+2.3/-6.7%`.
+
+    구간 이름은 블록 소제목에 한 번만 적으므로 자리만 지키면 된다.
+    못 구한 구간은 건너뛰지 않고 –로 채운다 — 빼면 남은 숫자가 어느
+    구간인지 알 수 없게 된다.
+    """
+    vals = (d.get("ret_4h"), _daily_gain(d), d.get("ret_7d"))
+    if all(v is None for v in vals):
+        return None
+    return "/".join("–" if v is None else _pct(v)[:-1] for v in vals) + "%"
 
 
 def _wave_tag(d: dict) -> str:
@@ -259,7 +275,7 @@ def format_events(events_crypto: list, events_etf: list,
             # 파동만 구간 세트를 싣는다 — refresh_detail이 매 스캔 갱신하므로
             # 세 값 모두 지금 값이다. 다른 시그널의 ret_4h는 트리거 봉에
             # 얼어붙은 값이라 추적 줄에 실으면 묵은 숫자가 나간다.
-            rt = _returns_tag(d)
+            rt = _returns_compact(d)
             if rt:
                 tags.append(rt)
         else:
@@ -273,7 +289,9 @@ def format_events(events_crypto: list, events_etf: list,
         else:
             if d.get("stage") in PULLBACK_STAGES:
                 tags.append("🎯타점" if d["stage"] == "타점" else "대기")
-            if d.get("align"):
+            # 파동은 배열 태그를 뺀다 — 판정이 수퍼트렌드라 이평선 배열은
+            # 조건에 안 들어가고, 한글 두 글자가 줄 폭에서 제일 비싸다
+            if d.get("align") and e.signal != "wave_setup":
                 tags.append(d["align"])
         price = d.get("last_price")
         return (f"↳ {_short_symbol(e.symbol, kind, name)}"

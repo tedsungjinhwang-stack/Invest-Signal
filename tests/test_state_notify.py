@@ -401,8 +401,8 @@ def test_only_wave_hold_lines_carry_the_full_span_set():
     """
     wave = _wave("XUSDT", "ABC", 0.13)
     wave.detail.update({"ret_4h": -0.02, "ret_7d": 0.42})
-    assert "4h -2.0% · 24h +13% · 7d +42%" in format_events(
-        [], [], {}, ongoing_crypto=[wave])
+    # 추적 줄은 라벨 없이 한 덩어리 — 순서는 블록 소제목이 말해 준다
+    assert "-2.0/+13/+42%" in format_events([], [], {}, ongoing_crypto=[wave])
 
     other = _hold("YUSDT", gain=0.13)
     other.detail.update({"ret_4h": -0.02, "ret_7d": 0.42})
@@ -436,3 +436,31 @@ def test_hold_lines_use_one_separator_everywhere():
     line = [ln for ln in format_events([], [], {}, ongoing_crypto=[e]).splitlines()
             if ln.startswith("↳ ")][0]
     assert line == "↳ X  100 · 0d · 24h +13% · 역배열"
+
+
+def test_wave_hold_line_fits_one_phone_line():
+    """파동 추적 줄은 다른 칸과 같은 폭이어야 한다 — 폰에서 안 접히게.
+
+    라벨을 반복하고 배열 태그까지 붙이면 62칸이 되어 두 줄로 접혔다.
+    """
+    import unicodedata
+
+    def width(s):        # 한글·전각은 두 칸으로 센다
+        return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in s)
+
+    wave = _wave("AIGENSYNUSDT", "ABC", 0.023)
+    wave.detail.update({"ret_4h": -0.003, "ret_7d": -0.067, "align": "역배열",
+                        "last_price": 0.02067})
+    line = [ln for ln in format_events([], [], {}, ongoing_crypto=[wave]).splitlines()
+            if ln.startswith("↳ ")][0]
+    assert width(line) <= 45, f"{width(line)}칸: {line}"
+    assert "역배열" not in line      # 판정에 안 쓰는 배열 태그는 뺐다
+    assert "4h -" not in line       # 라벨은 소제목에만
+
+
+def test_wave_compact_returns_keep_the_slot_when_a_span_is_missing():
+    """한 구간을 못 구해도 자리를 비워 둔다 — 안 그러면 어느 구간인지 모른다."""
+    wave = _wave("XUSDT", "임펄스", 0.13)
+    wave.detail.update({"ret_4h": None, "ret_7d": 0.42})
+    out = format_events([], [], {}, ongoing_crypto=[wave])
+    assert "–/+13/+42%" in out
