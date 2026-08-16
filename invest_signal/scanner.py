@@ -31,9 +31,10 @@ RANK_FILTER_SCOPE = {
     "pullback": frozenset({"pullback", "mss"}),
     "uptrend_onset": frozenset({"uptrend_onset"}),
     "pump_early": frozenset({"pump_early"}),
+    "wave_setup": frozenset({"wave_setup"}),
 }
 RANK_FILTER_LABEL = {"pullback": "눌림목·MSS", "uptrend_onset": "상승초입",
-                     "pump_early": "펌핑초기"}
+                     "pump_early": "펌핑초기", "wave_setup": "파동"}
 
 
 def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[list, list]:

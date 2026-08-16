@@ -126,20 +126,24 @@ def atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
     return rma(true_range(df), n)
 
 
-def supertrend(df: pd.DataFrame, period: int = 22,
-               mult: float = 3.0) -> pd.Series:
-    """수퍼트렌드 방향 — +1 상승추세, −1 하락추세, ATR 미성립 구간은 NaN.
+def supertrend_full(df: pd.DataFrame, period: int = 22,
+                    mult: float = 3.0) -> pd.DataFrame:
+    """수퍼트렌드 방향과 추세선 — 열 `dir`(+1/−1/NaN)과 `line`.
 
     TradingView 내장 `ta.supertrend(mult, period)`와 같은 정의다:
       기준선 = (고+저)/2, 밴드 = 기준선 ∓ mult×ATR
       상단/하단 밴드는 추세가 유지되는 동안 유리한 쪽으로만 따라 올라간다
       (트레일링 스톱). 종가가 반대편 밴드를 넘기면 방향이 뒤집힌다.
+
+    `line`은 차트에 그려지는 그 선이다 — 상승추세면 하단 밴드,
+    하락추세면 상단 밴드. 캔들이 선을 '터치'했는지 보려면 이 값이 필요하다.
     """
     a = atr(df, period).to_numpy(dtype=float)
     hl2 = ((df["High"] + df["Low"]) / 2).to_numpy(dtype=float)
     close = df["Close"].to_numpy(dtype=float)
     n = len(close)
     dirs = np.full(n, np.nan)
+    lines = np.full(n, np.nan)
     lower = upper = np.nan
     trend = 1                       # 파인 기본값과 동일하게 상승에서 시작
     for i in range(n):
@@ -157,7 +161,14 @@ def supertrend(df: pd.DataFrame, period: int = 22,
             trend = -1
         lower, upper = lo, up
         dirs[i] = trend
-    return pd.Series(dirs, index=df.index)
+        lines[i] = lower if trend > 0 else upper
+    return pd.DataFrame({"dir": dirs, "line": lines}, index=df.index)
+
+
+def supertrend(df: pd.DataFrame, period: int = 22,
+               mult: float = 3.0) -> pd.Series:
+    """수퍼트렌드 방향만 — +1 상승추세, −1 하락추세, ATR 미성립 구간은 NaN."""
+    return supertrend_full(df, period, mult)["dir"]
 
 
 def pct_over(close: pd.Series, bars: int, at: int = -1) -> float | None:

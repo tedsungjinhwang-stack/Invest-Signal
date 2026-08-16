@@ -36,9 +36,11 @@ def chart_url(symbol: str, kind: str, market: str = "US") -> str:
     return f"https://www.tradingview.com/symbols/{symbol}/"
 
 
-SIGNAL_EMOJI = {"상승초입": "🟢", "눌림목": "🔵", "펌핑초기": "🌱",
+SIGNAL_EMOJI = {"상승초입": "🟢", "눌림목": "🔵", "펌핑초기": "🌱", "파동": "🌊",
                 "크립토 모멘텀 눌림목/이탈": "⚡", "하락전환": "🔻"}
-SIGNAL_ORDER = ["상승초입", "눌림목", "펌핑초기", "크립토 모멘텀 눌림목/이탈", "하락전환"]
+SIGNAL_ORDER = ["상승초입", "눌림목", "펌핑초기", "파동",
+                "크립토 모멘텀 눌림목/이탈", "하락전환"]
+PULLBACK_STAGES = ("타점", "대기")   # 그 외 stage는 시그널별로 따로 표기한다
 DISPLAY_GROUP = {"MSS": "눌림목", "풀백": "눌림목"}   # MSS는 눌림목 칸에 태그로 표시
 MARKET_EMOJI = {"크립토": "🪙", "ETF": "📊", "주식": "🏛"}
 DIVIDER = "─" * 16
@@ -110,6 +112,15 @@ def _returns_tag(d: dict) -> str | None:
     return " · ".join(parts) if parts else None
 
 
+def _wave_tag(d: dict) -> str:
+    """파동 — 어느 변형인지와 단기 추세선 값. ABC는 4h 돌파, 임펄스는 일봉 터치."""
+    stage, iv = d.get("stage", ""), d.get("interval", "")
+    how = "돌파" if stage == "ABC" else "터치"
+    line = d.get("fast_line")
+    return (f"{stage} · {iv} {d.get('fast_st', '')}선 "
+            f"{_fmt_price(line) if line is not None else '?'} {how}")
+
+
 def _event_line(e, url: str, name: str, kind: str) -> str:
     d = e.detail
     head = (f"• <a href=\"{url}\">{_short_symbol(e.symbol, kind, name)}</a>"
@@ -126,9 +137,11 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tags.append(f"⚠️MSS 저점 {_fmt_price(d['broken_low'])} 이탈"
                     if d.get("broken_low") else "⚠️MSS")
     else:
-        if d.get("stage"):
+        if d.get("stage") in PULLBACK_STAGES:
             # 눌림목 — 타점(밴드 터치)과 대기(밴드 위)를 한눈에 구분
             tags.append("🎯타점" if d["stage"] == "타점" else "대기")
+        if e.signal == "wave_setup":
+            tags.append(_wave_tag(d))
         if e.signal == "pump_early" and d.get("rise") is not None:
             hours = int(d.get("rise_bars", 1)) * 4
             tags.append(f"{hours}h +{d['rise'] * 100:.1f}%"
@@ -216,8 +229,10 @@ def format_events(events_crypto: list, events_etf: list,
             tags.append(f"⚠️MSS 저점 {_fmt_price(d['broken_low'])} 이탈"
                         if d.get("broken_low") else "⚠️MSS")
         else:
-            if d.get("stage"):
+            if d.get("stage") in PULLBACK_STAGES:
                 tags.append("🎯타점" if d["stage"] == "타점" else "대기")
+            elif e.signal == "wave_setup":
+                tags.append(_wave_tag(d))
             if d.get("align"):
                 tags.append(d["align"])
         price = d.get("last_price")

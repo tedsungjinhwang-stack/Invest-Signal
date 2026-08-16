@@ -3,7 +3,7 @@
 import yaml
 
 from .signals import (downtrend_reversal, mss, pullback, pump_early,
-                      uptrend_onset)
+                      uptrend_onset, wave_setup)
 
 DEFAULT_PATH = "config.yaml"
 
@@ -104,6 +104,20 @@ def pump_early_params(cfg: dict) -> pump_early.Params:
     )
 
 
+def wave_params(cfg: dict) -> wave_setup.Params:
+    s = (cfg.get("signal") or {}).get("wave_setup") or {}
+    return wave_setup.Params(
+        fast_period=int(s.get("fast_period", 22)),
+        fast_mult=float(s.get("fast_mult", 3.0)),
+        slow_period=int(s.get("slow_period", 30)),
+        slow_mult=float(s.get("slow_mult", 6.0)),
+        abc_enabled=bool(s.get("abc_enabled", True)),
+        impulse_enabled=bool(s.get("impulse_enabled", True)),
+        grace_bars=int(s.get("grace_bars", 1)),
+        daily_grace_bars=int(s.get("daily_grace_bars", 1)),
+    )
+
+
 def mss_params(cfg: dict) -> mss.Params:
     s = (cfg.get("signal") or {}).get("mss") or {}
     return mss.Params(
@@ -129,6 +143,8 @@ def detectors(cfg: dict, crypto: bool = False) -> list:
         out.append((downtrend_reversal, downtrend_params(cfg)))
     if (s.get("pump_early") or {}).get("enabled", True):
         out.append((pump_early, pump_early_params(cfg)))
+    if (s.get("wave_setup") or {}).get("enabled", True):
+        out.append((wave_setup, wave_params(cfg)))
     if (s.get("mss") or {}).get("enabled", True):
         out.append((mss, mss_params(cfg)))
     return out
