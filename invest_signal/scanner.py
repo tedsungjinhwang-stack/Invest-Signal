@@ -38,6 +38,17 @@ RANK_FILTER_LABEL = {"pullback": "눌림목·MSS", "uptrend_onset": "상승초�
                      "pump_early": "펌핑초기", "wave_setup": "파동"}
 
 
+def _with_fields(params, **kw):
+    """dataclass에 실제로 있는 필드만 갈아 끼운다.
+
+    시그널마다 아는 설정이 다르다 — 인트라바 같은 스캔 모드를 알아야 하는
+    시그널에만 조용히 전달하고, 모르는 시그널은 그대로 둔다.
+    """
+    names = {f.name for f in dataclasses.fields(params)}
+    use = {k: v for k, v in kw.items() if k in names}
+    return dataclasses.replace(params, **use) if use else params
+
+
 def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[list, list]:
     """전 종목 시그널 검출 + '유지 중' 목록.
 
@@ -334,8 +345,10 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         detectors = [(m, p) for m, p in detectors if m.NAME not in skipped]
         log(f"[binance] 크립토 제외 시그널: {', '.join(skipped)}")
     if intrabar:
-        detectors = [(m, p) for m, p in detectors
-                     if getattr(m, "INTRABAR_OK", False)]
+        # 인트라바를 아는 시그널에는 진행 중인 봉을 쓰라고 알려 준다
+        # (파동의 일봉 변형은 오늘을 포함해야 그날 안에 터치를 잡는다)
+        detectors = [(m, _with_fields(p, include_live_day=True))
+                     for m, p in detectors if getattr(m, "INTRABAR_OK", False)]
     exclude = set(c.get("exclude") or [])
     limit = int(c.get("kline_limit", 750))
     workers = int(c.get("fetch_workers", 6))
@@ -360,10 +373,12 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
     events, ongoing = _detect_all(frames, detectors, log)
     _fill_daily_return(ongoing, ticker)     # 추적 줄 정렬·표기용 24h 수익률
     if intrabar:
-        # 진행 중인 봉에서 잡힌 이벤트는 '미확정' 표시 — 마감 때 되돌릴 수 있음
-        live_open = pd.Timestamp.now(tz="UTC").floor("4h")
+        # 진행 중인 봉에서 잡힌 이벤트는 '미확정' 표시 — 마감 때 되돌릴 수 있음.
+        # 봉 주기가 시그널마다 다르므로(파동의 일봉 변형) 각자 주기로 자른다.
+        now = pd.Timestamp.now(tz="UTC")
         for e in events:
-            if e.bar_time == live_open:
+            freq = "1D" if e.detail.get("interval") == "1d" else "4h"
+            if e.bar_time == now.floor(freq):
                 e.detail["intrabar"] = True
         # 추적 목록도 그대로 싣는다. 판정이 진행봉 기준이라 4h봉 안에서
         # 들락날락할 수 있지만, 조건이 깨진 항목을 마감까지 최대 4시간

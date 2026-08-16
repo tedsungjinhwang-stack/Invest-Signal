@@ -150,10 +150,10 @@ def test_dedup_key_separates_the_two_variants():
     assert a.dedup_key != b.dedup_key
 
 
-def test_crypto_only_and_close_scan_only():
-    """크립토 전용이고, 인트라바 스캔에서는 돌지 않는다(돌파는 마감 판정)."""
+def test_crypto_only_and_runs_intrabar():
+    """크립토 전용이고, 인트라바 스캔에서도 돈다(매시간)."""
     assert wave_setup.CRYPTO_ONLY is True
-    assert getattr(wave_setup, "INTRABAR_OK", False) is False
+    assert wave_setup.INTRABAR_OK is True
 
 
 def test_impulse_lookback_follows_the_widened_grace():
@@ -225,3 +225,43 @@ def test_impulse_tracking_stays_inside_the_track_window():
         probe.loc[probe.index.normalize() == day, "High"] = line + 1.0
         got = [e.bar_time for e in detect(probe, "XUSDT", wide)]
         assert (day in got) is inside, (back, inside, got)
+
+
+def test_impulse_can_use_the_running_day_when_asked():
+    """include_live_day면 진행 중인 오늘도 일봉으로 보고 그날 터치를 잡는다.
+
+    끄면 오늘은 미완성이라 버려지므로, 오늘의 터치는 내일 UTC 00시가
+    지나야 알림이 된다 — 최대 하루가 늦는다.
+    """
+    import dataclasses
+
+    n = 6 * 120 + 2                      # 마지막 날은 4h봉 2개뿐 (진행 중)
+    df = _frame(list(np.linspace(100.0, 50.0, n)))
+    p = Params(abc_enabled=False)
+
+    live = wave_setup._daily(df, keep_partial=True)
+    assert len(live) == len(wave_setup._daily(df)) + 1      # 오늘이 한 줄 더
+
+    fast = supertrend_full(live, p.fast_period, p.fast_mult)
+    today = live.index[-1]
+    line = float(fast["line"].iloc[-1])
+    df.loc[df.index.normalize() == today, "High"] = line + 1.0
+
+    assert detect(df, "XUSDT", p) == []                     # 기본은 오늘을 안 본다
+    got = detect(df, "XUSDT", dataclasses.replace(p, include_live_day=True))
+    assert len(got) == 1 and got[0].bar_time == today
+
+
+def test_with_fields_only_sets_known_params():
+    """스캐너는 그 필드를 아는 시그널에만 값을 넘긴다."""
+    import dataclasses
+
+    from invest_signal.scanner import _with_fields
+    from invest_signal.signals import uptrend_onset
+
+    wave = _with_fields(Params(), include_live_day=True)
+    assert wave.include_live_day is True
+
+    other = uptrend_onset.Params()       # 이 필드를 모르는 시그널
+    assert _with_fields(other, include_live_day=True) == other
+    assert not dataclasses.replace(other, grace_bars=1).__dict__.get("include_live_day")

@@ -14,12 +14,16 @@
      추세선을 **터치**한 날 (저가 ≤ 선 ≤ 고가). 터치만이라 방향은 그대로
      하락이다 — 종가가 선을 넘었다면 그건 돌파(ⓐ)지 터치가 아니다.
 
-두 변형 모두 **마감 판정 전용**이다(INTRABAR_OK 없음). ⓐ는 "돌파 후 마감"이
-조건 자체라 진행봉으로 보면 뒤집힐 수 있고, ⓑ는 일봉이라 더 그렇다.
+두 변형 모두 **인트라바 스캔에서도 돈다**(매시간). 진행 중인 봉을 잠정
+종가로 보고 판정하므로 알림에 ⏳진행봉이 붙고, 봉이 마감될 때 조건이
+풀리면 무효일 수 있다. ⓐ의 "돌파 후 마감"은 그래서 마감 때 되돌려질 수
+있는 판정이지만, 그걸 기다리면 최대 4시간이 늦는다.
 
 일봉은 따로 받지 않고 스캔이 이미 가진 4h봉을 리샘플해서 쓴다 — 4h봉은
-UTC 00시에 맞춰 떨어지므로 6개가 하루가 된다. 아직 6개가 안 찬 마지막
-날은 미완성이라 버린다.
+UTC 00시에 맞춰 떨어지므로 6개가 하루가 된다. 아직 6개가 안 찬 오늘은
+기본적으로 버리지만, include_live_day를 켜면(인트라바) 진행 중인 오늘을
+포함해 ⓑ의 터치를 그날 안에 잡는다 — 안 그러면 오늘의 터치를 내일 UTC
+00시가 지나서야 알게 되어 하루까지 묵는다.
 """
 
 from dataclasses import dataclass
@@ -32,6 +36,7 @@ from . import SignalEvent
 NAME = "wave_setup"
 LABEL = "파동"
 CRYPTO_ONLY = True          # ETF·주식 스캔에서는 돌리지 않는다
+INTRABAR_OK = True          # 진행봉을 잠정 종가로 판정 — 알림에 ⏳진행봉 표시
 BARS_PER_DAY = 6            # 4h × 6 = 하루
 
 ABC = "ABC"                 # 4h 돌파
@@ -62,10 +67,15 @@ class Params:
     impulse_enabled: bool = True    # ⓑ 일봉 터치
     grace_bars: int = 1         # 4h 지각 허용 봉 수 (스캔을 놓쳤을 때 소급)
     daily_grace_bars: int = 1   # 일봉 지각 허용 봉 수 — 하루 1봉이라 따로 둔다
+    include_live_day: bool = False   # 진행 중인 오늘을 일봉에 포함 (인트라바 스캔)
 
 
-def _daily(df: pd.DataFrame) -> pd.DataFrame:
-    """4h봉 → 일봉. 아직 6봉이 안 찬 마지막 날은 미완성이라 버린다.
+def _daily(df: pd.DataFrame, keep_partial: bool = False) -> pd.DataFrame:
+    """4h봉 → 일봉. 아직 6봉이 안 찬 마지막 날은 기본적으로 버린다.
+
+    keep_partial=True면 진행 중인 오늘도 남긴다 — 인트라바 스캔에서 오늘의
+    터치를 그날 안에 잡기 위한 것이고, 그 봉의 고·저는 아직 자라는 중이라
+    판정이 뒤집힐 수 있다(알림에 ⏳진행봉이 붙는다).
 
     중간에 결측이 있는 날은 그대로 둔다 — 거기서 하루를 통째로 빼면
     일봉 인덱스에 구멍이 생겨 수퍼트렌드가 엉뚱한 봉을 이웃으로 본다.
@@ -77,7 +87,7 @@ def _daily(df: pd.DataFrame) -> pd.DataFrame:
     if not len(agg):
         return agg
     counts = df["Close"].resample("1D").count().reindex(agg.index)
-    if counts.iloc[-1] < BARS_PER_DAY:
+    if not keep_partial and counts.iloc[-1] < BARS_PER_DAY:
         agg = agg.iloc[:-1]
     return agg
 
@@ -127,7 +137,8 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     if params.abc_enabled:
         events += _detect_abc(df, symbol, params, rets)
     if params.impulse_enabled:
-        events += _detect_impulse(_daily(df), symbol, params, rets)
+        events += _detect_impulse(_daily(df, params.include_live_day),
+                                  symbol, params, rets)
     return events
 
 
@@ -202,7 +213,8 @@ def refresh_detail(df: pd.DataFrame, event: SignalEvent,
     나온다. 추세선은 지금 어디가 무효화 지점인지를 말해 줄 때 쓸모가
     있으므로 매 스캔 다시 계산한다.
     """
-    frame = df if event.detail.get("stage") == ABC else _daily(df)
+    frame = (df if event.detail.get("stage") == ABC
+             else _daily(df, params.include_live_day))
     if not len(frame):
         return
     fast, slow = _trends(frame, params)
@@ -223,7 +235,8 @@ def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()
       임펄스 — 단기가 상승으로 뒤집히면 그건 더 이상 터치 자리가 아니다
                 (그 사건은 ABC 쪽에서 따로 잡힌다)
     """
-    frame = df if event.detail.get("stage") == ABC else _daily(df)
+    frame = (df if event.detail.get("stage") == ABC
+             else _daily(df, params.include_live_day))
     if not len(frame):
         return False
     fast, slow = _trends(frame, params)
