@@ -26,7 +26,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..indicators import pct_over, supertrend_full
+from ..indicators import pct_since, supertrend_full
 from . import SignalEvent
 
 NAME = "wave_setup"
@@ -36,6 +36,20 @@ BARS_PER_DAY = 6            # 4h × 6 = 하루
 
 ABC = "ABC"                 # 4h 돌파
 IMPULSE = "임펄스"           # 일봉 터치
+
+# 알림 줄에 붙일 수익률 구간 — 이 시그널에만 있다. 봉 개수가 아니라 시각으로
+# 재고(pct_since), 변형과 무관하게 **4h 프레임**에서 뽑는다: 7일 상승률은
+# 종목의 성질이지 그 변형이 보는 차트 주기의 성질이 아니다. 일봉으로 재면
+# 마지막 완성 봉이 이미 어제라 임펄스만 하루 묵은 값이 된다.
+RETURN_SPANS = (("ret_4h", pd.Timedelta(hours=4)),
+                ("ret_24h", pd.Timedelta(hours=24)),
+                ("ret_7d", pd.Timedelta(days=7)))
+
+
+def _returns(df4h: pd.DataFrame) -> dict:
+    """마지막 4h봉 기준 구간별 수익률. 못 구한 구간은 None(알림에서 빠진다)."""
+    close = df4h["Close"]
+    return {k: pct_since(close, d) for k, d in RETURN_SPANS}
 
 
 @dataclass(frozen=True)
@@ -84,7 +98,7 @@ def _up(s: pd.DataFrame, i: int) -> bool:
     return not pd.isna(v) and v > 0
 
 
-def _event(df, symbol, i, kind, fast, slow, params) -> SignalEvent:
+def _event(df, symbol, i, kind, fast, slow, params, rets) -> SignalEvent:
     close = df["Close"]
     return SignalEvent(
         symbol=symbol,
@@ -101,8 +115,7 @@ def _event(df, symbol, i, kind, fast, slow, params) -> SignalEvent:
             "slow_line": float(slow["line"].iloc[i]),
             "fast_st": f"{params.fast_period}×{params.fast_mult:g}",
             "slow_st": f"{params.slow_period}×{params.slow_mult:g}",
-            "ret_4h": pct_over(close, 1, i) if kind == ABC else None,
-            "ret_24h": pct_over(close, BARS_PER_DAY if kind == ABC else 1, i),
+            **rets,
         },
     )
 
@@ -110,14 +123,16 @@ def _event(df, symbol, i, kind, fast, slow, params) -> SignalEvent:
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
     """마감된 4h OHLC(오름차순, UTC 인덱스)에서 두 변형을 모두 찾는다."""
     events = []
+    rets = _returns(df) if len(df) else {}
     if params.abc_enabled:
-        events += _detect_abc(df, symbol, params)
+        events += _detect_abc(df, symbol, params, rets)
     if params.impulse_enabled:
-        events += _detect_impulse(_daily(df), symbol, params)
+        events += _detect_impulse(_daily(df), symbol, params, rets)
     return events
 
 
-def _detect_abc(df: pd.DataFrame, symbol: str, params: Params) -> list[SignalEvent]:
+def _detect_abc(df: pd.DataFrame, symbol: str, params: Params,
+                rets: dict) -> list[SignalEvent]:
     """ⓐ 4h — 둘 다 하락이던 상태에서 종가가 단기선을 돌파해 마감한 봉.
 
     돌파의 정의를 '종가 > 단기선'으로 따로 쓰지 않고 **단기 수퍼트렌드가
@@ -136,11 +151,12 @@ def _detect_abc(df: pd.DataFrame, symbol: str, params: Params) -> list[SignalEve
             continue            # 직전 봉에 둘 다 하락이어야 '둘 다 하락인 시점'
         if not (_up(fast, t) and _down(slow, t)):
             continue            # 이 봉에서 단기만 뒤집히고 장기는 아직 하락
-        out.append(_event(df, symbol, t, ABC, fast, slow, params))
+        out.append(_event(df, symbol, t, ABC, fast, slow, params, rets))
     return out
 
 
-def _detect_impulse(df: pd.DataFrame, symbol: str, params: Params) -> list[SignalEvent]:
+def _detect_impulse(df: pd.DataFrame, symbol: str, params: Params,
+                    rets: dict) -> list[SignalEvent]:
     """ⓑ 일봉 — 둘 다 하락인 채로 캔들이 단기선을 터치한 날.
 
     방향이 하락이면 단기선은 상단 밴드다. 종가가 그 선을 넘었다면 방향이
@@ -172,7 +188,7 @@ def _detect_impulse(df: pd.DataFrame, symbol: str, params: Params) -> list[Signa
     out = []
     for t in range(max(1, n - 1 - look), n):
         if touching(t) and not touching(t - 1):     # 연속 터치는 첫날만
-            out.append(_event(df, symbol, t, IMPULSE, fast, slow, params))
+            out.append(_event(df, symbol, t, IMPULSE, fast, slow, params, rets))
     return out
 
 
@@ -190,10 +206,12 @@ def refresh_detail(df: pd.DataFrame, event: SignalEvent,
     if not len(frame):
         return
     fast, slow = _trends(frame, params)
-    for key, s in (("fast_line", fast), ("slow_line", slow)):
-        v = s["line"].iloc[-1]
+    for key, series in (("fast_line", fast), ("slow_line", slow)):
+        v = series["line"].iloc[-1]
         if not pd.isna(v):
             event.detail[key] = float(v)
+    if len(df):
+        event.detail.update(_returns(df))   # 수익률도 지금 값으로
 
 
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:

@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from invest_signal.indicators import quarterly_vwap, sma
 
@@ -64,3 +65,44 @@ def test_alignment_states():
     df_up = pd.DataFrame({"Open": up, "High": up, "Low": up, "Close": up})
     assert alignment(df_up) == "정배열"
     assert alignment(df_up.iloc[:100]) is None   # 480선 계산 불가
+
+
+def test_pct_since_uses_timestamps_not_bar_counts():
+    """장 시간에만 봉이 있는 프레임에서도 이름 그대로의 기간을 재야 한다.
+
+    4h 버킷이 빠진 ETF 프레임에서 봉을 세면 '24h'가 며칠 전이 된다.
+    """
+    from invest_signal.indicators import pct_since
+
+    # 하루에 4h봉 2개만 있는 프레임 (장 시간만) — 3일치
+    idx = pd.DatetimeIndex([
+        "2026-08-10T12:00Z", "2026-08-10T16:00Z",
+        "2026-08-11T12:00Z", "2026-08-11T16:00Z",
+        "2026-08-12T12:00Z", "2026-08-12T16:00Z",
+    ])
+    close = pd.Series([100.0, 101.0, 110.0, 111.0, 120.0, 132.0], index=idx)
+
+    # 24시간 전(08-11 16:00)이 기준 → 132/111 - 1
+    assert pct_since(close, pd.Timedelta(hours=24)) == pytest.approx(132 / 111 - 1)
+    # 봉 개수(6봉=24h)로 셌다면 100이 기준이 되어 완전히 다른 값이 나온다
+    assert pct_since(close, pd.Timedelta(hours=24)) != pytest.approx(132 / 100 - 1)
+
+
+def test_pct_since_returns_none_when_history_is_too_short():
+    """이력이 그 기간까지 못 닿으면 0이 아니라 None."""
+    from invest_signal.indicators import pct_since
+
+    idx = pd.date_range("2026-08-15", periods=3, freq="4h", tz="UTC")
+    close = pd.Series([1.0, 2.0, 3.0], index=idx)
+    assert pct_since(close, pd.Timedelta(days=7)) is None
+    assert pct_since(close, pd.Timedelta(hours=8)) == pytest.approx(2.0)
+
+
+def test_pct_since_matches_pct_over_on_a_gapless_frame():
+    """크립토처럼 빈 봉이 없는 프레임에서는 봉 세기와 결과가 같다."""
+    from invest_signal.indicators import pct_over, pct_since
+
+    idx = pd.date_range("2026-08-01", periods=60, freq="4h", tz="UTC")
+    close = pd.Series(np.linspace(10.0, 20.0, 60), index=idx)
+    assert pct_since(close, pd.Timedelta(hours=24)) == pytest.approx(pct_over(close, 6))
+    assert pct_since(close, pd.Timedelta(days=7)) == pytest.approx(pct_over(close, 42))

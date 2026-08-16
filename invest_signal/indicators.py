@@ -171,6 +171,31 @@ def supertrend(df: pd.DataFrame, period: int = 22,
     return supertrend_full(df, period, mult)["dir"]
 
 
+def pct_since(close: pd.Series, delta: pd.Timedelta, at: int = -1) -> float | None:
+    """at 위치 종가의 delta 시간 전 대비 변화율. 구할 수 없으면 None.
+
+    봉 개수가 아니라 **인덱스 시각**으로 기준 봉을 찾는다. 크립토는 24시간이
+    정확히 4h봉 6개라 둘이 같지만, ETF·주식은 장 시간에만 봉이 생기고 빈
+    버킷은 버려지므로 6봉을 세면 실제로는 이삼일 전이 된다. 7일처럼 창이
+    길수록 그 어긋남이 커진다.
+
+    delta만큼 거슬러 올라간 시각 **이하의 가장 마지막 봉**을 기준으로 쓴다.
+    이력이 거기까지 닿지 않으면 None — 0으로 채우면 '변화 없음'과 구분이
+    안 돼서 알림에 거짓 정보가 실린다.
+    """
+    n = len(close)
+    i = at if at >= 0 else n + at
+    if i < 0 or i >= n:
+        return None
+    j = int(close.index.searchsorted(close.index[i] - delta, side="right")) - 1
+    if j < 0 or j >= n:
+        return None
+    a, b = close.iloc[j], close.iloc[i]
+    if pd.isna(a) or pd.isna(b) or float(a) == 0.0:
+        return None
+    return float(b) / float(a) - 1
+
+
 def pct_over(close: pd.Series, bars: int, at: int = -1) -> float | None:
     """at 위치 종가의 bars봉 전 대비 변화율. 데이터가 모자라면 None.
 

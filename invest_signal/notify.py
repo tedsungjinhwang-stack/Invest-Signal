@@ -69,14 +69,13 @@ def _pct(x: float) -> str:
     return f"{v:+.1f}%" if abs(v) < 10 else f"{v:+.0f}%"
 
 
-# 신규 줄에 1h·4h·24h를 붙일 시그널. 파동은 24h가 정렬 기준이라 값을 보여야
-# 순서가 읽힌다(임펄스는 일봉이라 4h가 없어 24h만 붙는다).
+# 신규 줄에 구간별 수익률을 붙일 시그널. 어떤 구간이 나오는지는 시그널이
+# 채워 준 키에 달렸다 — 파동만 4h·24h·7d 셋을 다 준다.
 RETURN_SIGNALS = {"uptrend_onset", "leader_break", "wave_setup"}
 
 
-def _daily_gain(e) -> float | None:
-    """추적 줄의 24h 수익률 — 티커 값 우선, 없으면 캔들 역산."""
-    d = e.detail
+def _daily_gain(d: dict) -> float | None:
+    """24h 수익률 — 바이낸스 티커 값 우선, 없으면 캔들 역산."""
     g = d.get("gain_24h")
     return d.get("ret_24h") if g is None else g
 
@@ -104,7 +103,7 @@ def _by_gain_desc(e):
     거래대금으로 통과한 종목은 보지도 않으므로, 화면에서 처음 드러나는
     정보이고 "이 셋업이 지금 먹히는가"에 직접 답한다.
     """
-    g = _daily_gain(e)
+    g = _daily_gain(e.detail)
     return (1, 0.0) if g is None else (0, -g)
 
 
@@ -119,7 +118,10 @@ def _hold_order(e):
 
 
 def _returns_tag(d: dict) -> str | None:
-    """1h·4h·24h 종목 수익률 — 구할 수 있는 것만 이어 붙인다.
+    """1h·4h·24h·7d 종목 수익률 — 구할 수 있는 것만 이어 붙인다.
+
+    구간은 시그널마다 다르다. 7d를 채우는 건 파동뿐이고, 1h는 상승초입·
+    크립토 모멘텀만 받는다 — 없는 키는 그냥 빠진다.
 
     24h는 바이낸스 24hr 티커 값(gain_24h)이 있으면 그쪽을 쓴다. 캔들 역산은
     마지막 마감봉 기준이라 최대 4시간 묵는데, 티커는 호출 시점 롤링이다.
@@ -129,11 +131,11 @@ def _returns_tag(d: dict) -> str | None:
         v = d.get(key)
         if v is not None:
             parts.append(f"{label} {_pct(v)}")
-    day = d.get("gain_24h")
-    if day is None:
-        day = d.get("ret_24h")
+    day = _daily_gain(d)
     if day is not None:
         parts.append(f"24h {_pct(day)}")
+    if d.get("ret_7d") is not None:
+        parts.append(f"7d {_pct(d['ret_7d'])}")
     return " · ".join(parts) if parts else None
 
 
@@ -245,15 +247,24 @@ def format_events(events_crypto: list, events_etf: list,
             tags = [f"{d['rank']}위" if d.get("rank")
                     else f"추적 {d.get('watch_days', 0)}일차",
                     f"{ma}선 위" if d.get("above_ma") else f"🔻{ma}선 아래"]
-            if d.get("gain_24h") is not None:
-                tags.append(f"24h {d['gain_24h'] * 100:+.0f}%")
+            day = _daily_gain(d)
+            if day is not None:
+                tags.append(f"24h {_pct(day)}")
             return (f"↳ {_short_symbol(e.symbol, kind, name)}"
                     + (f"  {_fmt_price(d['last_price'])}" if d.get("last_price") else "")
                     + " · " + "·".join(tags))
         tags = [f"{_age_days(e.bar_time)}d"]
-        day = _daily_gain(e)
-        if day is not None:
-            tags.append(f"24h {_pct(day)}")     # 정렬 기준을 줄에도 드러낸다
+        if e.signal == "wave_setup":
+            # 파동만 구간 세트를 싣는다 — refresh_detail이 매 스캔 갱신하므로
+            # 세 값 모두 지금 값이다. 다른 시그널의 ret_4h는 트리거 봉에
+            # 얼어붙은 값이라 추적 줄에 실으면 묵은 숫자가 나간다.
+            rt = _returns_tag(d)
+            if rt:
+                tags.append(rt)
+        else:
+            day = _daily_gain(d)
+            if day is not None:
+                tags.append(f"24h {_pct(day)}")   # 정렬 기준을 줄에도 드러낸다
         if e.signal == "mss" or d.get("label") == "MSS":
             # MSS는 신규 줄과 같은 형식으로 — 깨진 저점 레벨 포함
             tags.append(f"⚠️MSS 저점 {_fmt_price(d['broken_low'])} 이탈"

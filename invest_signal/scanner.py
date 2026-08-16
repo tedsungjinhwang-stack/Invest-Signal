@@ -79,8 +79,8 @@ def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[l
             if len(df):
                 last = float(df["Close"].iloc[-1])
                 # 추적 줄은 24h 수익률 순으로 정렬·표기한다. detect가 붙여 둔
-                # ret_24h는 **발생 봉에 얼어붙은 값**이라(사흘 전 셋업이면 사흘
-                # 전 수익률) 마지막 봉 기준으로 다시 계산해 덮어쓴다.
+                # 값은 **발생 봉에 얼어붙은 값**이라(사흘 전 셋업이면 사흘 전
+                # 수익률) 마지막 봉 기준으로 다시 계산해 덮어쓴다.
                 day = indicators.pct_over(df["Close"], DAILY_BARS)
                 for e in sym_ongoing:       # 추적 리스트에 현재가(최근 4h 종가) 표시용
                     e.detail["last_price"] = last

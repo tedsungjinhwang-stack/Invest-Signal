@@ -200,7 +200,7 @@ def test_hold_line_shows_leader_break_rank_and_ma_side():
                                  "gain_24h": -0.02})
     out = format_events([], [], {}, ongoing_crypto=[top, lapsed])
     assert "↳ HFT  0.0174 · 2위·🔻60선 아래·24h +41%" in out
-    assert "↳ ETH  3,200.0 · 추적 3일차·60선 위·24h -2%" in out
+    assert "↳ ETH  3,200.0 · 추적 3일차·60선 위·24h -2.0%" in out
     # 60선 위로 복귀한 종목도 목록에 남아 있어야 한다
     assert "ETH" in out
 
@@ -376,3 +376,39 @@ def test_non_wave_signals_keep_a_single_group():
     out = format_events([], [], {}, ongoing_crypto=evs)
     order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳ ")]
     assert order == ["B", "A", "C"]
+
+
+def test_returns_tag_lists_every_available_span():
+    """줄에 1h·4h·24h·7d가 순서대로 붙고, 없는 구간만 빠진다."""
+    full = _event("XUSDT", {"label": "상승초입", "ret_1h": 0.01, "ret_4h": -0.02,
+                            "ret_24h": 0.13, "ret_7d": 0.42})
+    line = [ln for ln in format_events([full], [], {}).splitlines()
+            if ln.startswith("• ")][0]
+    assert "1h +1.0% · 4h -2.0% · 24h +13% · 7d +42%" in line
+
+    partial = _event("YUSDT", {"label": "상승초입", "ret_24h": 0.05})
+    line = [ln for ln in format_events([partial], [], {}).splitlines()
+            if ln.startswith("• ")][0]
+    assert "24h +5.0%" in line
+    assert "7d " not in line and "1h " not in line
+
+
+def test_only_wave_hold_lines_carry_the_full_span_set():
+    """구간 세트는 파동 추적 줄에만 붙는다.
+
+    다른 시그널의 ret_4h·ret_7d는 트리거 봉에 얼어붙은 값이라 며칠 지난
+    추적 줄에 실으면 묵은 숫자가 나간다 — 24h만 매 스캔 갱신된다.
+    """
+    wave = _wave("XUSDT", "ABC", 0.13)
+    wave.detail.update({"ret_4h": -0.02, "ret_7d": 0.42})
+    assert "4h -2.0% · 24h +13% · 7d +42%" in format_events(
+        [], [], {}, ongoing_crypto=[wave])
+
+    other = _hold("YUSDT", gain=0.13)
+    other.detail.update({"ret_4h": -0.02, "ret_7d": 0.42})
+    line = [ln for ln in format_events([], [], {}, ongoing_crypto=[other]).splitlines()
+            if ln.startswith("↳ ")][0]
+    # "24h"가 "4h"를 포함하므로 구분자까지 넣어서 본다
+    assert "24h +13%" in line
+    assert "·4h " not in line and " 4h " not in line
+    assert "7d " not in line
