@@ -154,3 +154,29 @@ def test_crypto_only_and_close_scan_only():
     """크립토 전용이고, 인트라바 스캔에서는 돌지 않는다(돌파는 마감 판정)."""
     assert wave_setup.CRYPTO_ONLY is True
     assert getattr(wave_setup, "INTRABAR_OK", False) is False
+
+
+def test_impulse_lookback_follows_the_widened_grace():
+    """스캐너가 grace_bars를 4h 기준으로 넓히면 임펄스도 같은 일수를 본다.
+
+    안 그러면 daily_grace_bars(1)에 묶여 임펄스만 추적이 이틀 만에 끊긴다.
+    """
+    import dataclasses
+
+    from invest_signal.scanner import ONGOING_LOOKBACK_BARS, TRACK_DAYS
+
+    n = 6 * 120
+    df = _frame(list(np.linspace(100.0, 50.0, n)))
+    p = Params(abc_enabled=False)
+    daily = wave_setup._daily(df)
+    fast = supertrend_full(daily, p.fast_period, p.fast_mult)
+    # TRACK_DAYS만큼 거슬러 올라간 날에 터치를 만든다 — 좁은 창이면 못 잡는다
+    back = TRACK_DAYS
+    day = daily.index[-1 - back + 1]
+    line = float(fast["line"].loc[day])
+    df.loc[df.index.normalize() == day, "High"] = line + 1.0
+
+    assert detect(df, "XUSDT", p) == []              # 기본 창(1일)으로는 못 본다
+    wide = dataclasses.replace(p, grace_bars=ONGOING_LOOKBACK_BARS)
+    evs = detect(df, "XUSDT", wide)
+    assert len(evs) == 1 and evs[0].bar_time == day

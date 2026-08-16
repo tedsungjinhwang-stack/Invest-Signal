@@ -160,8 +160,12 @@ def _detect_impulse(df: pd.DataFrame, symbol: str, params: Params) -> list[Signa
         line = fast["line"].iloc[i]
         return not pd.isna(line) and low.iloc[i] <= line <= high.iloc[i]
 
+    # 스캐너는 '유지 중'을 찾을 때 grace_bars를 4h봉 기준으로 넓혀서 부른다.
+    # 그 폭을 일수로 환산해 여기에도 반영해야 임펄스 추적이 다른 시그널과
+    # 같은 기간을 산다 — 안 그러면 daily_grace_bars(1)에 묶여 이틀만 남는다.
+    look = max(params.daily_grace_bars, params.grace_bars // BARS_PER_DAY)
     out = []
-    for t in range(max(1, n - 1 - params.daily_grace_bars), n):
+    for t in range(max(1, n - 1 - look), n):
         if touching(t) and not touching(t - 1):     # 연속 터치는 첫날만
             out.append(_event(df, symbol, t, IMPULSE, fast, slow, params))
     return out

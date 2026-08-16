@@ -10,7 +10,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 RETENTION_DAYS = 30
-LEADER_DAYS = 7          # 상위권에서 밀려난 뒤에도 계속 볼 기간
+LEADER_DAYS = 3          # 상위권에서 밀려난 뒤에도 계속 볼 기간 (config의 watch_days와 같이 둔다)
 
 
 class AlertState:

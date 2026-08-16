@@ -85,7 +85,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     def bearish(i: int) -> bool:
         """ma_align 선들이 짧은 것부터 오름차순 — 역배열.
 
-        선 개수는 설정에 따라 다르다(기본 120·240 두 선). MA를 못
+        선 개수는 설정에 따라 다르다(기본 120·240·480 세 선). MA를 못
         구하는 구간은 판정하지 않는다.
         """
         vals = [m.iloc[i] for m in aligns]
@@ -207,7 +207,7 @@ def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()
     제거는 **수퍼트렌드가 하락으로 뒤집힐 때** 하나뿐이다. 이 시그널의
     전제가 "구조는 아직 하락인데 추세는 위로 돌아섰다"이므로, 그 추세가
     꺾이면 셋업 자체가 사라진 것이다 — 진입 조건이면서 해제 조건이다.
-    그 외에는 조회 범위(7일)가 지나면 자동으로 빠진다.
+    그 외에는 조회 범위(3일)가 지나면 자동으로 빠진다.
 
     240선 돌파 실패는 더 이상 보지 않는다. 240선은 원래 진입 조건(터치)의
     기준선이었는데 그 조건을 끄면서 해제 판정에만 남아 있었고, 240선을

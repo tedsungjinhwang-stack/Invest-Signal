@@ -18,7 +18,8 @@ from .signals import SignalEvent, leader_break
 from . import sent_log
 from .state import AlertState
 
-ONGOING_LOOKBACK_BARS = 42      # '유지 중' 판정 시 트리거를 찾아볼 범위 — 42봉 = 7일
+TRACK_DAYS = 3                  # 추적 리스트 보유 기간 — 이 기간이 지나면 자동으로 빠진다
+ONGOING_LOOKBACK_BARS = TRACK_DAYS * 6      # 4h봉 기준 조회 범위 (6봉 = 하루)
 DAILY_BARS = 6                  # 4h봉 6개 = 24시간 — 추적 줄의 24h 수익률 역산 폭
 
 
@@ -144,7 +145,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         ma=int(s.get("ma", 60)),
         grace_bars=int(s.get("grace_bars", 4)),
         min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
-        watch_days=int(s.get("watch_days", 7)),
+        watch_days=int(s.get("watch_days", TRACK_DAYS)),
         max_watch=int(s.get("max_watch", 60)),
         track_break_only=bool(s.get("track_break_only", True)),
         exhausted_filter=bool(s.get("exhausted_filter", True)),
