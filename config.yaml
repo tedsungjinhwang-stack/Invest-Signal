@@ -39,7 +39,7 @@ signal:
       volume_top: 200       # 24h 거래대금 상위 N위 이내, 또는
       gain_top: 100         # 최근 3일 상승률 상위 N위 이내면 통과하되
       gain_lookback_bars: 18  # 상승률 계산 구간 — 18봉 = 3일
-      min_turnover_usd: 1000000  # 24h 거래대금 $1M 미만은 무조건 제외
+      min_turnover_usd: 2000000  # 24h 거래대금 $2M 미만은 무조건 제외
   pullback:                 # 눌림목 (4h봉): 480선 위 + 60선 하회
     enabled: true
     crypto_enabled: false   # 크립토는 눌림목 대신 크립토 모멘텀 눌림목/이탈로 본다 (ETF·주식만 유지)
@@ -130,7 +130,7 @@ signal:
       volume_top: 200
       gain_top: 100
       gain_lookback_bars: 18
-      min_turnover_usd: 1000000
+      min_turnover_usd: 2000000  # 24h 거래대금 $2M 미만은 무조건 제외
 
   leader_break:             # 크립토 모멘텀 눌림목/이탈 (15m봉, 크립토 선물 전용)
     # 24h 상승률 상위 top_n종이 15분봉 ma선을 하향 이탈하는 첫 봉에서 알림.
