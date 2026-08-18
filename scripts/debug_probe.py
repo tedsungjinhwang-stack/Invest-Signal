@@ -327,8 +327,12 @@ def _leader_segment(sess) -> None:
           f"(유니버스 밖 {len({s for s, _ in events}) - len(want)}종 제외) · {source}")
 
     workers = int(c.get("fetch_workers", 6))
-    frames4 = data_binance.fetch_all(sess, want + ["BTCUSDT"], source, limit=750,
+    # 유니버스 전체를 받는다 — 알림 시점의 '24h 상승률 순위'를 복원하려면
+    # 알림 종목만으로는 안 되고 그때의 횡단면이 통째로 필요하다.
+    frames4 = data_binance.fetch_all(sess, syms, source, limit=750,
                                      log=print, workers=workers)
+    closes = pd.DataFrame({s: f["Close"] for s, f in frames4.items() if len(f)})
+    ranks = (closes / closes.shift(6) - 1).rank(axis=1, ascending=False)
 
     def fetch15(sym):
         s = requests.Session()
@@ -377,6 +381,14 @@ def _leader_segment(sess) -> None:
             "7d상승": back_ret(c4, 42, j),
             "이력일": round(j / 6, 1),
         }
+        # 발화 시점 24h 상승률 순위 — 15위 안이면 '현재 주도주', 밖이면
+        # watch_days로 이월된 감시분이다(선정 기준이 순위라 이 구분이 핵심).
+        try:
+            rk = ranks.at[d4.index[j], sym]
+            r["순위"] = None if pd.isna(rk) else float(rk)
+            r["이월분"] = None if pd.isna(rk) else float(rk > 15)
+        except KeyError:
+            r["순위"] = r["이월분"] = None
         for p, name in ((120, "120선확장"), (480, "480선확장")):
             m = indicators.sma(c4, p).iloc[j] if j >= p else float("nan")
             r[name] = (entry / float(m) - 1) if pd.notna(m) else None
@@ -418,8 +430,9 @@ def _leader_segment(sess) -> None:
         print("분석 가능한 알림 없음 (15m 창 밖이거나 프레임 부족)")
         return
 
-    FEATS = ["재알림", "24h상승", "3d상승", "7d상승", "4h상승", "1h상승", "이탈깊이",
-             "120선확장", "480선확장", "변동성", "거래대금M", "이력일", "BTC24h"]
+    FEATS = ["순위", "이월분", "재알림", "24h상승", "3d상승", "7d상승", "4h상승",
+             "1h상승", "이탈깊이", "120선확장", "480선확장", "변동성", "거래대금M",
+             "이력일", "BTC24h"]
 
     def med(vals):
         vals = [v for v in vals if v is not None]
@@ -431,7 +444,7 @@ def _leader_segment(sess) -> None:
     def raw(v, w=7):
         return f"{'—':>{w}}" if v is None else f"{v:>{w}.2f}"
 
-    fmt = {"재알림": raw, "거래대금M": raw, "이력일": raw}
+    fmt = {"재알림": raw, "거래대금M": raw, "이력일": raw, "순위": raw, "이월분": raw}
     mature = [r for r in rows if r["진행h"] >= 24 * 6]
     print(f"\n분석 대상 {len(rows)}건 · 7일 관찰 완료 {len(mature)}건 · "
           f"대박 기준 MFE≥{big:+.0%} / 쪽박 기준 MAE≤{-bad:.0%}")
@@ -485,6 +498,15 @@ def _leader_segment(sess) -> None:
             lab = f"{'  ' if lo is None else g(lo, 7)}~{'' if hi is None else g(hi, 7)}"
             print(f"  {lab:<20}" + stat(rs))
         print()
+
+    print("  [상위권 vs 이월 감시분]")
+    print(head)
+    for lab, sel in (("현재 상위 15위 안", lambda r: r.get("이월분") == 0.0),
+                     ("이월 감시분(15위 밖)", lambda r: r.get("이월분") == 1.0)):
+        rs = [r for r in rows if sel(r)]
+        if rs:
+            print(f"  {lab:<20}" + stat(rs))
+    print()
 
     # ③ 룰 시뮬레이션
     print("== ③ 단일 조건 룰 — 잔존율 대비 대박/쪽박 (전체 대비 개선폭 순)\n")
