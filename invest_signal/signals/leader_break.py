@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..indicators import alignment, pct_over, sma
+from ..indicators import alignment, atr, pct_over, sma
 from . import SignalEvent
 
 NAME = "leader_break"
@@ -45,6 +45,10 @@ class Params:
     allow_short_history: bool = False    # 이력이 짧아 배열 판정 불가면 통과시킬지
     exhausted_mas: tuple = (120, 240, 480)   # 4h봉 정배열 판정 3선
     exhausted_below: int = 480               # 정배열이어도 종가가 이 선 아래면 제외
+    # '조용한' 종목 표시 기준 — 거르지 않고 태그만 붙인다(quiet() 참고)
+    quiet_turnover_usd: float = 6_000_000    # 24h 거래대금이 이 아래이고
+    quiet_atr_pct: float = 0.073             # 4h ATR÷종가가 이 아래면 조용
+    quiet_atr_period: int = 14
 
 
 def leaders(ticker: dict[str, dict], symbols: set[str],
@@ -117,6 +121,36 @@ def blocked(df4h: pd.DataFrame, params: Params = Params()) -> bool:
     if pd.isna(ref.iloc[-1]):
         return False
     return bool(float(df4h["Close"].iloc[-1]) < float(ref.iloc[-1]))
+
+
+def quiet(stat: dict | None, df4h: pd.DataFrame | None,
+          params: Params = Params()) -> bool | None:
+    """'조용한' 자리인지 — 거래대금이 작고 4h 변동성이 낮은 종목.
+
+    **거르는 조건이 아니라 표시용이다.** 최근 10일 퍼프 알림 1785건 실측
+    (`scripts/debug_probe.py`의 PROBE_MODE=leaders)에서 이 시그널의 대박
+    (7일 내 고점 +20% 이상)과 쪽박(저점 −15% 이하)은 **같은 축**에 있었다 —
+    이미 크게 오르고 변동성이 터진 종목이 양쪽을 다 만들어서, 대박을 남기는
+    조건이 곧 쪽박을 남기는 조건이었다. 확장도·변동성·거래대금·직전 상승폭
+    어느 것으로 잘라도 최상위 구간은 대박률 36~44%에 쪽박률 49~67%였다.
+
+    유일하게 비대칭이었던 게 거래대금 하위 구간이다. 24h 거래대금 $6.2M
+    미만에서 대박률은 28%→25%로 거의 안 깎이는데 쪽박률이 37%→10%로
+    떨어졌고, 3일 뒤 중앙 수익률이 플러스(+0.7%)인 유일한 구간이었다
+    (경로 승률 68% — 전체 평균은 53%). 변동성 조건을 같이 걸면 쪽박률이
+    8%까지 내려간다. 그래서 두 조건을 AND로 본다.
+
+    판단에 필요한 값이 없으면 None — 조용하다고도, 아니라고도 하지 않는다.
+    """
+    turnover = (stat or {}).get("quote_volume")
+    if turnover is None or df4h is None or len(df4h) <= params.quiet_atr_period:
+        return None
+    a = atr(df4h, params.quiet_atr_period).iloc[-1]
+    close = float(df4h["Close"].iloc[-1])
+    if pd.isna(a) or close <= 0:
+        return None
+    return bool(float(turnover) < params.quiet_turnover_usd
+                and float(a) / close < params.quiet_atr_pct)
 
 
 def tracking(df: pd.DataFrame, params: Params = Params()) -> dict | None:

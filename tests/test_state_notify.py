@@ -464,3 +464,39 @@ def test_wave_compact_returns_keep_the_slot_when_a_span_is_missing():
     wave.detail.update({"ret_4h": None, "ret_7d": 0.42})
     out = format_events([], [], {}, ongoing_crypto=[wave])
     assert "–/+13/+42%" in out
+
+
+def _leader(symbol, quiet=None, hold=False):
+    """⚡ 이벤트 — quiet가 None이면 키 자체를 넣지 않는다(판단 불가)."""
+    detail = {"label": "크립토 모멘텀 눌림목/이탈", "ma": 100.0, "ma_period": 20,
+              "interval": "15m", "gain_24h": 0.10}
+    if hold:
+        detail |= {"last_price": 100.0, "above_ma": False, "rank": 3}
+    if quiet is not None:
+        detail["quiet"] = quiet
+    return SignalEvent(symbol=symbol, signal="leader_break",
+                       bar_time=pd.Timestamp("2026-08-18T00:00:00Z"),
+                       price=100.0, detail=detail)
+
+
+def test_quiet_tag_marks_only_the_quiet_symbols():
+    """조용한 종목에만 🍃 — 거르지 않고 표시만 하므로 셋 다 줄은 남는다."""
+    out = format_events([_leader("QUIETUSDT", quiet=True),
+                         _leader("LOUDUSDT", quiet=False),
+                         _leader("UNKNOWNUSDT")], [], {})
+    rows = [ln for ln in out.splitlines() if ln.startswith("• ")]
+    assert len(rows) == 3
+    line = {name: [ln for ln in rows if f">{name}</a>" in ln][0]
+            for name in ("QUIET", "LOUD", "UNKNOWN")}
+    assert "🍃" in line["QUIET"]
+    assert "🍃" not in line["LOUD"]
+    assert "🍃" not in line["UNKNOWN"]
+
+
+def test_quiet_tag_shows_on_tracking_lines_too():
+    """추적(↳) 줄에도 같은 표시 — 신규만 붙으면 목록에서 다시 못 고른다."""
+    out = format_events([], [], {}, ongoing_crypto=[_leader("QUSDT", quiet=True, hold=True),
+                                                    _leader("LUSDT", quiet=False, hold=True)])
+    rows = {ln.split()[1]: ln for ln in out.splitlines() if ln.startswith("↳")}
+    assert "🍃" in rows["Q"] and "🍃" not in rows["L"]
+    assert rows["Q"].index("🍃") < rows["Q"].index("3위")   # 줄 앞쪽에 온다

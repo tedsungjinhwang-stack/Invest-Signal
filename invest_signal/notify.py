@@ -177,6 +177,8 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     tags = []
     if d.get("intrabar"):
         tags.append("⏳진행봉")     # 봉 미마감 잠정 판정 — 마감 때 되돌릴 수 있음
+    if d.get("quiet"):
+        tags.append(QUIET_TAG)      # 거래대금·변동성이 작은 종목 (leader_break.quiet)
     if e.signal in RETURN_SIGNALS:
         rt = _returns_tag(d)
         if rt:
@@ -212,6 +214,11 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
 
 
 LEADER_LABEL = "크립토 모멘텀 눌림목/이탈"
+
+# ⚡ 줄에만 붙는 표시. 거래대금·변동성이 작아 위아래로 덜 흔들리는 종목이라는
+# 뜻이고, 거르지는 않는다 — 왜 이 축을 표시하는지는 leader_break.quiet 참고.
+# 줄 앞쪽(수익률보다 먼저)에 둔다: 뒤에 붙이면 모바일에서 줄바꿈에 묻힌다.
+QUIET_TAG = "🍃조용"
 
 
 def _board_lines(board: list) -> list[str]:
@@ -264,6 +271,8 @@ def format_events(events_crypto: list, events_etf: list,
             tags = [f"{d['rank']}위" if d.get("rank")
                     else f"추적 {d.get('watch_days', 0)}일차",
                     f"{ma}선 위" if d.get("above_ma") else f"🔻{ma}선 아래"]
+            if d.get("quiet"):
+                tags.insert(0, QUIET_TAG)
             day = _daily_gain(d)
             if day is not None:
                 tags.append(f"24h {_pct(day)}")

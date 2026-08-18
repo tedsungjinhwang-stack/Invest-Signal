@@ -257,3 +257,43 @@ def test_watch_list_drops_illiquid_carryovers():
     assert [s for s, _ in got2] == ["AUSDT", "DRYUSDT", "OKUSDT"]
     # 현재 상위권은 leaders()에서 이미 하한을 통과했으므로 다시 안 거른다
     assert got[0][0] == "AUSDT"
+
+
+def _quiet_df4h(price=100.0, swing=0.01, bars=60):
+    """4h 프레임 — swing이 클수록 ATR이 커진다(고·저를 종가 ±swing만큼 벌린다).
+
+    고·저가 종가 대비 ±swing이면 TR은 매 봉 2·swing·가격이라 ATR÷종가 ≈ 2·swing.
+    """
+    idx = pd.date_range("2026-06-01", periods=bars, freq="4h", tz="UTC")
+    c = pd.Series(price, index=idx)
+    return pd.DataFrame({"Open": c, "High": c * (1 + swing), "Low": c * (1 - swing),
+                         "Close": c, "Volume": 1.0})
+
+
+def test_quiet_marks_low_turnover_low_volatility():
+    """거래대금·변동성이 둘 다 기준 아래일 때만 '조용'."""
+    calm = _quiet_df4h(swing=0.01)              # ATR ≈ 2% < 7.3%
+    assert leader_break.quiet({"quote_volume": 4e6}, calm, P) is True
+    # 거래대금이 크면 조용하지 않다 — 변동성이 낮아도
+    assert leader_break.quiet({"quote_volume": 80e6}, calm, P) is False
+    # 변동성이 크면 조용하지 않다 — 거래대금이 작아도
+    wild = _quiet_df4h(swing=0.06)              # ATR ≈ 12% > 7.3%
+    assert leader_break.quiet({"quote_volume": 4e6}, wild, P) is False
+
+
+def test_quiet_thresholds_are_configurable():
+    """하한/상한을 바꾸면 같은 종목의 판정이 뒤집힌다."""
+    calm = _quiet_df4h(swing=0.01)
+    stat = {"quote_volume": 4e6}
+    assert leader_break.quiet(stat, calm, Params(quiet_turnover_usd=1e6)) is False
+    assert leader_break.quiet(stat, calm, Params(quiet_atr_pct=0.005)) is False
+
+
+def test_quiet_is_none_when_undecidable():
+    """판단할 값이 없으면 None — 조용하다고도, 아니라고도 하지 않는다."""
+    calm = _quiet_df4h(swing=0.01)
+    assert leader_break.quiet(None, calm, P) is None             # 티커 없음
+    assert leader_break.quiet({}, calm, P) is None               # 거래대금 없음
+    assert leader_break.quiet({"quote_volume": 4e6}, None, P) is None   # 4h 없음
+    short = _quiet_df4h(swing=0.01, bars=P.quiet_atr_period)     # ATR 미성립
+    assert leader_break.quiet({"quote_volume": 4e6}, short, P) is None

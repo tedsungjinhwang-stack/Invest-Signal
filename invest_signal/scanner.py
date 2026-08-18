@@ -169,6 +169,8 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         allow_short_history=bool(s.get("allow_short_history", False)),
         exhausted_mas=tuple(s.get("exhausted_mas", (120, 240, 480))),
         exhausted_below=int(s.get("exhausted_below", 480)),
+        quiet_turnover_usd=float(s.get("quiet_turnover_usd", 6_000_000)),
+        quiet_atr_pct=float(s.get("quiet_atr_pct", 0.073)),
     )
     if ticker is None:              # 호출 측이 미리 받아두지 않았을 때만 직접 조회
         ticker = _crypto_ticker(session, source, log)
@@ -197,16 +199,17 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         log(f"[binance] 크립토 모멘텀 눌림목/이탈: max_watch={params.max_watch} 초과분 "
             f"{dropped}종은 이번 스캔에서 제외 (최근 등재 순으로 남김)")
 
-    def is_blocked(sym: str) -> bool:
-        """4h 구조로 걸러낼 종목인지 — 정배열이 아니거나, 정배열인데 480선 아래.
+    trend_cache: dict[str, "pd.DataFrame | None"] = {}
 
-        4h 프레임이 이미 있으면 그걸 쓰고(스캔이 받아온 750봉), 없으면
-        (인트라바에 4h 대상 시그널이 없는 경우) 해당 종목만 따로 받는다.
-        **조회 실패는 제외하지 않는다** — 네트워크 문제로 주도주가 통째로
-        사라지면 안 되니, 판단 자체가 불가능한 경우만 통과로 둔다.
+    def trend_frame(sym: str):
+        """이 종목의 4h 프레임 — 제외 판정과 조용 판정이 같이 쓴다.
+
+        스캔이 이미 받아온 750봉이 있으면 그걸 쓰고, 없으면(인트라바에 4h
+        대상 시그널이 없는 경우) 해당 종목만 따로 받아 캐시한다. 조회 실패는
+        None — 어느 판정도 하지 않는다.
         """
-        if not (params.require_aligned or params.exhausted_filter):
-            return False
+        if sym in trend_cache:
+            return trend_cache[sym]
         need = max(params.exhausted_mas + (params.exhausted_below,))
         df4 = (frames or {}).get(sym)
         if df4 is None or len(df4) < need:
@@ -216,8 +219,20 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                                           limit=leader_break.TREND_LIMIT)
             except Exception as e:              # noqa: BLE001
                 log(f"[binance] {sym} 4h 수집 실패: {data_binance._safe(e)}")
-                return False
-        return leader_break.blocked(df4, params)
+                df4 = None
+        trend_cache[sym] = df4
+        return df4
+
+    def is_blocked(sym: str) -> bool:
+        """4h 구조로 걸러낼 종목인지 — 정배열이 아니거나, 정배열인데 480선 아래.
+
+        **조회 실패는 제외하지 않는다** — 네트워크 문제로 주도주가 통째로
+        사라지면 안 되니, 판단 자체가 불가능한 경우만 통과로 둔다.
+        """
+        if not (params.require_aligned or params.exhausted_filter):
+            return False
+        df4 = trend_frame(sym)
+        return False if df4 is None else leader_break.blocked(df4, params)
 
     now = pd.Timestamp.now(tz="UTC")
     rank = {sym: i + 1 for i, (sym, _) in enumerate(top)}
@@ -238,6 +253,10 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             """순위·추적일·24h 지표를 신규/유지 양쪽에 같은 모양으로 붙인다."""
             detail["gain_24h"] = stat.get("change_pct")
             detail["turnover_24h"] = stat.get("quote_volume")
+            # 거르지는 않고 '조용한 종목'만 표시 — 판단 불가면 키를 안 만든다
+            q = leader_break.quiet(stat, trend_frame(sym), params)
+            if q is not None:
+                detail["quiet"] = q
             if sym in rank:
                 detail["rank"] = rank[sym]      # 지금도 상위권
             if since is not None:               # 상위권 밖 — 며칠째 감시 창에 있는지
