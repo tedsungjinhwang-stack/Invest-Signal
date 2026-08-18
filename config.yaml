@@ -39,7 +39,7 @@ signal:
       volume_top: 200       # 24h 거래대금 상위 N위 이내, 또는
       gain_top: 100         # 최근 3일 상승률 상위 N위 이내면 통과하되
       gain_lookback_bars: 18  # 상승률 계산 구간 — 18봉 = 3일
-      min_turnover_usd: 2000000  # 24h 거래대금 $2M 미만은 무조건 제외
+      min_turnover_usd: 3000000  # 24h 거래대금 $3M 미만은 무조건 제외
   pullback:                 # 눌림목 (4h봉): 480선 위 + 60선 하회
     enabled: true
     crypto_enabled: false   # 크립토는 눌림목 대신 크립토 모멘텀 눌림목/이탈로 본다 (ETF·주식만 유지)
@@ -130,7 +130,7 @@ signal:
       volume_top: 200
       gain_top: 100
       gain_lookback_bars: 18
-      min_turnover_usd: 2000000  # 24h 거래대금 $2M 미만은 무조건 제외
+      min_turnover_usd: 3000000  # 24h 거래대금 $3M 미만은 무조건 제외
 
   leader_break:             # 크립토 모멘텀 눌림목/이탈 (15m봉, 크립토 선물 전용)
     # 24h 상승률 상위 top_n종이 15분봉 ma선을 하향 이탈하는 첫 봉에서 알림.
@@ -147,7 +147,7 @@ signal:
     # 수보다 📈24h 상승률 TOP에 뜨는 얼굴이 먼저 바뀐다.
     # 측정 기준도 다르다 — 4h봉 종가×거래량 근사치가 아니라 24hr 티커의
     # 실제 quoteVolume이다.
-    min_turnover_usd: 2000000
+    min_turnover_usd: 3000000
     # 한 번 상위권에 든 종목은 순위에서 밀려나도 이 기간은 계속 확인한다 —
     # 상위권은 하루에도 여러 번 바뀌어서, 밀리자마자 눈을 떼면 정작 꺾이는
     # 순간을 놓친다. 마지막 등재 시각은 상태 파일의 leaders에 남는다.
