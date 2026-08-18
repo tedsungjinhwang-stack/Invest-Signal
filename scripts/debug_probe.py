@@ -13,6 +13,11 @@ PROBE_MODE=perf면 **알림 성과 분석**을 돈다: state/alerts_state.json�
 진입가로 보고 이후 24h·3d·7d 수익률과 MFE/MAE, 경로 승률(±10% 중 어느
 쪽에 먼저 닿았는지)을 낸다.
 
+PROBE_MODE=leaders면 ⚡(크립토 모멘텀) 알림만 골라 **대박/쪽박 선별
+분석**을 돈다: 발화 봉 시점의 피처(그때까지 상승폭·확장도·변동성·
+거래대금·재알림 횟수)와 사후 MFE/MAE를 교차해, 어떤 조건이 대박군을
+남기고 쪽박군을 거르는지 룰 시뮬레이션까지 낸다.
+
 PROBE_MODE=turnover면 심볼 진단 대신 **거래대금 하한 스윕**을 돈다:
 유니버스 전체를 받아 하한별 통과 종목 수를 세고, 최근 발송된 알림
 (state/sent_log.jsonl)의 종목이 각 하한에서 살아남는지 하나씩 찍는다.
@@ -257,6 +262,283 @@ def _turnover_sweep(sess) -> None:
                   + (f" · 컷: {note}" if cut else ""))
         print()
 
+def _leader_segment(sess) -> None:
+    """⚡ 알림을 **발화 시점 피처**로 쪼개, 대박과 쪽박을 가르는 축을 찾는다.
+
+    ⚡는 성과가 반으로 갈린다 — 최근 10일 실측에서 MFE 상위도 MAE 하위도
+    전부 ⚡였다. 중앙값 하나로는 그 분포를 못 보므로, 알림 하나하나에
+    발화 봉 시점의 피처(그때까지의 상승폭·확장도·변동성·거래대금·재알림
+    횟수 등)를 붙이고 사후 결과(MFE/MAE/전진수익률)와 교차한다.
+
+    출력 세 단계:
+      ① 대박(MFE 상위)/쪽박(MAE 하위) 그룹의 피처 중앙값 대조
+      ② 피처별 사분위 버킷 성과표
+      ③ 단일·2중 조건 룰 시뮬레이션 — 잔존율 대비 대박률/쪽박률
+    """
+    import concurrent.futures as cf
+    import json
+    import statistics as st
+
+    import pandas as pd
+
+    from invest_signal import config as cfg_mod
+
+    back = int(os.environ.get("PROBE_DAYS_BACK", "10"))
+    big = float(os.environ.get("PROBE_BIG", "20")) / 100      # 대박 기준 MFE
+    bad = float(os.environ.get("PROBE_BAD", "15")) / 100      # 쪽박 기준 MAE
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "state", "alerts_state.json"), encoding="utf-8") as f:
+        alerts = json.load(f).get("alerts", {})
+
+    now = pd.Timestamp.now(tz="UTC")
+    cutoff = now - pd.Timedelta(days=back)
+    events = []
+    for key in alerts:
+        parts = key.split("|")
+        if len(parts) < 3 or parts[1] != "leader_break":
+            continue
+        try:
+            t = pd.Timestamp(parts[2])
+        except ValueError:
+            continue
+        if t.tz is None:
+            t = t.tz_localize("UTC")
+        if t >= cutoff:
+            events.append((parts[0], t))
+    if not events:
+        print(f"최근 {back}일 ⚡ 알림 없음")
+        return
+    events.sort(key=lambda e: e[1])
+
+    # 재알림 횟수 — 같은 종목의 직전 72시간 내 ⚡ 알림 수
+    seen: dict[str, list] = {}
+    repeats = {}
+    for sym, t in events:
+        prior = seen.setdefault(sym, [])
+        repeats[(sym, t)] = sum(1 for p in prior if t - p <= pd.Timedelta(hours=72))
+        prior.append(t)
+
+    cfg = cfg_mod.load()
+    c = cfg.get("crypto") or {}
+    source, syms = data_binance.resolve_source(sess, c.get("source", "auto"),
+                                               set(c.get("exclude") or []), print)
+    want = sorted({s for s, _ in events} & set(syms))
+    print(f"\n최근 {back}일 ⚡ 알림 {len(events)}건 · 종목 {len(want)}종 "
+          f"(유니버스 밖 {len({s for s, _ in events}) - len(want)}종 제외) · {source}")
+
+    workers = int(c.get("fetch_workers", 6))
+    frames4 = data_binance.fetch_all(sess, want + ["BTCUSDT"], source, limit=750,
+                                     log=print, workers=workers)
+
+    def fetch15(sym):
+        s = requests.Session()
+        try:
+            return sym, data_binance.klines(s, sym, source, "15m", limit=1000)
+        except Exception:                              # noqa: BLE001
+            return sym, None
+        finally:
+            s.close()
+
+    frames15 = {}
+    with cf.ThreadPoolExecutor(max_workers=workers) as ex:
+        for sym, df in ex.map(fetch15, want):
+            if df is not None and len(df):
+                frames15[sym] = df
+    print(f"[15m] {len(frames15)}/{len(want)}종 수집")
+
+    btc = frames4.get("BTCUSDT")
+    D = pd.Timedelta
+    rows = []
+    for sym, t in events:
+        d15, d4 = frames15.get(sym), frames4.get(sym)
+        if d15 is None or d4 is None or len(d4) < 50:
+            continue
+        i = int(d15.index.searchsorted(t, "left"))
+        if i >= len(d15) or d15.index[i] != t or i < 96:
+            continue                       # 15m 창(≈10일) 밖이거나 24h 역산 불가
+        entry = float(d15["Close"].iloc[i])
+        j = int(d4.index.searchsorted(t, "right")) - 1
+        if entry <= 0 or j < 20:
+            continue
+        c15, c4 = d15["Close"], d4["Close"]
+
+        def back_ret(series, k, idx):
+            return None if idx - k < 0 else entry / float(series.iloc[idx - k]) - 1
+
+        ma20 = indicators.sma(c15, 20).iloc[i]
+        r = {
+            "sym": sym, "t": t,
+            "재알림": repeats[(sym, t)],
+            "이탈깊이": (entry / float(ma20) - 1) if pd.notna(ma20) else None,
+            "1h상승": back_ret(c15, 4, i),
+            "4h상승": back_ret(c15, 16, i),
+            "24h상승": back_ret(c15, 96, i),
+            "3d상승": back_ret(c4, 18, j),
+            "7d상승": back_ret(c4, 42, j),
+            "이력일": round(j / 6, 1),
+        }
+        for p, name in ((120, "120선확장"), (480, "480선확장")):
+            m = indicators.sma(c4, p).iloc[j] if j >= p else float("nan")
+            r[name] = (entry / float(m) - 1) if pd.notna(m) else None
+        hi, lo, cl = d4["High"], d4["Low"], c4
+        tr = pd.concat([hi - lo, (hi - cl.shift()).abs(), (lo - cl.shift()).abs()],
+                       axis=1).max(axis=1)
+        atr = tr.rolling(14).mean().iloc[j]
+        r["변동성"] = (float(atr) / entry) if pd.notna(atr) else None
+        seg_t = d4.iloc[max(0, j - 5):j + 1]
+        r["거래대금M"] = float((seg_t["Close"] * seg_t["Volume"]).sum()) / 1e6
+        if btc is not None and len(btc):
+            jb = int(btc.index.searchsorted(t, "right")) - 1
+            if jb >= 6:
+                r["BTC24h"] = float(btc["Close"].iloc[jb]) / float(btc["Close"].iloc[jb - 6]) - 1
+
+        fwd = d4[(d4.index > t) & (d4.index <= t + D(days=7))]
+        if not len(fwd):
+            continue
+        r["진행h"] = round((fwd.index[-1] - t) / D(hours=1))
+        r["mfe"] = float(fwd["High"].max()) / entry - 1
+        r["mae"] = float(fwd["Low"].min()) / entry - 1
+        for name, dl in (("24h", D(hours=24)), ("3d", D(days=3)), ("7d", D(days=7))):
+            k = int(d4.index.searchsorted(t + dl, "left"))
+            r[name] = (float(c4.iloc[k]) / entry - 1) if k < len(d4) else None
+        up = dn = None
+        for x in range(len(fwd)):
+            if up is None and float(fwd["High"].iloc[x]) / entry - 1 >= 0.10:
+                up = x
+            if dn is None and float(fwd["Low"].iloc[x]) / entry - 1 <= -0.10:
+                dn = x
+            if up is not None or dn is not None:
+                break
+        r["path"] = None if up is None and dn is None else (up is not None and (dn is None or up <= dn))
+        r["대박"] = r["mfe"] >= big
+        r["쪽박"] = r["mae"] <= -bad
+        rows.append(r)
+
+    if not rows:
+        print("분석 가능한 알림 없음 (15m 창 밖이거나 프레임 부족)")
+        return
+
+    FEATS = ["재알림", "24h상승", "3d상승", "7d상승", "4h상승", "1h상승", "이탈깊이",
+             "120선확장", "480선확장", "변동성", "거래대금M", "이력일", "BTC24h"]
+
+    def med(vals):
+        vals = [v for v in vals if v is not None]
+        return None if not vals else st.median(vals)
+
+    def pct(v, w=7):
+        return f"{'—':>{w}}" if v is None else f"{v * 100:+{w - 1}.1f}%"
+
+    def raw(v, w=7):
+        return f"{'—':>{w}}" if v is None else f"{v:>{w}.2f}"
+
+    fmt = {"재알림": raw, "거래대금M": raw, "이력일": raw}
+    mature = [r for r in rows if r["진행h"] >= 24 * 6]
+    print(f"\n분석 대상 {len(rows)}건 · 7일 관찰 완료 {len(mature)}건 · "
+          f"대박 기준 MFE≥{big:+.0%} / 쪽박 기준 MAE≤{-bad:.0%}")
+    hit = sum(r["대박"] for r in rows) / len(rows)
+    miss = sum(r["쪽박"] for r in rows) / len(rows)
+    print(f"전체 대박률 {hit:.0%} · 쪽박률 {miss:.0%} · 둘 다 "
+          f"{sum(r['대박'] and r['쪽박'] for r in rows) / len(rows):.0%}")
+
+    # ① 대박/쪽박 그룹 피처 대조
+    k = max(10, len(rows) // 5)
+    top = sorted(rows, key=lambda r: -r["mfe"])[:k]
+    bot = sorted(rows, key=lambda r: r["mae"])[:k]
+    print(f"\n== ① 대박 상위 {k}건 vs 쪽박 하위 {k}건 · 발화 시점 피처 중앙값\n")
+    print(f"  {'피처':<12}{'대박군':>10}{'쪽박군':>10}{'전체':>10}   갈림")
+    for f in FEATS:
+        a, b, w = med(r.get(f) for r in top), med(r.get(f) for r in bot), med(r.get(f) for r in rows)
+        g = fmt.get(f, pct)
+        gap = "" if a is None or b is None or not w else (
+            "◀◀" if a < b * 0.7 else "▶▶" if a > b * 1.4 else "")
+        print(f"  {f:<12}{g(a, 10)}{g(b, 10)}{g(w, 10)}   {gap}")
+
+    # ② 피처별 사분위 버킷
+    def stat(rs):
+        paths = [r["path"] for r in rs if r["path"] is not None]
+        return (f"{len(rs):>5}"
+                f"{pct(med(r['mfe'] for r in rs), 8)}{pct(med(r['mae'] for r in rs), 8)}"
+                f"{pct(med(r.get('24h') for r in rs), 8)}{pct(med(r.get('3d') for r in rs), 8)}"
+                f"{sum(r['대박'] for r in rs) / len(rs) * 100:>7.0f}%"
+                f"{sum(r['쪽박'] for r in rs) / len(rs) * 100:>7.0f}%"
+                f"{(sum(paths) / len(paths) * 100 if paths else 0):>7.0f}%")
+
+    head = (f"  {'구간':<20}{'건수':>5}{'MFE':>8}{'MAE':>8}{'24h':>8}{'3d':>8}"
+            f"{'대박':>8}{'쪽박':>8}{'경로':>8}")
+    print("\n== ② 피처별 사분위 성과\n")
+    for f in FEATS:
+        vals = sorted(r[f] for r in rows if r.get(f) is not None)
+        if len(vals) < 40:
+            continue
+        qs = [vals[int(len(vals) * q)] for q in (0.25, 0.5, 0.75)]
+        if len(set(qs)) < 3:
+            continue
+        print(f"  [{f}]")
+        print(head)
+        g = fmt.get(f, pct)
+        edges = [(None, qs[0]), (qs[0], qs[1]), (qs[1], qs[2]), (qs[2], None)]
+        for lo, hi in edges:
+            rs = [r for r in rows if r.get(f) is not None
+                  and (lo is None or r[f] >= lo) and (hi is None or r[f] < hi)]
+            if not rs:
+                continue
+            lab = f"{'  ' if lo is None else g(lo, 7)}~{'' if hi is None else g(hi, 7)}"
+            print(f"  {lab:<20}" + stat(rs))
+        print()
+
+    # ③ 룰 시뮬레이션
+    print("== ③ 단일 조건 룰 — 잔존율 대비 대박/쪽박 (전체 대비 개선폭 순)\n")
+    print(f"  {'조건':<26}{'잔존':>7}{'대박':>7}{'쪽박':>7}{'MFE':>8}{'MAE':>8}{'3d':>8}{'점수':>7}")
+    cands = []
+    for f in FEATS:
+        vals = sorted(r[f] for r in rows if r.get(f) is not None)
+        if len(vals) < 40:
+            continue
+        for q in (0.25, 0.5, 0.75):
+            cut = vals[int(len(vals) * q)]
+            g = fmt.get(f, pct)
+            for op, sel in ((">=", lambda r, f=f, c=cut: r.get(f) is not None and r[f] >= c),
+                            ("<", lambda r, f=f, c=cut: r.get(f) is not None and r[f] < c)):
+                rs = [r for r in rows if sel(r)]
+                if len(rs) < len(rows) * 0.15:
+                    continue
+                h = sum(r["대박"] for r in rs) / len(rs)
+                m = sum(r["쪽박"] for r in rs) / len(rs)
+                cands.append(((h - hit) - (m - miss), f"{f} {op} {g(cut, 8).strip()}", rs, sel))
+    cands.sort(key=lambda x: -x[0])
+    for score, name, rs, _ in cands[:12]:
+        print(f"  {name:<26}{len(rs) / len(rows) * 100:>6.0f}%"
+              f"{sum(r['대박'] for r in rs) / len(rs) * 100:>6.0f}%"
+              f"{sum(r['쪽박'] for r in rs) / len(rs) * 100:>6.0f}%"
+              f"{pct(med(r['mfe'] for r in rs), 8)}{pct(med(r['mae'] for r in rs), 8)}"
+              f"{pct(med(r.get('3d') for r in rs), 8)}{score * 100:>+6.0f}p")
+
+    print("\n== ③-2 두 조건 조합 (상위 단일 조건끼리)\n")
+    print(f"  {'조건':<44}{'잔존':>7}{'대박':>7}{'쪽박':>7}{'MFE':>8}{'MAE':>8}{'3d':>8}")
+    pairs = []
+    for a in range(min(6, len(cands))):
+        for b in range(a + 1, min(6, len(cands))):
+            _, na, _, sa = cands[a]
+            _, nb, _, sb = cands[b]
+            if na.split()[0] == nb.split()[0]:
+                continue
+            rs = [r for r in rows if sa(r) and sb(r)]
+            if len(rs) < len(rows) * 0.08:
+                continue
+            h = sum(r["대박"] for r in rs) / len(rs)
+            m = sum(r["쪽박"] for r in rs) / len(rs)
+            pairs.append(((h - hit) - (m - miss), f"{na}  +  {nb}", rs))
+    pairs.sort(key=lambda x: -x[0])
+    for _, name, rs in pairs[:8]:
+        print(f"  {name:<44}{len(rs) / len(rows) * 100:>6.0f}%"
+              f"{sum(r['대박'] for r in rs) / len(rs) * 100:>6.0f}%"
+              f"{sum(r['쪽박'] for r in rs) / len(rs) * 100:>6.0f}%"
+              f"{pct(med(r['mfe'] for r in rs), 8)}{pct(med(r['mae'] for r in rs), 8)}"
+              f"{pct(med(r.get('3d') for r in rs), 8)}")
+
+    print(f"\n  ※ 표본 {len(rows)}건·10일치라 과최적화 위험이 있다. 룰은 "
+          f"'대박률이 오르면서 잔존율이 60% 이상'인 것만 실전 후보로 본다.")
+
 with requests.Session() as sess:
     _mode = os.environ.get("PROBE_MODE", "").lower()
     if _mode == "turnover":
@@ -264,6 +546,9 @@ with requests.Session() as sess:
         raise SystemExit(0)
     if _mode == "perf":
         _performance(sess)
+        raise SystemExit(0)
+    if _mode in ("leaders", "segment"):
+        _leader_segment(sess)
         raise SystemExit(0)
     for sym in symbols:
         try:
