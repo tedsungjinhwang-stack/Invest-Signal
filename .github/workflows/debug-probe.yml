@@ -1,7 +1,7 @@
 # 심볼 진단 프로브 — 아래 PROBE_SYMBOLS를 바꿔 푸시하면 러너(프록시 경유
 # 선물 데이터)에서 해당 코인의 봉/VWAP/거래대금/시그널 판정을 출력한다.
 # PROBE_DAYS(UTC 날짜, 쉼표 구분)를 주면 그 날의 일봉 요약만 따로 찍는다.
-# PROBE_MODE=turnover면 거래대금 하한 스윕을 돈다.
+# PROBE_MODE=turnover면 거래대금 하한 스윕, perf면 알림 사후 성과 분석.
 # 퍼프 전용 종목·퍼프 거래대금은 샌드박스의 현물 미러에 없어 여기서만 확인된다.
 # 알림 미발송, 상태 파일 미변경 — 순수 조회용.
 name: Debug Probe
@@ -34,7 +34,8 @@ jobs:
           BINANCE_FAPI_BASE: ${{ secrets.BINANCE_FAPI_BASE }}
           # PROBE_MODE=turnover면 심볼 진단 대신 거래대금 하한 스윕을 돈다 —
           # 하한별 통과 종목 수와, 최근 발송된 알림의 종목이 살아남는지.
-          PROBE_MODE: "turnover"
+          PROBE_MODE: "perf"
+          PROBE_DAYS_BACK: "10"
           PROBE_FLOORS: "1,2,3,5,10"
           PROBE_RECENT_MSGS: "6"
           PROBE_SYMBOLS: "AIOTUSDT"
