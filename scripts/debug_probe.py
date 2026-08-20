@@ -687,6 +687,12 @@ def _signal_segment(sess) -> None:
                 m = sum(r["쪽박"] for r in rs) / len(rs)
                 cands.append(((h - hit) - (m - miss), f"{f} {op} {g(cut, 8).strip()}", rs, sel))
     cands.sort(key=lambda x: -x[0])
+    uniq, names = [], set()          # 사분위 경계가 겹치면 같은 룰이 중복된다
+    for cand in cands:
+        if cand[1] not in names:
+            names.add(cand[1])
+            uniq.append(cand)
+    cands = uniq
     for score, name, rs, _ in cands[:12]:
         print(f"  {name:<26}{len(rs) / len(rows) * 100:>6.0f}%"
               f"{sum(r['대박'] for r in rs) / len(rs) * 100:>6.0f}%"
@@ -717,7 +723,7 @@ def _signal_segment(sess) -> None:
               f"{pct(med(r['mfe'] for r in rs), 8)}{pct(med(r['mae'] for r in rs), 8)}"
               f"{pct(med(r.get('3d') for r in rs), 8)}")
 
-    print(f"\n  ※ 표본 {len(rows)}건·10일치라 과최적화 위험이 있다. 룰은 "
+    print(f"\n  ※ 표본 {len(rows)}건·{back}일치라 과최적화 위험이 있다. 룰은 "
           f"'대박률이 오르면서 잔존율이 60% 이상'인 것만 실전 후보로 본다.")
 
 with requests.Session() as sess:
