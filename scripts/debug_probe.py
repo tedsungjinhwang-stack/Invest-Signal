@@ -262,17 +262,127 @@ def _turnover_sweep(sess) -> None:
                   + (f" · 컷: {note}" if cut else ""))
         print()
 
-def _leader_segment(sess) -> None:
-    """⚡ 알림을 **발화 시점 피처**로 쪼개, 대박과 쪽박을 가르는 축을 찾는다.
+def _replay_wave(frames4: dict, since, ranks_ok, log=print) -> list[tuple]:
+    """파동 디텍터를 과거 봉에 그대로 돌려 **그때 왔을 알림**을 복원한다.
 
-    ⚡는 성과가 반으로 갈린다 — 최근 10일 실측에서 MFE 상위도 MAE 하위도
-    전부 ⚡였다. 중앙값 하나로는 그 분포를 못 보므로, 알림 하나하나에
-    발화 봉 시점의 피처(그때까지의 상승폭·확장도·변동성·거래대금·재알림
-    횟수 등)를 붙이고 사후 결과(MFE/MAE/전진수익률)와 교차한다.
+    시그널을 새로 만들면 alerts_state에는 만든 날 이후 기록밖에 없어서
+    사후 분석 표본이 며칠치뿐이다. 파동의 트리거는 전부 인과적이라(그 봉
+    이전 데이터만 본다) 과거 봉에 그대로 돌리면 같은 알림이 재현된다.
+
+    **wave_setup의 함수를 그대로 부른다** — 조건을 베껴 적으면 모듈이
+    바뀔 때 조용히 어긋난다. 다른 점은 훑는 범위 하나다: 실제 스캔은
+    직전 몇 봉(grace_bars)만 보지만 여기선 창 안의 모든 봉을 본다.
+
+    ranks_ok(sym, bar_index) — 그 시점에 랭크 필터를 통과했는지.
+    """
+    import pandas as pd
+
+    from invest_signal import config as cfg_mod
+    from invest_signal.signals import wave_setup as ws
+
+    cfg = cfg_mod.load()
+    w = (cfg.get("signal") or {}).get("wave_setup") or {}
+    fields = {f.name for f in dataclasses.fields(ws.Params)}
+    params = ws.Params(**{k: v for k, v in w.items() if k in fields})
+
+    out, skipped = [], 0
+    for sym, df in frames4.items():
+        if len(df) < max(params.fast_period, params.slow_period) + 3:
+            continue
+        fast, slow = ws._trends(df, params)
+        vwap_ok = ws._vwap_gate(df, params)
+        start = max(1, int(df.index.searchsorted(since, "left")))
+        if params.abc_enabled:
+            for t in range(start, len(df)):
+                if (ws._down(fast, t - 1) and ws._down(slow, t - 1)
+                        and ws._up(fast, t) and ws._down(slow, t) and vwap_ok(t)):
+                    if ranks_ok(sym, t):
+                        out.append((sym, df.index[t], ws.ABC))
+                    else:
+                        skipped += 1
+        if not params.impulse_enabled:
+            continue
+        daily = ws._daily(df)
+        if len(daily) < max(params.fast_period, params.slow_period) + 3:
+            continue
+        dfast, dslow = ws._trends(daily, params)
+        dhigh, dlow = daily["High"], daily["Low"]
+
+        def touching(i: int) -> bool:
+            if i < 0 or not (ws._down(dfast, i) and ws._down(dslow, i)):
+                return False
+            line = dfast["line"].iloc[i]
+            return not pd.isna(line) and dlow.iloc[i] <= line <= dhigh.iloc[i]
+
+        def last_4h(day) -> int:            # 그날 마지막 4h봉 — 판정 기준점
+            return int(df.index.searchsorted(day + pd.Timedelta(days=1), "left")) - 1
+
+        for t in range(max(1, int(daily.index.searchsorted(since, "left"))), len(daily)):
+            if not (touching(t) and not touching(t - 1)):
+                continue
+            j = last_4h(daily.index[t])
+            if j < 6 or not vwap_ok(j):
+                continue
+            if ranks_ok(sym, j):
+                out.append((sym, daily.index[t], ws.IMPULSE))
+            else:
+                skipped += 1
+    log(f"[replay] 파동 재현 {len(out)}건 (랭크 필터 컷 {skipped}건) · "
+        f"ABC {sum(1 for e in out if e[2] == ws.ABC)} / "
+        f"임펄스 {sum(1 for e in out if e[2] == ws.IMPULSE)}")
+    return out
+
+
+def _rank_gate(frames4: dict, rcfg: dict):
+    """봉마다 랭크 필터를 다시 매기는 판정기 — ok(sym, bar_index).
+
+    scanner._crypto_rank_eligible과 같은 규칙(거래대금 상위 ∪ 상승률 상위,
+    그리고 거래대금 하한)을 **매 봉 횡단면**으로 계산해 둔다. 지금 통과하는
+    종목으로 과거를 판정하면 그때는 안 왔을 알림이 섞인다.
+    """
+    import pandas as pd
+
+    vol_top = int(rcfg.get("volume_top", 200))
+    gain_top = int(rcfg.get("gain_top", 100))
+    look = int(rcfg.get("gain_lookback_bars", 18))
+    floor = float(rcfg.get("min_turnover_usd", 0))
+    closes = pd.DataFrame({s: f["Close"] for s, f in frames4.items() if len(f)})
+    vols = pd.DataFrame({s: f["Volume"] for s, f in frames4.items() if len(f)})
+    turn = (closes * vols).rolling(6).sum()
+    gain = closes / closes.shift(look) - 1
+    tr = turn.rank(axis=1, ascending=False)
+    gr = gain.rank(axis=1, ascending=False)
+    idx = {s: f.index for s, f in frames4.items() if len(f)}
+
+    def ok(sym: str, i: int) -> bool:
+        try:
+            ts = idx[sym][i]
+            t = turn.at[ts, sym]
+        except (KeyError, IndexError):
+            return False
+        if pd.isna(t) or t < floor:
+            return False
+        a, b = tr.at[ts, sym], gr.at[ts, sym]
+        return bool((not pd.isna(a) and a <= vol_top) or (not pd.isna(b) and b <= gain_top))
+
+    return ok
+
+
+def _signal_segment(sess) -> None:
+    """한 시그널의 알림을 **발화 시점 피처**로 쪼개, 대박과 쪽박을 가르는 축을 찾는다.
+
+    대상은 PROBE_SIGNAL(기본 leader_break). ⚡는 성과가 반으로 갈렸다 —
+    MFE 상위도 MAE 하위도 전부 ⚡였다. 중앙값 하나로는 그 분포를 못 보므로,
+    알림 하나하나에 발화 봉 시점의 피처(그때까지의 상승폭·확장도·변동성·
+    거래대금·재알림 횟수 등)를 붙이고 사후 결과와 교차한다.
+
+    진입가는 발화 봉의 종가다. ⚡만 15m봉이라 15m 프레임에서 읽고 1h 수익률·
+    이탈 깊이까지 뽑고, 나머지 시그널은 4h 프레임에서 읽는다. 일봉 발화
+    (파동 임펄스)는 그날 마지막 4h봉을 종가로 삼는다.
 
     출력 세 단계:
       ① 대박(MFE 상위)/쪽박(MAE 하위) 그룹의 피처 중앙값 대조
-      ② 피처별 사분위 버킷 성과표
+      ② 피처별 사분위 버킷 성과표 (+ 시그널 안의 하위 종류 대조)
       ③ 단일·2중 조건 룰 시뮬레이션 — 잔존율 대비 대박률/쪽박률
     """
     import concurrent.futures as cf
@@ -283,56 +393,76 @@ def _leader_segment(sess) -> None:
 
     from invest_signal import config as cfg_mod
 
+    target = os.environ.get("PROBE_SIGNAL", "leader_break")
+    # 1이면 상태 파일 대신 캔들에서 알림을 재현한다(지금은 파동만 지원)
+    replay = os.environ.get("PROBE_REPLAY", "") not in ("", "0")
+    intraday = target == "leader_break"      # 15m 프레임으로 판정하는 유일한 시그널
     back = int(os.environ.get("PROBE_DAYS_BACK", "10"))
     big = float(os.environ.get("PROBE_BIG", "20")) / 100      # 대박 기준 MFE
     bad = float(os.environ.get("PROBE_BAD", "15")) / 100      # 쪽박 기준 MAE
+    # 사후 관찰 창. 시그널이 갓 생겨 알림이 전부 최근이면 7일 창은 대부분
+    # 잘린 채로 집계돼 대박·쪽박이 실제보다 작게 나온다 — 그럴 땐 줄인다.
+    hz = int(os.environ.get("PROBE_HORIZON_DAYS", "7"))
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     with open(os.path.join(root, "state", "alerts_state.json"), encoding="utf-8") as f:
         alerts = json.load(f).get("alerts", {})
 
     now = pd.Timestamp.now(tz="UTC")
-    cutoff = now - pd.Timedelta(days=back)
-    events = []
-    for key in alerts:
-        parts = key.split("|")
-        if len(parts) < 3 or parts[1] != "leader_break":
-            continue
-        try:
-            t = pd.Timestamp(parts[2])
-        except ValueError:
-            continue
-        if t.tz is None:
-            t = t.tz_localize("UTC")
-        if t >= cutoff:
-            events.append((parts[0], t))
-    if not events:
-        print(f"최근 {back}일 ⚡ 알림 없음")
-        return
-    events.sort(key=lambda e: e[1])
-
-    # 재알림 횟수 — 같은 종목의 직전 72시간 내 ⚡ 알림 수
-    seen: dict[str, list] = {}
-    repeats = {}
-    for sym, t in events:
-        prior = seen.setdefault(sym, [])
-        repeats[(sym, t)] = sum(1 for p in prior if t - p <= pd.Timedelta(hours=72))
-        prior.append(t)
+    # 초 단위로 내린다 — 캔들 인덱스는 ms 정밀도라 ns 값을 그대로 넣으면
+    # searchsorted가 단위 변환을 거부한다.
+    cutoff = (now - pd.Timedelta(days=back)).floor("s")
 
     cfg = cfg_mod.load()
     c = cfg.get("crypto") or {}
     source, syms = data_binance.resolve_source(sess, c.get("source", "auto"),
                                                set(c.get("exclude") or []), print)
-    want = sorted({s for s, _ in events} & set(syms))
-    print(f"\n최근 {back}일 ⚡ 알림 {len(events)}건 · 종목 {len(want)}종 "
-          f"(유니버스 밖 {len({s for s, _ in events}) - len(want)}종 제외) · {source}")
-
     workers = int(c.get("fetch_workers", 6))
     # 유니버스 전체를 받는다 — 알림 시점의 '24h 상승률 순위'를 복원하려면
-    # 알림 종목만으로는 안 되고 그때의 횡단면이 통째로 필요하다.
+    # 알림 종목만으로는 안 되고 그때의 횡단면이 통째로 필요하고, 리플레이는
+    # 애초에 전 종목을 다시 돌린다.
     frames4 = data_binance.fetch_all(sess, syms, source, limit=750,
                                      log=print, workers=workers)
     closes = pd.DataFrame({s: f["Close"] for s, f in frames4.items() if len(f)})
     ranks = (closes / closes.shift(6) - 1).rank(axis=1, ascending=False)
+
+    if replay:
+        # 상태 파일 대신 캔들에서 알림을 복원한다 — 시그널이 갓 생겨 기록이
+        # 며칠치뿐일 때, 표본이 쌓이길 기다리지 않고 과거로 늘린다.
+        rcfg = ((cfg.get("signal") or {}).get(target) or {}).get("crypto_rank_filter") or {}
+        events = _replay_wave(frames4, cutoff, _rank_gate(frames4, rcfg))
+    else:
+        events = []
+        for key in alerts:
+            parts = key.split("|")
+            if len(parts) < 3 or parts[1] != target:
+                continue
+            try:
+                t = pd.Timestamp(parts[2])
+            except ValueError:
+                continue
+            if t.tz is None:
+                t = t.tz_localize("UTC")
+            if t >= cutoff:
+                # 4번째 조각은 시그널 안의 하위 종류(파동 ABC/임펄스 등)
+                events.append((parts[0], t, parts[3] if len(parts) > 3 else ""))
+    if not events:
+        print(f"최근 {back}일 {target} 알림 없음")
+        return
+    events.sort(key=lambda e: e[1])
+    stages = sorted({st for _, _, st in events if st})
+
+    # 재알림 횟수 — 같은 종목의 직전 72시간 내 같은 시그널 알림 수
+    seen: dict[str, list] = {}
+    repeats = {}
+    for sym, t, _ in events:
+        prior = seen.setdefault(sym, [])
+        repeats[(sym, t)] = sum(1 for p in prior if t - p <= pd.Timedelta(hours=72))
+        prior.append(t)
+
+    want = sorted({s for s, _, _ in events} & set(syms))
+    print(f"\n최근 {back}일 {target} {'재현' if replay else '알림'} {len(events)}건 · "
+          f"종목 {len(want)}종 · {source}"
+          + (f" · 하위 종류 {'/'.join(stages)}" if stages else ""))
 
     def fetch15(sym):
         s = requests.Session()
@@ -344,43 +474,58 @@ def _leader_segment(sess) -> None:
             s.close()
 
     frames15 = {}
-    with cf.ThreadPoolExecutor(max_workers=workers) as ex:
-        for sym, df in ex.map(fetch15, want):
-            if df is not None and len(df):
-                frames15[sym] = df
-    print(f"[15m] {len(frames15)}/{len(want)}종 수집")
+    if intraday:
+        with cf.ThreadPoolExecutor(max_workers=workers) as ex:
+            for sym, df in ex.map(fetch15, want):
+                if df is not None and len(df):
+                    frames15[sym] = df
+        print(f"[15m] {len(frames15)}/{len(want)}종 수집")
 
     btc = frames4.get("BTCUSDT")
     D = pd.Timedelta
     rows = []
-    for sym, t in events:
+    for sym, t, stage in events:
         d15, d4 = frames15.get(sym), frames4.get(sym)
-        if d15 is None or d4 is None or len(d4) < 50:
+        if d4 is None or len(d4) < 50:
             continue
-        i = int(d15.index.searchsorted(t, "left"))
-        if i >= len(d15) or d15.index[i] != t or i < 96:
-            continue                       # 15m 창(≈10일) 밖이거나 24h 역산 불가
-        entry = float(d15["Close"].iloc[i])
-        j = int(d4.index.searchsorted(t, "right")) - 1
-        if entry <= 0 or j < 20:
+        # 발화 봉의 4h 위치. 일봉 발화(파동 임펄스)는 그날 마지막 4h봉이 종가다.
+        daily = stage == "임펄스"
+        j = int(d4.index.searchsorted(t + (D(days=1) if daily else D(0)),
+                                      "left" if daily else "right")) - 1
+        if j < 20 or (not daily and d4.index[j] != t):
+            continue                       # 4h 창 밖이거나 봉이 안 맞는다
+        i = None
+        if intraday:
+            if d15 is None:
+                continue
+            i = int(d15.index.searchsorted(t, "left"))
+            if i >= len(d15) or d15.index[i] != t or i < 96:
+                continue                   # 15m 창(≈10일) 밖이거나 24h 역산 불가
+            entry = float(d15["Close"].iloc[i])
+        else:
+            entry = float(d4["Close"].iloc[j])
+        if entry <= 0:
             continue
-        c15, c4 = d15["Close"], d4["Close"]
+        c4 = d4["Close"]
+        c15 = d15["Close"] if i is not None else None
 
         def back_ret(series, k, idx):
             return None if idx - k < 0 else entry / float(series.iloc[idx - k]) - 1
 
-        ma20 = indicators.sma(c15, 20).iloc[i]
         r = {
-            "sym": sym, "t": t,
+            "sym": sym, "t": t, "stage": stage,
             "재알림": repeats[(sym, t)],
-            "이탈깊이": (entry / float(ma20) - 1) if pd.notna(ma20) else None,
-            "1h상승": back_ret(c15, 4, i),
-            "4h상승": back_ret(c15, 16, i),
-            "24h상승": back_ret(c15, 96, i),
+            # 4h·24h는 프레임이 있는 쪽에서 — ⚡는 15m(4·96봉), 나머지는 4h(1·6봉)
+            "4h상승": back_ret(c15, 16, i) if i is not None else back_ret(c4, 1, j),
+            "24h상승": back_ret(c15, 96, i) if i is not None else back_ret(c4, 6, j),
             "3d상승": back_ret(c4, 18, j),
             "7d상승": back_ret(c4, 42, j),
             "이력일": round(j / 6, 1),
         }
+        if i is not None:
+            ma20 = indicators.sma(c15, 20).iloc[i]
+            r["이탈깊이"] = (entry / float(ma20) - 1) if pd.notna(ma20) else None
+            r["1h상승"] = back_ret(c15, 4, i)
         # 발화 시점 24h 상승률 순위 — 15위 안이면 '현재 주도주', 밖이면
         # watch_days로 이월된 감시분이다(선정 기준이 순위라 이 구분이 핵심).
         try:
@@ -404,14 +549,17 @@ def _leader_segment(sess) -> None:
             if jb >= 6:
                 r["BTC24h"] = float(btc["Close"].iloc[jb]) / float(btc["Close"].iloc[jb - 6]) - 1
 
-        fwd = d4[(d4.index > t) & (d4.index <= t + D(days=7))]
+        t0 = d4.index[j]               # 진입 봉 — 이 뒤부터가 전진 구간이다
+        fwd = d4[(d4.index > t0) & (d4.index <= t0 + D(days=hz))]
         if not len(fwd):
             continue
-        r["진행h"] = round((fwd.index[-1] - t) / D(hours=1))
+        r["진행h"] = round((fwd.index[-1] - t0) / D(hours=1))
         r["mfe"] = float(fwd["High"].max()) / entry - 1
         r["mae"] = float(fwd["Low"].min()) / entry - 1
         for name, dl in (("24h", D(hours=24)), ("3d", D(days=3)), ("7d", D(days=7))):
-            k = int(d4.index.searchsorted(t + dl, "left"))
+            if dl > D(days=hz):
+                continue
+            k = int(d4.index.searchsorted(t0 + dl, "left"))
             r[name] = (float(c4.iloc[k]) / entry - 1) if k < len(d4) else None
         up = dn = None
         for x in range(len(fwd)):
@@ -430,9 +578,11 @@ def _leader_segment(sess) -> None:
         print("분석 가능한 알림 없음 (15m 창 밖이거나 프레임 부족)")
         return
 
-    FEATS = ["순위", "이월분", "재알림", "24h상승", "3d상승", "7d상승", "4h상승",
-             "1h상승", "이탈깊이", "120선확장", "480선확장", "변동성", "거래대금M",
-             "이력일", "BTC24h"]
+    ALL_FEATS = ["순위", "이월분", "재알림", "24h상승", "3d상승", "7d상승", "4h상승",
+                 "1h상승", "이탈깊이", "120선확장", "480선확장", "변동성", "거래대금M",
+                 "이력일", "BTC24h"]
+    # 시그널마다 채워지는 피처가 다르다 — 아무도 값을 안 준 축은 빼고 본다
+    FEATS = [f for f in ALL_FEATS if any(r.get(f) is not None for r in rows)]
 
     def med(vals):
         vals = [v for v in vals if v is not None]
@@ -445,8 +595,8 @@ def _leader_segment(sess) -> None:
         return f"{'—':>{w}}" if v is None else f"{v:>{w}.2f}"
 
     fmt = {"재알림": raw, "거래대금M": raw, "이력일": raw, "순위": raw, "이월분": raw}
-    mature = [r for r in rows if r["진행h"] >= 24 * 6]
-    print(f"\n분석 대상 {len(rows)}건 · 7일 관찰 완료 {len(mature)}건 · "
+    mature = [r for r in rows if r["진행h"] >= 24 * (hz - 1)]
+    print(f"\n분석 대상 {len(rows)}건 · {hz}일 관찰 완료 {len(mature)}건 · "
           f"대박 기준 MFE≥{big:+.0%} / 쪽박 기준 MAE≤{-bad:.0%}")
     hit = sum(r["대박"] for r in rows) / len(rows)
     miss = sum(r["쪽박"] for r in rows) / len(rows)
@@ -499,14 +649,23 @@ def _leader_segment(sess) -> None:
             print(f"  {lab:<20}" + stat(rs))
         print()
 
-    print("  [상위권 vs 이월 감시분]")
-    print(head)
-    for lab, sel in (("현재 상위 15위 안", lambda r: r.get("이월분") == 0.0),
-                     ("이월 감시분(15위 밖)", lambda r: r.get("이월분") == 1.0)):
-        rs = [r for r in rows if sel(r)]
-        if rs:
-            print(f"  {lab:<20}" + stat(rs))
-    print()
+    if any(r.get("이월분") is not None for r in rows):
+        print("  [상위권 vs 이월 감시분]")
+        print(head)
+        for lab, sel in (("현재 상위 15위 안", lambda r: r.get("이월분") == 0.0),
+                         ("이월 감시분(15위 밖)", lambda r: r.get("이월분") == 1.0)):
+            rs = [r for r in rows if sel(r)]
+            if rs:
+                print(f"  {lab:<20}" + stat(rs))
+        print()
+    if stages:
+        print("  [하위 종류]")
+        print(head)
+        for st_name in stages:
+            rs = [r for r in rows if r.get("stage") == st_name]
+            if rs:
+                print(f"  {st_name:<20}" + stat(rs))
+        print()
 
     # ③ 룰 시뮬레이션
     print("== ③ 단일 조건 룰 — 잔존율 대비 대박/쪽박 (전체 대비 개선폭 순)\n")
@@ -570,7 +729,7 @@ with requests.Session() as sess:
         _performance(sess)
         raise SystemExit(0)
     if _mode in ("leaders", "segment"):
-        _leader_segment(sess)
+        _signal_segment(sess)
         raise SystemExit(0)
     for sym in symbols:
         try:
