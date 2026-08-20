@@ -521,3 +521,18 @@ def test_quiet_grouping_does_not_reorder_other_signals():
     evs = [_hold("AUSDT", gain=0.01), _hold("BUSDT", gain=0.30)]
     out = format_events([], [], {}, ongoing_crypto=evs)
     assert [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳")] == ["B", "A"]
+
+
+def test_quiet_tag_shows_on_wave_lines_too():
+    """파동도 같은 🍃 — 신규·추적 양쪽, 그리고 조용한 쪽이 먼저 온다."""
+    def wave(symbol, quiet, gain):
+        e = _wave(symbol, "ABC", gain)
+        e.detail["quiet"] = quiet
+        return e
+    out = format_events([wave("QUSDT", True, 0.01), wave("LUSDT", False, 0.50)], [], {},
+                        ongoing_crypto=[wave("HQUSDT", True, 0.02)])
+    new = [ln for ln in out.splitlines() if ln.startswith("• ")]
+    assert "🍃" in new[0] and ">Q</a>" in new[0]      # 상승률이 낮아도 먼저
+    assert "🍃" not in new[1]
+    hold = [ln for ln in out.splitlines() if ln.startswith("↳")][0]
+    assert "🍃" in hold

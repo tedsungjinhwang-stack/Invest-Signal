@@ -363,3 +363,70 @@ def test_vwap_gate_blocks_an_abc_far_below_the_line():
 
     assert len(detect(df, "XUSDT", off)) == 1        # 게이트만 빼면 잡히던 자리
     assert detect(df, "XUSDT", on) == []             # 종가 42 vs MVWAP 70
+
+
+def _quiet_frame(price=100.0, swing=0.015, vol=1000.0, bars=60):
+    """4h 프레임 — swing이 클수록 ATR이, vol이 클수록 거래대금이 커진다.
+
+    고·저가 종가 대비 ±swing이면 TR이 매 봉 2·swing·가격이라 ATR÷종가 ≈ 2·swing.
+    """
+    idx = pd.date_range("2026-06-01", periods=bars, freq="4h", tz="UTC")
+    c = pd.Series(price, index=idx)
+    return pd.DataFrame({"Open": c, "High": c * (1 + swing), "Low": c * (1 - swing),
+                         "Close": c, "Volume": vol})
+
+
+def test_quiet_needs_low_turnover_and_a_volatility_band():
+    """거래대금이 작고 변동성이 밴드 안일 때만 조용 — 너무 조용해도 아니다."""
+    P = wave_setup.Params()
+    assert wave_setup.quiet(_quiet_frame(swing=0.015, vol=1000), P) is True   # ATR 3%
+    # 거래대금이 크면 아니다 — 6봉 × 100 × 20000 = $12M
+    assert wave_setup.quiet(_quiet_frame(swing=0.015, vol=20000), P) is False
+    # 변동성이 상한 위면 아니다 (ATR ≈ 12%)
+    assert wave_setup.quiet(_quiet_frame(swing=0.06, vol=1000), P) is False
+    # 하한 아래도 아니다 — 안 깨지지만 안 가는 구간 (ATR ≈ 1%)
+    assert wave_setup.quiet(_quiet_frame(swing=0.005, vol=1000), P) is False
+
+
+def test_quiet_is_none_when_undecidable():
+    """ATR이 성립 안 하는 짧은 이력이면 None — 아니라고 하지 않는다."""
+    P = wave_setup.Params()
+    assert wave_setup.quiet(pd.DataFrame(), P) is None
+    assert wave_setup.quiet(_quiet_frame(bars=P.quiet_atr_period), P) is None
+
+
+def test_quiet_is_judged_at_the_trigger_bar_not_the_last_one():
+    """at으로 과거 봉을 판정한다 — 발화 시점 상태여야 한다."""
+    P = wave_setup.Params()
+    df = _quiet_frame(swing=0.015, vol=1000)
+    df.iloc[-6:, df.columns.get_loc("Volume")] = 20000.0   # 최근 하루만 거래 폭증
+    assert wave_setup.quiet(df, P) is False                # 마지막 봉 기준
+    assert wave_setup.quiet(df, P, len(df) - 10) is True   # 폭증 전 봉 기준
+
+
+def test_quiet_is_stamped_on_both_variants_from_the_4h_frame():
+    """두 변형 모두 4h 프레임 기준으로 🍃 판정이 붙는다.
+
+    임펄스는 일봉 사건이라 발화 봉이 그날 00시다. 그 위치를 4h 프레임에서
+    그대로 찾으면 그날 **첫** 봉이 되므로, 마지막 봉으로 옮겨 판정해야
+    ABC와 같은 잣대가 된다.
+    """
+    n = 6 * 120
+    df = _frame(list(np.linspace(100.0, 50.0, n)))
+    df["Volume"] = 1.0                       # 거래대금이 아주 작다 → 조용 후보
+    # 변동성은 이 테스트의 관심사가 아니다 — 밴드를 열어 거래대금만 남긴다
+    p = Params(abc_enabled=False, vwap_condition=False,
+               quiet_atr_min=0.0, quiet_atr_max=1.0)
+    daily = wave_setup._daily(df)
+    fast = supertrend_full(daily, p.fast_period, p.fast_mult)
+    day = daily.index[-1]
+    df.loc[df.index.normalize() == day, "High"] = float(fast["line"].iloc[-1]) + 1.0
+    # **전날 마지막 봉**에 거래를 몰아 준다. 거래대금 창이 6봉이라, 그날 첫
+    # 봉을 기준으로 삼으면 이 봉이 창에 들어와 조용이 깨지고, 그날 마지막
+    # 봉을 기준으로 삼으면 창 밖이라 조용이 유지된다 — 매핑이 갈리는 자리다.
+    first = int(np.flatnonzero(df.index.normalize() == day)[0])
+    df.iloc[first - 1, df.columns.get_loc("Volume")] = 10_000_000.0
+
+    ev = detect(df, "XUSDT", p)[0]
+    assert ev.detail["stage"] == IMPULSE
+    assert ev.detail["quiet"] is True        # 첫 봉을 봤다면 거래대금 초과로 False

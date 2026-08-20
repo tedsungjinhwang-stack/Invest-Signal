@@ -30,7 +30,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..indicators import anchored_vwap, pct_since, supertrend_full
+from ..indicators import anchored_vwap, atr, pct_since, supertrend_full
 from . import SignalEvent
 
 NAME = "wave_setup"
@@ -81,6 +81,13 @@ class Params:
     # 돌파는 4h짜리 사건이라 며칠 지나면 '방금 돌파한 자리'가 아니게 된다.
     # 임펄스는 일봉 터치라 성격이 달라 공용 창을 그대로 쓴다.
     abc_track_days: int = 3
+    # 🍃조용 태그 기준 — 거르지 않고 표시만 한다(quiet() 참고).
+    # ⚡와 같은 축이지만 **기준값은 따로**다: 파동은 하락 추세 종목을 잡아서
+    # 변동성 중앙값이 2.9%인데(⚡는 7.3%) ⚡ 기준을 그대로 쓰면 전부 붙는다.
+    quiet_turnover_usd: float = 5_000_000   # 24h 거래대금(4h 6봉 종가×거래량)
+    quiet_atr_min: float = 0.019            # 너무 조용해도 안 간다 — 아래 하한
+    quiet_atr_max: float = 0.044            # 이 위는 위아래로 다 크게 움직인다
+    quiet_atr_period: int = 14
 
 
 def _daily(df: pd.DataFrame, keep_partial: bool = False) -> pd.DataFrame:
@@ -140,6 +147,47 @@ def _vwap_gate(df: pd.DataFrame, params: Params):
     return ok
 
 
+def quiet(df: pd.DataFrame, params: Params = Params(), at: int = -1) -> bool | None:
+    """'조용한' 자리인지 — 거래대금이 작고 변동성이 적당한 구간.
+
+    **거르는 조건이 아니라 표시용이다.** 30일 리플레이(퍼프 281건,
+    `scripts/debug_probe.py`의 PROBE_MODE=leaders + PROBE_REPLAY=1)에서
+    이 시그널도 ⚡와 같은 모양이었다 — 이미 크게 오르고 변동성이 터진
+    종목이 대박(7일 내 고점 +20%↑)과 쪽박(저점 −15%↓)을 다 만든다.
+    24h 상승률 상위 25%는 대박 42%에 쪽박 51%, 변동성 상위 25%는 대박
+    44%에 쪽박 54%였다.
+
+    갈라지는 축도 같다. 24h 거래대금 하위 25%($5.2M 미만)에서 대박률은
+    24%→27%로 **오히려 오르고** 쪽박률은 21%→7%로 떨어졌다(경로 승률 64%).
+    ⚡에선 대박률이 조금 깎였는데 여기선 안 깎인다.
+
+    변동성은 상한만 두지 않고 **밴드**로 본다. 하위 25%(1.9% 미만)는 대박
+    6%·쪽박 1%로 안 깨지지만 안 가기도 했다 — 2.9~4.4% 구간이 대박 37%·
+    쪽박 21%로 가장 좋았다.
+
+    거래대금은 티커가 아니라 4h 캔들에서 구한다(종가×거래량 6봉 합) —
+    기준값을 그 방식으로 쟀고, 과거 봉에도 같은 값을 매길 수 있어야 한다.
+    at은 판정할 봉 위치다(기본 마지막 봉).
+
+    판단할 값이 없으면 None — 조용하다고도, 아니라고도 하지 않는다.
+    """
+    n = len(df)
+    if not n:
+        return None
+    i = at if at >= 0 else n + at
+    if i < params.quiet_atr_period or i >= n:
+        return None
+    seg = df.iloc[max(0, i - BARS_PER_DAY + 1):i + 1]
+    turnover = float((seg["Close"] * seg["Volume"]).sum())
+    a = atr(df.iloc[:i + 1], params.quiet_atr_period).iloc[-1]
+    close = float(df["Close"].iloc[i])
+    if pd.isna(a) or close <= 0:
+        return None
+    vol = float(a) / close
+    return bool(turnover < params.quiet_turnover_usd
+                and params.quiet_atr_min <= vol < params.quiet_atr_max)
+
+
 def _trends(df: pd.DataFrame, params: Params):
     fast = supertrend_full(df, params.fast_period, params.fast_mult)
     slow = supertrend_full(df, params.slow_period, params.slow_mult)
@@ -191,10 +239,22 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
         daily = _daily(df, params.include_live_day)
         # 일봉 트리거를 4h 프레임 위치로 옮긴다 — 그날의 마지막 4h봉이 기준점
         def day_ok(day) -> bool:
-            i = int(df.index.searchsorted(day + pd.Timedelta(days=1), "left")) - 1
-            return vwap_ok(i)
+            return vwap_ok(_at_4h(df, day))
         events += _detect_impulse(daily, symbol, params, rets, day_ok)
+    # 🍃조용 판정은 변형과 무관하게 **4h 프레임**에서 한다 — 일봉으로 재면
+    # 거래대금 창도 변동성 눈금도 달라져 두 변형을 같은 잣대로 못 본다.
+    for ev in events:
+        i = (_at_4h(df, ev.bar_time) if ev.detail.get("stage") == IMPULSE
+             else int(df.index.searchsorted(ev.bar_time, "left")))
+        q = quiet(df, params, i)
+        if q is not None:
+            ev.detail["quiet"] = q
     return events
+
+
+def _at_4h(df: pd.DataFrame, day) -> int:
+    """그날의 마지막 4h봉 위치 — 일봉 사건을 4h 프레임에 얹을 때 쓴다."""
+    return int(df.index.searchsorted(day + pd.Timedelta(days=1), "left")) - 1
 
 
 def _detect_abc(df: pd.DataFrame, symbol: str, params: Params,
@@ -279,6 +339,9 @@ def refresh_detail(df: pd.DataFrame, event: SignalEvent,
     """
     if len(df):
         event.detail.update(_returns(df))
+        q = quiet(df, params)          # 거래대금·변동성은 계속 변한다
+        if q is not None:
+            event.detail["quiet"] = q
 
 
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:

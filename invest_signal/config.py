@@ -120,6 +120,9 @@ def wave_params(cfg: dict) -> wave_setup.Params:
         vwap_period=str(s.get("vwap_period", "M")),
         vwap_mode=str(s.get("vwap_mode", "any")),
         vwap_touch_bars=int(s.get("vwap_touch_bars", 5)),
+        quiet_turnover_usd=float(s.get("quiet_turnover_usd", 5_000_000)),
+        quiet_atr_min=float(s.get("quiet_atr_min", 0.019)),
+        quiet_atr_max=float(s.get("quiet_atr_max", 0.044)),
     )
 
 

@@ -292,6 +292,8 @@ def format_events(events_crypto: list, events_etf: list,
                     + (f"  {_fmt_price(d['last_price'])}" if d.get("last_price") else "")
                     + " · " + " · ".join(tags))
         tags = [f"{_age_days(e.bar_time)}d"]
+        if d.get("quiet"):
+            tags.append(QUIET_TAG)      # ⚡·파동 공통 — 조용한 종목 표시
         if e.signal == "wave_setup":
             # 파동만 구간 세트를 싣는다 — refresh_detail이 매 스캔 갱신하므로
             # 세 값 모두 지금 값이다. 다른 시그널의 ret_4h는 트리거 봉에
