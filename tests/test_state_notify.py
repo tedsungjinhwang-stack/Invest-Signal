@@ -500,3 +500,24 @@ def test_quiet_tag_shows_on_tracking_lines_too():
     rows = {ln.split()[1]: ln for ln in out.splitlines() if ln.startswith("↳")}
     assert "🍃" in rows["Q"] and "🍃" not in rows["L"]
     assert rows["Q"].index("🍃") < rows["Q"].index("3위")   # 줄 앞쪽에 온다
+
+
+def test_quiet_symbols_are_grouped_at_the_top():
+    """🍃가 먼저, 그 안에서 24h 상승률 순 — 흩어져 있으면 폰에서 못 찾는다."""
+    def lead(symbol, gain, quiet):
+        e = _leader(symbol, quiet=quiet)
+        e.detail["gain_24h"] = gain
+        return e
+    out = format_events([lead("LOUDHIUSDT", 0.50, False), lead("QLOUSDT", 0.01, True),
+                         lead("LOUDLOUSDT", 0.20, False), lead("QHIUSDT", 0.09, True)],
+                        [], {})
+    order = [ln.split(">")[1].split("<")[0] for ln in out.splitlines()
+             if ln.startswith("• ")]
+    assert order == ["QHI", "QLO", "LOUDHI", "LOUDLO"]
+
+
+def test_quiet_grouping_does_not_reorder_other_signals():
+    """quiet 키가 없는 시그널은 순서 그대로 — 상승률 순이 유지된다."""
+    evs = [_hold("AUSDT", gain=0.01), _hold("BUSDT", gain=0.30)]
+    out = format_events([], [], {}, ongoing_crypto=evs)
+    assert [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳")] == ["B", "A"]

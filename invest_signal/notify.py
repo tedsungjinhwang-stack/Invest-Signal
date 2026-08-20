@@ -107,14 +107,26 @@ def _by_gain_desc(e):
     return (1, 0.0) if g is None else (0, -g)
 
 
+def _quiet_first(e):
+    """🍃조용을 칸 맨 위로 올리는 정렬 조각.
+
+    ⚡ 알림은 16%쯤만 조용한 종목인데 상승률 순으로만 세우면 목록 여기저기
+    흩어져, 폰에서 스크롤하며 이모지를 찾아야 한다. 이 축의 성과 차이가
+    가장 크므로(leader_break.quiet 참고) 먼저 묶어 보여준다.
+
+    quiet 키는 ⚡만 채운다 — 다른 시그널은 전부 같은 값이라 순서가 그대로다.
+    """
+    return 0 if e.detail.get("quiet") else 1
+
+
 def _new_order(e):
-    """신규 줄 — 변형별로 묶고, 그 안에서 24h 수익률 순, 없으면 심볼 순."""
-    return (_variant(e), *_by_gain_desc(e), e.symbol)
+    """신규 줄 — 변형·🍃로 묶고, 그 안에서 24h 수익률 순, 없으면 심볼 순."""
+    return (_variant(e), _quiet_first(e), *_by_gain_desc(e), e.symbol)
 
 
 def _hold_order(e):
-    """추적 줄 — 변형별로 묶고, 그 안에서 24h 수익률 순, 동률이면 최신 발생 순."""
-    return (_variant(e), *_by_gain_desc(e), -e.bar_time.timestamp())
+    """추적 줄 — 변형·🍃로 묶고, 24h 수익률 순, 동률이면 최신 발생 순."""
+    return (_variant(e), _quiet_first(e), *_by_gain_desc(e), -e.bar_time.timestamp())
 
 
 def _returns_tag(d: dict) -> str | None:
