@@ -193,11 +193,17 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     if carried:
         log(f"[binance] 크립토 모멘텀 눌림목/이탈 추적 유지 {carried}종 "
             f"(상위권 이탈 후 {params.watch_days}일 이내)")
-    dropped = sum(1 for sym in recent
-                  if sym in universe and sym not in {w for w, _ in watch})
-    if dropped:
-        log(f"[binance] 크립토 모멘텀 눌림목/이탈: max_watch={params.max_watch} 초과분 "
-            f"{dropped}종은 이번 스캔에서 제외 (최근 등재 순으로 남김)")
+    # 이월분이 빠지는 이유는 두 가지고 대응이 다르다 — 하한 미달은 종목
+    # 문제(거래가 말라붙음), max_watch 초과는 설정 문제(창을 늘렸으면 상한도
+    # 같이 올려야 한다). 뭉뚱그리면 어느 쪽인지 모르니 나눠 센다.
+    watched = {w for w, _ in watch}
+    stale = [sym for sym in recent if sym in universe and sym not in watched]
+    thin = sum(1 for sym in stale
+               if (ticker.get(sym) or {}).get("quote_volume", 0) < params.min_turnover_usd)
+    if stale:
+        log(f"[binance] 크립토 모멘텀 눌림목/이탈 이월분 {len(stale)}종 제외 — "
+            f"거래대금 하한 미달 {thin}종 · "
+            f"max_watch={params.max_watch} 초과 {len(stale) - thin}종")
 
     trend_cache: dict[str, "pd.DataFrame | None"] = {}
 
