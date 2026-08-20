@@ -481,6 +481,13 @@ def _signal_segment(sess) -> None:
                     frames15[sym] = df
         print(f"[15m] {len(frames15)}/{len(want)}종 수집")
 
+    # 파동은 모듈이 🍃 판정을 갖고 있다 — 그 함수를 그대로 불러 실제 태그가
+    # 어느 칸을 잡는지 잰다(다른 시그널은 시그니처가 달라 건너뛴다).
+    wave_quiet = wave_params = None
+    if target == "wave_setup":
+        from invest_signal.signals import wave_setup as _ws
+        wave_quiet, wave_params = _ws.quiet, cfg_mod.wave_params(cfg)
+
     btc = frames4.get("BTCUSDT")
     D = pd.Timedelta
     rows = []
@@ -542,6 +549,10 @@ def _signal_segment(sess) -> None:
                        axis=1).max(axis=1)
         atr = tr.rolling(14).mean().iloc[j]
         r["변동성"] = (float(atr) / entry) if pd.notna(atr) else None
+        if wave_quiet is not None:
+            # **배포된 함수를 그대로 부른다** — 조건을 여기에 옮겨 적으면
+            # 모듈이 바뀔 때 조용히 어긋나서, 재는 대상이 실제 태그가 아니게 된다.
+            r["🍃"] = wave_quiet(d4, wave_params, j)
         seg_t = d4.iloc[max(0, j - 5):j + 1]
         r["거래대금M"] = float((seg_t["Close"] * seg_t["Volume"]).sum()) / 1e6
         if btc is not None and len(btc):
@@ -722,6 +733,40 @@ def _signal_segment(sess) -> None:
               f"{sum(r['쪽박'] for r in rs) / len(rs) * 100:>6.0f}%"
               f"{pct(med(r['mfe'] for r in rs), 8)}{pct(med(r['mae'] for r in rs), 8)}"
               f"{pct(med(r.get('3d') for r in rs), 8)}")
+
+    if wave_quiet is not None:
+        wp = wave_params
+        lo, hi = wp.quiet_atr_min, wp.quiet_atr_max
+        floor = wp.quiet_turnover_usd / 1e6
+
+        def cell(f):
+            return [r for r in rows if f(r)]
+
+        def cash(r):
+            return r.get("거래대금M") is not None and r["거래대금M"] < floor
+
+        def vol(r, a, b):
+            v = r.get("변동성")
+            return v is not None and a <= v < b
+
+        print(f"\n== ④ 실제 🍃 룰 분해 — 거래대금 < ${floor:.0f}M "
+              f"AND 변동성 {lo:.1%}~{hi:.1%}\n")
+        print(head)
+        for lab, f in (
+            ("전체", lambda r: True),
+            ("🍃 (실제 태그)", lambda r: r.get("🍃") is True),
+            ("  ├ 거래대금만", cash),
+            ("  └ 변동성 밴드만", lambda r: vol(r, lo, hi)),
+            (f"거래대금+상한만(<{hi:.1%})", lambda r: cash(r) and vol(r, 0, hi)),
+            ("  └ 그중 하한 미만", lambda r: cash(r) and vol(r, 0, lo)),
+            ("🍃 아님", lambda r: r.get("🍃") is not True),
+        ):
+            rs = cell(f)
+            if rs:
+                print(f"  {lab:<20}" + stat(rs))
+        n_q = len(cell(lambda r: r.get("🍃") is True))
+        print(f"\n  🍃 판정 불가 {sum(1 for r in rows if r.get('🍃') is None)}건 · "
+              f"태그 비율 {n_q / len(rows) * 100:.0f}%")
 
     print(f"\n  ※ 표본 {len(rows)}건·{back}일치라 과최적화 위험이 있다. 룰은 "
           f"'대박률이 오르면서 잔존율이 60% 이상'인 것만 실전 후보로 본다.")

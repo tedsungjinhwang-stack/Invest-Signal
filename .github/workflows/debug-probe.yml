@@ -38,7 +38,7 @@ jobs:
           # 하한별 통과 종목 수와, 최근 발송된 알림의 종목이 살아남는지.
           PROBE_MODE: "leaders"
           PROBE_SIGNAL: "wave_setup"
-          PROBE_REPLAY: "1"        # 알림 기록 대신 과거 캔들에서 재현
+          PROBE_REPLAY: "1"        # 알림 기록 대신 과거 캔들에서 재현 (④ 🍃 룰 분해 포함)
           PROBE_DAYS_BACK: "30"
           PROBE_BIG: "20"          # 대박 기준 — 7일 내 MFE ≥ +20%
           PROBE_BAD: "15"          # 쪽박 기준 — 7일 내 MAE ≤ -15%
