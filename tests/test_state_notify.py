@@ -366,7 +366,7 @@ def test_wave_line_shows_the_gain_it_is_sorted_by():
     out = format_events([_wave("XUSDT", "ABC", 0.083)], [], {})
     line = [ln for ln in out.splitlines() if ln.startswith("• ")][0]
     assert "24h +8.3%" in line
-    assert line.endswith("ABC 돌파")
+    assert line.endswith("ABC 장기선 터치")
     assert "0.9" not in line and "수퍼트렌드선" not in line
 
 
@@ -420,12 +420,12 @@ def test_wave_tracking_gets_one_subheader_per_variant():
            _wave("CUSDT", "임펄스", 0.30), _wave("DUSDT", "임펄스", 0.05)]
     out = format_events([], [], {}, ongoing_crypto=evs)
     body = [ln for ln in out.splitlines() if ln.startswith("↳ ") or "ⓐ" in ln or "ⓑ" in ln]
-    assert body[0].strip().startswith("ⓐ") and "4h 돌파" in body[0]
+    assert body[0].strip().startswith("ⓐ") and "4h 장기선 터치" in body[0]
     assert [ln.split()[1] for ln in body[1:3]] == ["A", "B"]
     assert body[3].strip().startswith("ⓑ") and "일봉 터치" in body[3]
     assert [ln.split()[1] for ln in body[4:6]] == ["C", "D"]
     # 소제목이 말해 주므로 추적 줄에는 변형 이름이 없다
-    assert "ABC 돌파" not in "\n".join(body[1:3])
+    assert "ABC 장기선 터치" not in "\n".join(body[1:3])
     assert out.count("ⓐ") == 1 and out.count("ⓑ") == 1
 
 

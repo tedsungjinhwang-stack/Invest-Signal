@@ -1,4 +1,4 @@
-"""파동 시그널 — 4h 돌파(ABC)와 일봉 터치(임펄스)."""
+"""파동 시그널 — 4h 장기선 터치(ABC)와 일봉 단기선 터치(임펄스)."""
 
 import numpy as np
 import pandas as pd
@@ -26,15 +26,50 @@ def _falling_then_pop(n=200, pop=0.05):
     return base + [base[-1] * (1 + pop)]
 
 
-def test_abc_fires_when_only_fast_flips_up():
-    """ⓐ 둘 다 하락이던 상태에서 단기만 상승 전환한 봉에서 발화한다."""
-    df = _frame(_falling_then_pop())
+def _touching_slow(df, params=None):
+    """마지막 봉의 고가를 장기선까지 끌어올려 '터치'를 만든다.
+
+    고가를 바꾸면 ATR이 바뀌어 선도 다시 계산되지만, 하락 추세의 장기선은
+    트레일링이라 위로는 안 움직인다 — 한두 번이면 수렴한다.
+    """
+    p = params or Params()
+    df = df.copy()
+    for _ in range(5):
+        slow = supertrend_full(df, p.slow_period, p.slow_mult)
+        line = float(slow["line"].iloc[-1])
+        if (slow["dir"].iloc[-1] < 0
+                and df["Low"].iloc[-1] <= line <= df["High"].iloc[-1]):
+            return df
+        df.iloc[-1, df.columns.get_loc("High")] = line
+    raise AssertionError("장기선 터치를 못 만들었다")
+
+
+def _abc_frame(pop=0.05, params=None, gap=0, start="2026-01-01", n=200):
+    """ⓐ 새 정의를 만족하는 프레임 — 단기가 최근 뒤집혔고 고가가 장기선에 닿는다.
+
+    gap을 주면 전환 봉과 터치 봉 사이를 그만큼 벌린다(전환이 오래된 경우).
+    """
+    closes = _falling_then_pop(n=n, pop=pop)
+    # 갭은 평평하게 채운다 — 조금이라도 올리면 장기까지 상승 전환해 버려서
+    # '장기는 아직 하락'이라는 전제가 깨진다.
+    closes += [closes[-1]] * gap
+    return _touching_slow(_frame(closes, start=start), params)
+
+
+def _extend(df, closes_more):
+    """프레임 뒤에 봉을 붙인다 — 터치를 만든 고가 수정을 그대로 보존한다."""
+    more = _frame(closes_more, start=df.index[-1] + pd.Timedelta(hours=4))
+    return pd.concat([df, more])
+
+
+def test_abc_fires_when_a_recent_flip_reaches_the_slow_line():
+    """ⓐ 단기가 막 뒤집혔고 캔들이 장기선(저항)에 닿은 봉에서 발화한다."""
     p = Params(impulse_enabled=False)
+    df = _abc_frame(params=p)
     fast = supertrend_full(df, p.fast_period, p.fast_mult)["dir"]
-    slow = supertrend_full(df, p.slow_period, p.slow_mult)["dir"]
-    # 전제 확인 — 직전 봉은 둘 다 하락, 마지막 봉은 단기만 상승
-    assert fast.iloc[-2] < 0 and slow.iloc[-2] < 0
-    assert fast.iloc[-1] > 0 and slow.iloc[-1] < 0
+    slow = supertrend_full(df, p.slow_period, p.slow_mult)
+    # 전제 — 단기는 방금 뒤집혔고 장기는 아직 하락
+    assert fast.iloc[-2] < 0 and fast.iloc[-1] > 0 and slow["dir"].iloc[-1] < 0
 
     evs = detect(df, "XUSDT", p)
     assert len(evs) == 1
@@ -42,7 +77,26 @@ def test_abc_fires_when_only_fast_flips_up():
     assert e.signal == "wave_setup" and e.detail["stage"] == ABC
     assert e.detail["interval"] == "4h"
     assert e.bar_time == df.index[-1]
-    assert e.detail["fast_line"] < e.price      # 돌파했으니 종가가 선 위
+    assert e.price < e.detail["slow_line"]      # 터치지 돌파가 아니다
+
+
+def test_abc_silent_when_the_flip_never_reaches_the_slow_line():
+    """단기가 뒤집혀도 장기선까지 못 닿으면 발화하지 않는다 — 예전 정의와의 차이."""
+    df = _frame(_falling_then_pop())
+    p = Params(impulse_enabled=False)
+    fast = supertrend_full(df, p.fast_period, p.fast_mult)["dir"]
+    slow = supertrend_full(df, p.slow_period, p.slow_mult)
+    assert fast.iloc[-1] > 0 and slow["dir"].iloc[-1] < 0    # 전환은 했다
+    assert df["High"].iloc[-1] < float(slow["line"].iloc[-1])  # 선까진 멀다
+    assert detect(df, "XUSDT", p) == []
+
+
+def test_abc_silent_when_the_flip_is_too_old():
+    """전환이 flip_window_bars보다 오래됐으면 터치해도 발화하지 않는다."""
+    df = _abc_frame(gap=4)                       # 전환 4봉 뒤에 터치
+    assert detect(df, "XUSDT", Params(impulse_enabled=False)) != []      # 기본 창(12봉)
+    assert detect(df, "XUSDT",
+                  Params(impulse_enabled=False, flip_window_bars=2)) == []  # 창 밖
 
 
 def test_abc_silent_while_both_still_down():
@@ -116,24 +170,25 @@ def test_daily_ohlc_aggregates_the_four_hour_bars():
 
 
 def test_still_active_drops_abc_when_fast_falls_back():
-    """ⓐ 돌파가 실패해 단기가 다시 하락하면 추적에서 뺀다."""
-    closes = _falling_then_pop()
+    """ⓐ 반등이 죽어 단기가 다시 하락하면 추적에서 뺀다."""
     p = Params(impulse_enabled=False)
-    df = _frame(closes)
+    df = _abc_frame(params=p)
     e = detect(df, "XUSDT", p)[0]
     assert still_active(df, e, p)                    # 방금은 살아 있다
 
-    later = _frame(closes + [closes[-2] * 0.5, closes[-2] * 0.4])
+    last = float(df["Close"].iloc[-1])
+    later = _extend(df, [last * 0.5, last * 0.4])
     assert supertrend_full(later, p.fast_period, p.fast_mult)["dir"].iloc[-1] < 0
     assert not still_active(later, e, p)
 
 
 def test_still_active_drops_when_long_term_turns_up():
     """공통 전제가 사라지면(장기 상승 전환) 두 변형 모두 빠진다."""
-    closes = _falling_then_pop()
     p = Params(impulse_enabled=False)
-    e = detect(_frame(closes), "XUSDT", p)[0]
-    surge = _frame(closes + [closes[-1] * 2, closes[-1] * 4, closes[-1] * 8])
+    df = _abc_frame(params=p)
+    e = detect(df, "XUSDT", p)[0]
+    last = float(df["Close"].iloc[-1])
+    surge = _extend(df, [last * 2, last * 4, last * 8])
     assert supertrend_full(surge, p.slow_period, p.slow_mult)["dir"].iloc[-1] > 0
     assert not still_active(surge, e, p)
 
@@ -189,17 +244,19 @@ def test_refresh_detail_updates_the_returns_to_now():
 
     며칠 지난 셋업이면 며칠 전 수익률이 현재가 옆에 박제된다.
     """
-    closes = _falling_then_pop()
     p = Params(impulse_enabled=False)
-    e = detect(_frame(closes), "XUSDT", p)[0]
+    df = _abc_frame(params=p)
+    e = detect(df, "XUSDT", p)[0]
     at_trigger = e.detail["ret_24h"]
+    line_at_trigger = e.detail["fast_line"]
 
-    later = _frame(closes + list(np.linspace(closes[-1], closes[-1] * 5, 12)))
+    last = float(df["Close"].iloc[-1])
+    later = _extend(df, list(np.linspace(last, last * 5, 12)))
     wave_setup.refresh_detail(later, e, p)
     assert e.detail["ret_24h"] != at_trigger
     assert e.detail["ret_24h"] > 0        # 그 사이 크게 올랐다
     # 추세선은 알림에 안 실으므로 갱신하지 않는다 — 트리거 시점 기록 그대로
-    assert e.detail["fast_line"] == detect(_frame(closes), "XUSDT", p)[0].detail["fast_line"]
+    assert e.detail["fast_line"] == line_at_trigger
 
 
 def test_impulse_tracking_stays_inside_the_track_window():
@@ -282,24 +339,27 @@ def test_abc_tracking_is_capped_shorter_than_the_shared_window():
     wide = dataclasses.replace(p, grace_bars=ONGOING_LOOKBACK_BARS)
     assert TRACK_DAYS > p.abc_track_days        # 캡이 실제로 좁히는 상황
 
-    closes = _falling_then_pop()
-    inside = _frame(closes + list(np.linspace(closes[-1], closes[-1] * 1.02,
-                                              3 * 6)))       # 전환 후 3일
-    outside = _frame(closes + list(np.linspace(closes[-1], closes[-1] * 1.02,
-                                               4 * 6)))      # 전환 후 4일
-    assert len(detect(inside, "XUSDT", wide)) == 1
-    assert detect(outside, "XUSDT", wide) == []
+    df = _abc_frame(params=p)
+    trigger = detect(df, "XUSDT", p)[0].bar_time
+    last = float(df["Close"].iloc[-1])
+    inside = _extend(df, list(np.linspace(last, last * 1.02, 3 * 6)))    # 터치 후 3일
+    outside = _extend(df, list(np.linspace(last, last * 1.02, 4 * 6)))   # 터치 후 4일
 
+    def bars(frame, prm):
+        return [e.bar_time for e in detect(frame, "XUSDT", prm)]
+
+    # 반등이 이어지며 나중 봉에서 또 닿을 수 있으니, 건수가 아니라
+    # **그 트리거 봉이 소급 창 안에 들어오는지**로 본다.
+    assert trigger in bars(inside, wide)
+    assert trigger not in bars(outside, wide)
     # 캡을 끄면 공용 창 안이므로 다시 잡힌다
-    assert len(detect(outside, "XUSDT",
-                      dataclasses.replace(wide, abc_track_days=0))) == 1
+    assert trigger in bars(outside, dataclasses.replace(wide, abc_track_days=0))
 
 
 def test_abc_cap_does_not_shorten_the_normal_grace():
     """평소 스캔(grace_bars=1)에서는 캡이 아무것도 바꾸지 않는다."""
-    df = _frame(_falling_then_pop())
     p = Params(impulse_enabled=False)
-    assert len(detect(df, "XUSDT", p)) == 1
+    assert len(detect(_abc_frame(params=p), "XUSDT", p)) == 1
 
 
 def _vwap_probe():
@@ -353,16 +413,15 @@ def test_vwap_gate_modes_differ():
 
 
 def test_vwap_gate_blocks_an_abc_far_below_the_line():
-    """실제 발화 경로에서도 막힌다 — 한 달 내내 흘러내린 뒤의 돌파."""
+    """실제 발화 경로에서도 막힌다 — 한 달 내내 흘러내린 뒤의 반등."""
     import dataclasses
 
-    base = list(np.linspace(100.0, 40.0, 179))       # 한 달(30일) 안에서만
-    df = _frame(base + [base[-1] * 1.05], start="2026-03-01")
     on = Params(impulse_enabled=False)
     off = dataclasses.replace(on, vwap_condition=False)
+    df = _abc_frame(params=off, start="2026-03-01", n=180)   # 한 달(30일) 안에서만
 
     assert len(detect(df, "XUSDT", off)) == 1        # 게이트만 빼면 잡히던 자리
-    assert detect(df, "XUSDT", on) == []             # 종가 42 vs MVWAP 70
+    assert detect(df, "XUSDT", on) == []             # 종가는 MVWAP 한참 아래
 
 
 def _quiet_frame(price=100.0, swing=0.015, vol=1000.0, bars=60):

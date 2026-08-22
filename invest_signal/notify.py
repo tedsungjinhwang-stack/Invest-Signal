@@ -86,7 +86,8 @@ WAVE_VARIANTS = ("ABC", "임펄스")   # 파동 칸 안에서 이 순서로 묶�
 def _variant(e) -> int:
     """같은 칸 안에서 먼저 갈라 놓을 하위 종류. 파동의 ABC/임펄스가 유일하다.
 
-    한 칸에 두 변형이 섞이면 4h 돌파와 일봉 터치가 번갈아 나와 읽기 어렵다 —
+    한 칸에 두 변형이 섞이면 4h 장기선 터치와 일봉 단기선 터치가 번갈아
+    나와 읽기 어렵다 —
     정렬 키의 맨 앞에 둬서 블록으로 묶는다.
     """
     if e.signal != "wave_setup":
@@ -154,7 +155,7 @@ def _returns_tag(d: dict) -> str | None:
 # 소제목이 수익률 세 칸의 순서까지 말해 준다 — 줄에서는 숫자만 이어 붙여
 # 폭을 줄인다. 파동 줄은 라벨을 반복하면 62칸이 되어 폰에서 두 줄로 접힌다
 # (다른 칸은 41칸이라 한 줄에 들어간다).
-WAVE_HEADERS = {"ABC": "  ⓐ <b>ABC</b> · 4h 돌파 · 4h/24h/7d",
+WAVE_HEADERS = {"ABC": "  ⓐ <b>ABC</b> · 4h 장기선 터치 · 4h/24h/7d",
                 "임펄스": "  ⓑ <b>임펄스</b> · 일봉 터치 · 4h/24h/7d"}
 
 
@@ -172,14 +173,15 @@ def _returns_compact(d: dict) -> str | None:
 
 
 def _wave_tag(d: dict) -> str:
-    """파동 — 어느 변형인지만.
+    """파동 — 어느 변형인지와, 무슨 선에 닿았는지.
 
-    수퍼트렌드선 값은 싣지 않는다. 봉 주기도 적지 않는다 — ABC는 4h 돌파,
-    임펄스는 일봉 터치로 1:1이라 변형 이름이 이미 그 정보이고, 줄에 붙는
-    수익률의 `4h`와 글자가 겹쳐 서로 다른 뜻으로 두 번 나온다.
+    둘 다 '터치'라서 변형 이름만으로는 어느 선인지 알 수 없다. 수퍼트렌드선
+    값은 싣지 않고 어느 선인지만 적는다 — ABC는 장기선(저항), 임펄스는
+    단기선이다. 봉 주기(4h/일봉)는 적지 않는다: 줄에 붙는 수익률의 `4h`와
+    글자가 겹쳐 서로 다른 뜻으로 두 번 나온다.
     """
     stage = d.get("stage", "")
-    return f"{stage} {'돌파' if stage == 'ABC' else '터치'}"
+    return f"{stage} {'장기선' if stage == 'ABC' else '단기선'} 터치"
 
 
 def _event_line(e, url: str, name: str, kind: str) -> str:
@@ -364,7 +366,7 @@ def format_events(events_crypto: list, events_etf: list,
             # 추적 리스트 — 종목마다 한 줄, 현재가 포함. 자르지 않고 전부 보여준다
             # (길어지면 split_chunks가 여러 메시지로 나눠 보낸다).
             # 파동은 변형이 바뀌는 자리에 소제목을 넣는다 — 이미 변형별로
-            # 묶여 있으므로 줄마다 "ABC 돌파"를 반복할 이유가 없고, 서른 줄
+            # 묶여 있으므로 줄마다 변형 이름을 반복할 이유가 없고, 서른 줄
             # 내내 같은 말이 붙으면 정작 다른 값이 눈에 안 들어온다.
             for e in hold_sel:
                 stage = e.detail.get("stage") if e.signal == "wave_setup" else None
