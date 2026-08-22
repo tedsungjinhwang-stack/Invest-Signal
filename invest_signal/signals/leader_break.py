@@ -42,7 +42,7 @@ class Params:
     track_break_only: bool = True   # 추적도 '20선 아래'인 동안만 (복귀하면 제외)
     exhausted_filter: bool = True        # 아래 blocked() 조건에 걸리면 대상에서 제외
     require_aligned: bool = True         # 4h 배열을 보는지 (끄면 배열 무관 전부 통과)
-    allow_bearish: bool = True           # 역배열도 통과 — 끄면 정배열만 (혼조는 항상 제외)
+    allow_bearish: bool = False          # 켜면 역배열도 통과 (혼조는 어느 쪽이든 제외)
     allow_short_history: bool = False    # 이력이 짧아 배열 판정 불가면 통과시킬지
     exhausted_mas: tuple = (120, 240, 480)   # 4h봉 정배열 판정 3선
     exhausted_below: int = 480               # 정배열이어도 종가가 이 선 아래면 제외
@@ -100,14 +100,14 @@ def watch_list(top: list[tuple[str, dict]], recent: dict, symbols: set[str],
 def blocked(df4h: pd.DataFrame, params: Params = Params()) -> bool:
     """대상에서 뺄 자리인지 — True면 제외.
 
-    ① **정배열 또는 역배열만 통과**(require_aligned). 남는 건 혼조 컷이다 —
-       24h 상승률 상위여도 4h 구조가 혼조면 방향이 아직 안 잡힌 것이라
-       어느 쪽 시나리오로도 읽을 자리가 아니다.
+    ① **정배열이 아니면 제외**(require_aligned). 24h 상승률 상위라도 4h
+       구조가 역배열·혼조면 그 상승은 하락 추세 안의 반등이거나 방향이
+       아직 안 잡힌 것이다 — 주도주의 눌림으로 볼 자리가 아니다.
 
-       정배열과 역배열은 성격이 정반대이지만 둘 다 판이 읽히는 자리다:
-       정배열은 상승 추세 안의 눌림, 역배열은 하락 추세 안의 반등이 꺾이는
-       자리다. 어느 쪽인지는 알림 줄의 배열 태그로 구분한다
-       (allow_bearish를 끄면 예전처럼 정배열만 남는다).
+       allow_bearish를 켜면 역배열도 통과한다(혼조만 남는 컷). 한 번 켜서
+       돌려 봤다가 껐다 — 통과 종목이 15종에서 48종으로 3배 늘고 알림도
+       그만큼 늘었다. 켤 때는 알림 줄의 🌱상승초기 마크로 두 종류가
+       구분된다.
     ② **정배열일 때만 종가가 exhausted_below선 아래면 제외**
        (exhausted_filter). 상승 구조가 완성된 상태에서 480선까지 밀렸으면
        오를 만큼 오른 뒤 꺾인 것이라 새로 잡을 눌림이 아니다. **역배열엔

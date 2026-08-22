@@ -295,14 +295,13 @@ def test_quiet_is_none_when_undecidable():
     assert leader_break.quiet({"quote_volume": 4e6}, short, P) is None
 
 
-def test_blocked_lets_bearish_stacks_through():
-    """역배열도 통과 — 하락 추세 안의 반등이 꺾이는 자리로 본다."""
+def test_bearish_stacks_pass_only_when_allowed():
+    """역배열은 기본 제외 — allow_bearish를 켤 때만 통과한다."""
     down = list(np.linspace(400.0, 100.0, 600))
     df = _df4h(down)
     assert alignment_of(df) == "역배열"
-    assert leader_break.blocked(df, P) is False
-    # allow_bearish를 끄면 예전 동작 — 정배열만 남는다
-    assert leader_break.blocked(df, Params(allow_bearish=False)) is True
+    assert leader_break.blocked(df, P) is True
+    assert leader_break.blocked(df, Params(allow_bearish=True)) is False
 
 
 def test_blocked_still_cuts_mixed_alignment():
@@ -325,4 +324,5 @@ def test_the_480_cut_applies_to_bullish_stacks_only():
     bear = _df4h(down)
     ref = float(pd.Series(down).rolling(480).mean().iloc[-1])
     assert down[-1] < ref                                    # 역배열은 480선 아래가 정상
-    assert leader_break.blocked(bear, P) is False            # 그래도 통과
+    # allow_bearish를 켠 상태에서도 480선 컷은 역배열에 걸리지 않는다
+    assert leader_break.blocked(bear, Params(allow_bearish=True)) is False
