@@ -194,27 +194,51 @@ def test_blocked_excludes_bullish_stack_that_fell_under_the_long_ma():
     assert leader_break.blocked(df_down, P) is True
 
 
+THREE = Params(exhausted_mas=(120, 240, 480))    # 혼조가 나오려면 선이 셋 이상
+
+
+def _mixed_frame():
+    """세 선 기준 혼조 — 오래 흘러내리다 최근에만 반등한 모양."""
+    return _df4h(list(np.linspace(400.0, 100.0, 480))
+                 + list(np.linspace(100.0, 300.0, 120)))
+
+
+def test_two_line_alignment_has_no_mixed_state():
+    """기본값(120·240)은 선이 둘이라 정배열/역배열뿐 — 혼조가 안 나온다.
+
+    컷이 '120선이 240선 위인가' 하나로 단순해진다는 뜻이다.
+    """
+    df = _mixed_frame()
+    assert alignment_of(df, (120, 240, 480)) == "혼조"
+    assert alignment_of(df, (120, 240)) in ("정배열", "역배열")
+
+
 def test_require_aligned_off_lets_even_mixed_through():
     """require_aligned를 끄면 배열을 아예 안 본다 — 혼조까지 통과."""
-    mixed = list(np.linspace(400.0, 100.0, 480)) + list(np.linspace(100.0, 300.0, 120))
-    df = _df4h(mixed)
-    assert alignment_of(df) == "혼조"
-    assert leader_break.blocked(df, P) is True
-    assert leader_break.blocked(df, Params(require_aligned=False)) is False
+    df = _mixed_frame()
+    assert alignment_of(df, THREE.exhausted_mas) == "혼조"
+    assert leader_break.blocked(df, THREE) is True
+    assert leader_break.blocked(
+        df, Params(exhausted_mas=(120, 240, 480), require_aligned=False)) is False
 
 
 def test_blocked_excludes_short_history_unless_allowed():
-    """상장 80일 미만은 MA480이 없어 배열 판정 불가 — 기본은 제외."""
-    new_listing = _df4h(np.linspace(100.0, 200.0, 300))
+    """가장 긴 선이 안 잡히면 배열 판정 불가 — 기본은 제외.
+
+    기본값은 240봉(40일)이 요건이다. 480을 배열 판정에서 뺐기 때문에 예전
+    80일에서 내려왔다 — 상장 40~80일 종목은 배열은 잡히고 MA480이 없어
+    exhausted_below 검사를 그냥 통과하므로 새로 들어온다.
+    """
+    new_listing = _df4h(np.linspace(100.0, 200.0, 200))
     assert alignment_of(new_listing) is None
     assert leader_break.blocked(new_listing, P) is True
     assert leader_break.blocked(
         new_listing, Params(allow_short_history=True)) is False
     # 판정이 되는데 통과 배열이 아닌 경우(혼조)는 allow_short_history와 무관하게 제외
-    mixed = _df4h(list(np.linspace(400.0, 100.0, 480))
-                  + list(np.linspace(100.0, 300.0, 120)))
-    assert alignment_of(mixed) == "혼조"
-    assert leader_break.blocked(mixed, Params(allow_short_history=True)) is True
+    mixed = _mixed_frame()
+    assert alignment_of(mixed, THREE.exhausted_mas) == "혼조"
+    assert leader_break.blocked(
+        mixed, Params(exhausted_mas=(120, 240, 480), allow_short_history=True)) is True
 
 
 def test_filters_can_be_turned_off_independently():
@@ -229,9 +253,9 @@ def test_filters_can_be_turned_off_independently():
     assert leader_break.blocked(fell, off) is False and leader_break.blocked(down, off) is False
 
 
-def alignment_of(df):
+def alignment_of(df, periods=None):
     from invest_signal.indicators import alignment
-    return alignment(df, (120, 240, 480))
+    return alignment(df, periods or P.exhausted_mas)
 
 
 def test_watch_list_drops_illiquid_carryovers():
@@ -305,11 +329,10 @@ def test_bearish_stacks_pass_only_when_allowed():
 
 
 def test_blocked_still_cuts_mixed_alignment():
-    """혼조는 그대로 제외 — 방향이 안 잡힌 자리다."""
-    mixed = list(np.linspace(400.0, 100.0, 480)) + list(np.linspace(100.0, 300.0, 120))
-    df = _df4h(mixed)
-    assert alignment_of(df) == "혼조"
-    assert leader_break.blocked(df, P) is True
+    """혼조는 그대로 제외 — 선을 셋 이상 볼 때의 얘기다."""
+    df = _mixed_frame()
+    assert alignment_of(df, THREE.exhausted_mas) == "혼조"
+    assert leader_break.blocked(df, THREE) is True
 
 
 def test_the_480_cut_applies_to_bullish_stacks_only():
