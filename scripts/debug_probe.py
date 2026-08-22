@@ -31,6 +31,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pandas as pd
 import requests
 
 from invest_signal import data_binance, indicators
@@ -825,6 +826,29 @@ with requests.Session() as sess:
         for d in want:
             if d not in daily.index.strftime("%Y-%m-%d"):
                 print(f"     {d}: 프레임 범위 밖 (750봉 = 약 125일)")
+
+        if want:
+            # ⚡ 게이트를 그 날짜의 4h봉마다 재현한다. 일봉 합계로는 부족하다 —
+            # 시그널이 보는 건 스캔 시점 기준 **롤링 24시간**이고, 대상 선정은
+            # 매 스캔 다시 하므로 하루 안에서도 통과/탈락이 갈린다.
+            roll = (df["Close"] * df["Volume"]).rolling(6).sum()
+            g24 = df["Close"] / df["Close"].shift(6) - 1
+            floor = 3_000_000
+            print(f"  -- ⚡ 게이트 재현 (롤링 24h · 거래대금 하한 ${floor / 1e6:.0f}M)")
+            for d in want:
+                for i in range(len(df)):
+                    t = df.index[i]
+                    if t.strftime("%Y-%m-%d") != d:
+                        continue
+                    al = indicators.alignment(df.iloc[:i + 1], (120, 240, 480))
+                    m = m480.iloc[i]
+                    over = (None if pd.isna(m)
+                            else float(df["Close"].iloc[i]) / float(m) - 1)
+                    print(f"     {t.strftime('%m-%d %H:%M')}Z  24h {g24.iloc[i] * 100:+6.1f}%"
+                          f"  거래대금 ${roll.iloc[i] / 1e6:6.2f}M "
+                          f"{'통과' if roll.iloc[i] >= floor else '미달'}"
+                          f"  배열 {al or '이력부족':<5}"
+                          f"  480선 {'—' if over is None else format(over, '+.0%')}")
 
         closed = df.iloc[:-1]                       # 시그널 재현은 마감봉 기준
         for mod in PROBES:
