@@ -26,22 +26,31 @@ def _falling_then_pop(n=200, pop=0.05):
     return base + [base[-1] * (1 + pop)]
 
 
-def _touching_slow(df, params=None):
-    """마지막 봉의 고가를 장기선까지 끌어올려 '터치'를 만든다.
+def _touch(df, params=None, fast=False):
+    """마지막 봉을 늘려 추세선에 닿게 만든다.
 
-    고가를 바꾸면 ATR이 바뀌어 선도 다시 계산되지만, 하락 추세의 장기선은
-    트레일링이라 위로는 안 움직인다 — 한두 번이면 수렴한다.
+    장기선(하락)은 위에 있으니 고가를 올리고, 단기선(상승)은 아래에 있으니
+    저가를 내린다. 폭을 바꾸면 ATR이 바뀌어 선도 다시 계산되는데, **전환
+    봉에는 트레일링 하한이 없어** 선이 내가 옮긴 쪽으로 계속 따라온다 —
+    그래서 선에 딱 맞추지 않고 5%쯤 지나쳐 잡는다.
     """
     p = params or Params()
     df = df.copy()
+    period, mult = ((p.fast_period, p.fast_mult) if fast
+                    else (p.slow_period, p.slow_mult))
+    want_dir, col, over = (1, "Low", 0.95) if fast else (-1, "High", 1.05)
     for _ in range(5):
-        slow = supertrend_full(df, p.slow_period, p.slow_mult)
-        line = float(slow["line"].iloc[-1])
-        if (slow["dir"].iloc[-1] < 0
+        st = supertrend_full(df, period, mult)
+        line = float(st["line"].iloc[-1])
+        if (np.sign(st["dir"].iloc[-1]) == want_dir
                 and df["Low"].iloc[-1] <= line <= df["High"].iloc[-1]):
             return df
-        df.iloc[-1, df.columns.get_loc("High")] = line
-    raise AssertionError("장기선 터치를 못 만들었다")
+        df.iloc[-1, df.columns.get_loc(col)] = line * over
+    raise AssertionError(f"{'단기선' if fast else '장기선'} 터치를 못 만들었다")
+
+
+def _touching_slow(df, params=None):
+    return _touch(df, params, fast=False)
 
 
 def _abc_frame(pop=0.05, params=None, gap=0, start="2026-01-01", n=200):
@@ -489,3 +498,26 @@ def test_quiet_is_stamped_on_both_variants_from_the_4h_frame():
     ev = detect(df, "XUSDT", p)[0]
     assert ev.detail["stage"] == IMPULSE
     assert ev.detail["quiet"] is True        # 첫 봉을 봤다면 거래대금 초과로 False
+
+
+def test_abc_fires_on_a_fast_line_touch_too():
+    """ⓐ는 장기선(저항)뿐 아니라 단기선(지지) 터치도 잡는다."""
+    p = Params(impulse_enabled=False, vwap_condition=False)
+    # 마지막 봉의 저가를 단기선까지 내려 '지지 터치'를 만든다
+    df = _touch(_frame(_falling_then_pop()), p, fast=True)
+    assert supertrend_full(df, p.fast_period, p.fast_mult)["dir"].iloc[-1] > 0
+
+    evs = detect(df, "XUSDT", p)
+    assert len(evs) == 1
+    assert evs[0].detail["stage"] == ABC
+    assert evs[0].detail["touched"] == wave_setup.FAST_LINE
+
+    # 단기선 쪽을 끄면 침묵한다 (장기선까진 못 닿은 자리다)
+    assert detect(df, "XUSDT", dataclasses_replace(p, abc_touch_fast=False)) == []
+
+
+def test_abc_slow_touch_is_labelled():
+    """장기선 터치는 그렇게 표시된다 — 두 자리를 줄에서 구분해야 한다."""
+    p = Params(impulse_enabled=False)
+    e = detect(_abc_frame(params=p), "XUSDT", p)[0]
+    assert e.detail["touched"] == wave_setup.SLOW_LINE
