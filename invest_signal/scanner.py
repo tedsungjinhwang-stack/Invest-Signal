@@ -166,6 +166,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         track_break_only=bool(s.get("track_break_only", True)),
         exhausted_filter=bool(s.get("exhausted_filter", True)),
         require_aligned=bool(s.get("require_aligned", True)),
+        allow_bearish=bool(s.get("allow_bearish", True)),
         allow_short_history=bool(s.get("allow_short_history", False)),
         exhausted_mas=tuple(s.get("exhausted_mas", (120, 240, 480))),
         exhausted_below=int(s.get("exhausted_below", 480)),
@@ -260,9 +261,16 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             detail["gain_24h"] = stat.get("change_pct")
             detail["turnover_24h"] = stat.get("quote_volume")
             # 거르지는 않고 '조용한 종목'만 표시 — 판단 불가면 키를 안 만든다
-            q = leader_break.quiet(stat, trend_frame(sym), params)
+            df4 = trend_frame(sym)
+            q = leader_break.quiet(stat, df4, params)
             if q is not None:
                 detail["quiet"] = q
+            # 정배열(추세 안의 눌림)과 역배열(하락 중 반등)이 한 칸에 섞이므로
+            # 어느 쪽인지 줄에 적는다 — notify가 align 키를 그대로 렌더한다.
+            if df4 is not None and len(df4):
+                al = indicators.alignment(df4, tuple(params.exhausted_mas))
+                if al:
+                    detail["align"] = al
             if sym in rank:
                 detail["rank"] = rank[sym]      # 지금도 상위권
             if since is not None:               # 상위권 밖 — 며칠째 감시 창에 있는지
@@ -283,7 +291,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     if spent:
         why = []
         if params.require_aligned:
-            why.append("4h 정배열 아님")
+            why.append("4h 혼조·이력부족" if params.allow_bearish else "4h 정배열 아님")
         if params.exhausted_filter:
             why.append(f"정배열이나 {params.exhausted_below}선 아래")
         log(f"[binance] 크립토 모멘텀 눌림목/이탈 제외 {len(spent)}/{len(watch)}종 "

@@ -41,7 +41,8 @@ class Params:
     max_watch: int = 60         # 한 스캔에서 15m 캔들을 받을 최대 종목 수
     track_break_only: bool = True   # 추적도 '20선 아래'인 동안만 (복귀하면 제외)
     exhausted_filter: bool = True        # 아래 blocked() 조건에 걸리면 대상에서 제외
-    require_aligned: bool = True         # 4h 정배열이 아니면 제외 (역배열·혼조 컷)
+    require_aligned: bool = True         # 4h 배열을 보는지 (끄면 배열 무관 전부 통과)
+    allow_bearish: bool = True           # 역배열도 통과 — 끄면 정배열만 (혼조는 항상 제외)
     allow_short_history: bool = False    # 이력이 짧아 배열 판정 불가면 통과시킬지
     exhausted_mas: tuple = (120, 240, 480)   # 4h봉 정배열 판정 3선
     exhausted_below: int = 480               # 정배열이어도 종가가 이 선 아래면 제외
@@ -97,21 +98,29 @@ def watch_list(top: list[tuple[str, dict]], recent: dict, symbols: set[str],
 
 
 def blocked(df4h: pd.DataFrame, params: Params = Params()) -> bool:
-    """대상에서 뺄 자리인지 — True면 제외. 조건 두 개를 함께 본다.
+    """대상에서 뺄 자리인지 — True면 제외.
 
-    ① **정배열이 아니면 제외**(require_aligned). 24h 상승률 상위라도 4h
-       구조가 역배열·혼조면 그 상승은 하락 추세 안의 반등이거나 방향이
-       아직 안 잡힌 것이다 — 주도주의 눌림으로 볼 자리가 아니다.
-    ② **정배열이어도 종가가 exhausted_below선 아래면 제외**
+    ① **정배열 또는 역배열만 통과**(require_aligned). 남는 건 혼조 컷이다 —
+       24h 상승률 상위여도 4h 구조가 혼조면 방향이 아직 안 잡힌 것이라
+       어느 쪽 시나리오로도 읽을 자리가 아니다.
+
+       정배열과 역배열은 성격이 정반대이지만 둘 다 판이 읽히는 자리다:
+       정배열은 상승 추세 안의 눌림, 역배열은 하락 추세 안의 반등이 꺾이는
+       자리다. 어느 쪽인지는 알림 줄의 배열 태그로 구분한다
+       (allow_bearish를 끄면 예전처럼 정배열만 남는다).
+    ② **정배열일 때만 종가가 exhausted_below선 아래면 제외**
        (exhausted_filter). 상승 구조가 완성된 상태에서 480선까지 밀렸으면
-       오를 만큼 오른 뒤 꺾인 것이라 새로 잡을 눌림이 아니다.
+       오를 만큼 오른 뒤 꺾인 것이라 새로 잡을 눌림이 아니다. **역배열엔
+       적용하지 않는다** — 역배열은 480선 아래인 게 정상이라, 걸면 역배열이
+       통째로 다시 잘린다.
 
     MA480을 못 구할 만큼 이력이 짧으면(상장 80일 미만) alignment가 None을
     주므로 ①에서 걸린다. 신규 상장이 24h 상승률 상위를 자주 차지하는
     만큼 이 컷은 체감이 크다 — 통과시키려면 allow_short_history를 켠다.
     """
     aligned = alignment(df4h, tuple(params.exhausted_mas))
-    if params.require_aligned and aligned != "정배열":
+    passable = {"정배열"} | ({"역배열"} if params.allow_bearish else set())
+    if params.require_aligned and aligned not in passable:
         if aligned is None and params.allow_short_history:
             return False        # 판단 불가는 통과 (설정으로 켰을 때만)
         return True

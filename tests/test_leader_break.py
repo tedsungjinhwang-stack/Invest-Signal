@@ -194,19 +194,13 @@ def test_blocked_excludes_bullish_stack_that_fell_under_the_long_ma():
     assert leader_break.blocked(df_down, P) is True
 
 
-def test_blocked_excludes_bearish_and_mixed_alignment():
-    """정배열만 통과 — 역배열·혼조는 24h 상승률 상위여도 제외."""
-    down = list(np.linspace(400.0, 100.0, 600))  # 우하향 → 역배열
-    df = _df4h(down)
-    assert alignment_of(df) == "역배열"
-    assert leader_break.blocked(df, P) is True
-    # require_aligned를 끄면 예전 동작 — 역배열은 통과한다
-    assert leader_break.blocked(df, Params(require_aligned=False)) is False
-
+def test_require_aligned_off_lets_even_mixed_through():
+    """require_aligned를 끄면 배열을 아예 안 본다 — 혼조까지 통과."""
     mixed = list(np.linspace(400.0, 100.0, 480)) + list(np.linspace(100.0, 300.0, 120))
-    df_mixed = _df4h(mixed)
-    assert alignment_of(df_mixed) == "혼조"
-    assert leader_break.blocked(df_mixed, P) is True
+    df = _df4h(mixed)
+    assert alignment_of(df) == "혼조"
+    assert leader_break.blocked(df, P) is True
+    assert leader_break.blocked(df, Params(require_aligned=False)) is False
 
 
 def test_blocked_excludes_short_history_unless_allowed():
@@ -216,9 +210,11 @@ def test_blocked_excludes_short_history_unless_allowed():
     assert leader_break.blocked(new_listing, P) is True
     assert leader_break.blocked(
         new_listing, Params(allow_short_history=True)) is False
-    # 판정이 되는데 정배열이 아닌 경우는 allow_short_history와 무관하게 제외
-    down = _df4h(np.linspace(400.0, 100.0, 600))
-    assert leader_break.blocked(down, Params(allow_short_history=True)) is True
+    # 판정이 되는데 통과 배열이 아닌 경우(혼조)는 allow_short_history와 무관하게 제외
+    mixed = _df4h(list(np.linspace(400.0, 100.0, 480))
+                  + list(np.linspace(100.0, 300.0, 120)))
+    assert alignment_of(mixed) == "혼조"
+    assert leader_break.blocked(mixed, Params(allow_short_history=True)) is True
 
 
 def test_filters_can_be_turned_off_independently():
@@ -297,3 +293,36 @@ def test_quiet_is_none_when_undecidable():
     assert leader_break.quiet({"quote_volume": 4e6}, None, P) is None   # 4h 없음
     short = _quiet_df4h(swing=0.01, bars=P.quiet_atr_period)     # ATR 미성립
     assert leader_break.quiet({"quote_volume": 4e6}, short, P) is None
+
+
+def test_blocked_lets_bearish_stacks_through():
+    """역배열도 통과 — 하락 추세 안의 반등이 꺾이는 자리로 본다."""
+    down = list(np.linspace(400.0, 100.0, 600))
+    df = _df4h(down)
+    assert alignment_of(df) == "역배열"
+    assert leader_break.blocked(df, P) is False
+    # allow_bearish를 끄면 예전 동작 — 정배열만 남는다
+    assert leader_break.blocked(df, Params(allow_bearish=False)) is True
+
+
+def test_blocked_still_cuts_mixed_alignment():
+    """혼조는 그대로 제외 — 방향이 안 잡힌 자리다."""
+    mixed = list(np.linspace(400.0, 100.0, 480)) + list(np.linspace(100.0, 300.0, 120))
+    df = _df4h(mixed)
+    assert alignment_of(df) == "혼조"
+    assert leader_break.blocked(df, P) is True
+
+
+def test_the_480_cut_applies_to_bullish_stacks_only():
+    """480선 컷은 정배열 전용 — 역배열은 그 아래인 게 정상이라 안 건다."""
+    up = list(np.linspace(100.0, 400.0, 600))
+    ma480 = float(pd.Series(up).rolling(480).mean().iloc[-1])
+    bull_below = _df4h(up + [ma480 - 20])
+    assert alignment_of(bull_below) == "정배열"
+    assert leader_break.blocked(bull_below, P) is True      # 정배열 + 480선 아래 → 컷
+
+    down = list(np.linspace(400.0, 100.0, 600))
+    bear = _df4h(down)
+    ref = float(pd.Series(down).rolling(480).mean().iloc[-1])
+    assert down[-1] < ref                                    # 역배열은 480선 아래가 정상
+    assert leader_break.blocked(bear, P) is False            # 그래도 통과
