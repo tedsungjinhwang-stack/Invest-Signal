@@ -536,3 +536,27 @@ def test_quiet_tag_shows_on_wave_lines_too():
     assert "🍃" not in new[1]
     hold = [ln for ln in out.splitlines() if ln.startswith("↳")][0]
     assert "🍃" in hold
+
+
+def test_bearish_momentum_rows_get_the_early_mark():
+    """⚡ 역배열은 🌱상승초기 마크로 갈라 보인다 — 정배열과 성격이 반대다."""
+    def lead(symbol, align, hold=False):
+        e = _leader(symbol, hold=hold)
+        e.detail["align"] = align
+        return e
+    out = format_events([lead("BEARUSDT", "역배열"), lead("BULLUSDT", "정배열")], [], {},
+                        ongoing_crypto=[lead("HBEARUSDT", "역배열", hold=True)])
+    new = {n: [ln for ln in out.splitlines() if f">{n}</a>" in ln][0]
+           for n in ("BEAR", "BULL")}
+    assert "🌱상승초기" in new["BEAR"]
+    assert "역배열" not in new["BEAR"].replace("🌱상승초기", "")   # 태그를 두 번 적지 않는다
+    assert "🌱" not in new["BULL"] and new["BULL"].endswith("정배열")
+    assert "🌱상승초기" in [ln for ln in out.splitlines() if ln.startswith("↳")][0]
+
+
+def test_early_mark_is_momentum_only():
+    """다른 시그널의 역배열은 그대로 글자 태그 — ⚡만 마크로 바꾼다."""
+    e = _hold("XUSDT", gain=0.01, extra={"align": "역배열"})
+    line = [ln for ln in format_events([], [], {}, ongoing_crypto=[e]).splitlines()
+            if ln.startswith("↳")][0]
+    assert "🌱" not in line

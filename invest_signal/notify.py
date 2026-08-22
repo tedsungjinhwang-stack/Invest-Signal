@@ -191,6 +191,8 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tags.append("⏳진행봉")     # 봉 미마감 잠정 판정 — 마감 때 되돌릴 수 있음
     if d.get("quiet"):
         tags.append(QUIET_TAG)      # 거래대금·변동성이 작은 종목 (leader_break.quiet)
+    if _early(e):
+        tags.append(EARLY_TAG)
     if e.signal in RETURN_SIGNALS:
         rt = _returns_tag(d)
         if rt:
@@ -220,7 +222,7 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
             if d.get("watch_days") is not None:
                 # 지금은 상위권 밖 — 등재 후 며칠째 추적 중인지
                 tags.append(f"추적 {d['watch_days']}일차")
-        if d.get("align"):
+        if d.get("align") and not _early(e):
             tags.append(d["align"])
     return head + (" · " + " · ".join(tags) if tags else "")
 
@@ -231,6 +233,18 @@ LEADER_LABEL = "크립토 모멘텀 눌림목/이탈"
 # 뜻이고, 거르지는 않는다 — 왜 이 축을 표시하는지는 leader_break.quiet 참고.
 # 줄 앞쪽(수익률보다 먼저)에 둔다: 뒤에 붙이면 모바일에서 줄바꿈에 묻힌다.
 QUIET_TAG = "🍃조용"
+
+# ⚡ 역배열 줄에 붙는 표시. 정배열이 '상승 추세 안의 눌림'이라면 역배열은
+# '하락 추세에서 막 돌아서는 자리'라 성격이 정반대인데, 두 종류가 한 칸에
+# 섞여 나오므로 눈에 띄는 마크로 가른다. 정배열은 뒤쪽 배열 태그 그대로.
+# (🌱는 꺼져 있는 🌱펌핑초기 칸의 이모지이기도 하다 — 그 시그널을 되살리면
+#  둘 중 하나를 바꿔야 한다.)
+EARLY_TAG = "🌱상승초기"
+
+
+def _early(e) -> bool:
+    """⚡의 역배열 줄인지 — 이 표시가 붙으면 뒤쪽 배열 태그는 생략한다."""
+    return e.signal == "leader_break" and e.detail.get("align") == "역배열"
 
 
 def _board_lines(board: list) -> list[str]:
@@ -283,6 +297,8 @@ def format_events(events_crypto: list, events_etf: list,
             tags = [f"{d['rank']}위" if d.get("rank")
                     else f"추적 {d.get('watch_days', 0)}일차",
                     f"{ma}선 위" if d.get("above_ma") else f"🔻{ma}선 아래"]
+            if _early(e):
+                tags.insert(0, EARLY_TAG)
             if d.get("quiet"):
                 tags.insert(0, QUIET_TAG)
             day = _daily_gain(d)
