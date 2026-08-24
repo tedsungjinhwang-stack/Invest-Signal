@@ -194,7 +194,7 @@ def test_blocked_excludes_bullish_stack_that_fell_under_the_long_ma():
     assert leader_break.blocked(df_down, P) is True
 
 
-THREE = Params(exhausted_mas=(120, 240, 480))    # 혼조가 나오려면 선이 셋 이상
+THREE = Params(exhausted_mas=(120, 240, 480))    # 기본값과 같다 — 의도를 드러내려고 따로 둔다
 
 
 def _mixed_frame():
@@ -204,9 +204,9 @@ def _mixed_frame():
 
 
 def test_two_line_alignment_has_no_mixed_state():
-    """기본값(120·240)은 선이 둘이라 정배열/역배열뿐 — 혼조가 안 나온다.
+    """선을 둘로 줄이면 혼조가 안 나온다 — 컷이 '120선 > 240선' 하나가 된다.
 
-    컷이 '120선이 240선 위인가' 하나로 단순해진다는 뜻이다.
+    exhausted_mas에서 480을 뺄 때 무엇이 달라지는지 고정해 둔다.
     """
     df = _mixed_frame()
     assert alignment_of(df, (120, 240, 480)) == "혼조"
@@ -225,11 +225,9 @@ def test_require_aligned_off_lets_even_mixed_through():
 def test_blocked_excludes_short_history_unless_allowed():
     """가장 긴 선이 안 잡히면 배열 판정 불가 — 기본은 제외.
 
-    기본값은 240봉(40일)이 요건이다. 480을 배열 판정에서 뺐기 때문에 예전
-    80일에서 내려왔다 — 상장 40~80일 종목은 배열은 잡히고 MA480이 없어
-    exhausted_below 검사를 그냥 통과하므로 새로 들어온다.
+    기본값은 480봉(80일)이 요건이라 신규 상장이 자동으로 걸린다.
     """
-    new_listing = _df4h(np.linspace(100.0, 200.0, 200))
+    new_listing = _df4h(np.linspace(100.0, 200.0, 300))
     assert alignment_of(new_listing) is None
     assert leader_break.blocked(new_listing, P) is True
     assert leader_break.blocked(

@@ -44,7 +44,7 @@ class Params:
     require_aligned: bool = True         # 4h 배열을 보는지 (끄면 배열 무관 전부 통과)
     allow_bearish: bool = False          # 켜면 역배열도 통과 (혼조는 어느 쪽이든 제외)
     allow_short_history: bool = False    # 이력이 짧아 배열 판정 불가면 통과시킬지
-    exhausted_mas: tuple = (120, 240)    # 4h봉 정배열 판정선 (480은 아래에서 따로)
+    exhausted_mas: tuple = (120, 240, 480)   # 4h봉 정배열 판정 3선
     exhausted_below: int = 480               # 정배열이어도 종가가 이 선 아래면 제외
     # '조용한' 종목 표시 기준 — 거르지 않고 태그만 붙인다(quiet() 참고)
     quiet_turnover_usd: float = 6_000_000    # 24h 거래대금이 이 아래이고
