@@ -44,6 +44,6 @@ jobs:
           PROBE_BAD: "15"          # 쪽박 기준 — 7일 내 MAE ≤ -15%
           PROBE_FLOORS: "1,2,3,5,10"
           PROBE_RECENT_MSGS: "6"
-          PROBE_SYMBOLS: "NIGHTUSDT"
-          PROBE_DAYS: "2026-08-19,2026-08-20,2026-08-21"
+          PROBE_SYMBOLS: "TLMUSDT"
+          PROBE_DAYS: "2026-08-21,2026-08-22,2026-08-23"
         run: python scripts/debug_probe.py
