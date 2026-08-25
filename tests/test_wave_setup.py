@@ -89,15 +89,20 @@ def test_abc_fires_when_a_recent_flip_reaches_the_slow_line():
     assert e.price < e.detail["slow_line"]      # 터치지 돌파가 아니다
 
 
-def test_abc_silent_when_the_flip_never_reaches_the_slow_line():
-    """단기가 뒤집혀도 장기선까지 못 닿으면 발화하지 않는다 — 예전 정의와의 차이."""
+def test_abc_fires_on_the_flip_itself():
+    """전환 봉은 그 자리에서 '단기선 돌파'로 알린다 — 되돌림을 기다리지 않는다."""
     df = _frame(_falling_then_pop())
     p = Params(impulse_enabled=False)
     fast = supertrend_full(df, p.fast_period, p.fast_mult)["dir"]
     slow = supertrend_full(df, p.slow_period, p.slow_mult)
-    assert fast.iloc[-1] > 0 and slow["dir"].iloc[-1] < 0    # 전환은 했다
-    assert df["High"].iloc[-1] < float(slow["line"].iloc[-1])  # 선까진 멀다
-    assert detect(df, "XUSDT", p) == []
+    assert fast.iloc[-1] > 0 and slow["dir"].iloc[-1] < 0      # 전환은 했다
+    assert df["High"].iloc[-1] < float(slow["line"].iloc[-1])  # 장기선까진 멀다
+
+    e = detect(df, "XUSDT", p)[0]
+    assert e.detail["touched"] == wave_setup.FAST_LINE
+    assert e.detail["kind"] == wave_setup.BREAK
+    # 전환 트리거를 끄면 침묵한다 — 어느 선에도 안 닿은 자리다
+    assert detect(df, "XUSDT", dataclasses_replace(p, abc_flip=False)) == []
 
 
 def test_abc_silent_when_the_flip_is_too_old():
@@ -507,13 +512,20 @@ def test_abc_fires_on_a_fast_line_touch_too():
     df = _touch(_frame(_falling_then_pop()), p, fast=True)
     assert supertrend_full(df, p.fast_period, p.fast_mult)["dir"].iloc[-1] > 0
 
-    evs = detect(df, "XUSDT", p)
+    # 이 봉은 전환 봉이기도 하다 — 우선순위상 '돌파'가 먼저 잡힌다
+    assert detect(df, "XUSDT", p)[0].detail["kind"] == wave_setup.BREAK
+
+    # 전환 트리거를 빼면 같은 봉이 '단기선 터치'로 잡힌다
+    only_touch = dataclasses_replace(p, abc_flip=False)
+    evs = detect(df, "XUSDT", only_touch)
     assert len(evs) == 1
     assert evs[0].detail["stage"] == ABC
     assert evs[0].detail["touched"] == wave_setup.FAST_LINE
+    assert evs[0].detail["kind"] == wave_setup.TOUCH
 
-    # 단기선 쪽을 끄면 침묵한다 (장기선까진 못 닿은 자리다)
-    assert detect(df, "XUSDT", dataclasses_replace(p, abc_touch_fast=False)) == []
+    # 둘 다 끄면 침묵한다 (장기선까진 못 닿은 자리다)
+    assert detect(df, "XUSDT",
+                  dataclasses_replace(only_touch, abc_touch_fast=False)) == []
 
 
 def test_abc_slow_touch_is_labelled():

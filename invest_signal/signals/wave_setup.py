@@ -40,8 +40,10 @@ INTRABAR_OK = True          # 진행봉을 잠정 종가로 판정 — 알림에
 BARS_PER_DAY = 6            # 4h × 6 = 하루
 
 ABC = "ABC"                 # 4h — 최근 상승 전환 후 추세선 터치
-SLOW_LINE = "장기선"          # ⓐ가 닿은 선 (detail["touched"])
+SLOW_LINE = "장기선"          # ⓐ가 건드린 선 (detail["touched"])
 FAST_LINE = "단기선"
+TOUCH = "터치"                # 어떻게 건드렸는지 (detail["kind"])
+BREAK = "돌파"
 IMPULSE = "임펄스"           # 일봉 터치
 
 # 알림 줄에 붙일 수익률 구간 — 이 시그널에만 있다. 봉 개수가 아니라 시각으로
@@ -75,6 +77,9 @@ class Params:
     # 자리), 단기선은 아래쪽 지지(전환한 선을 다시 눌러 보는 자리)다.
     abc_touch_slow: bool = True
     abc_touch_fast: bool = True
+    # 전환 봉 자체도 알린다 — 단기선을 뚫고 마감한 순간. 되돌림을 기다리지
+    # 않고 그 자리에서 잡고 싶을 때가 있어서 세 번째 트리거로 둔다.
+    abc_flip: bool = True
     grace_bars: int = 1         # 4h 지각 허용 봉 수 (스캔을 놓쳤을 때 소급)
     daily_grace_bars: int = 1   # 일봉 지각 허용 봉 수 — 하루 1봉이라 따로 둔다
     include_live_day: bool = False   # 진행 중인 오늘을 일봉에 포함 (인트라바 스캔)
@@ -271,11 +276,13 @@ def _detect_abc(df: pd.DataFrame, symbol: str, params: Params,
                 rets: dict, vwap_ok) -> list[SignalEvent]:
     """ⓐ 4h — 단기가 **최근에** 상승 전환했고, 캔들이 추세선을 터치한 봉.
 
-    단기 수퍼트렌드가 하락에서 상승으로 뒤집힌 뒤(= 종가가 단기 추세선을
-    넘긴 뒤), 그 반등이 어느 선을 건드리는지를 본다. 두 자리 다 알린다:
+    단기 수퍼트렌드가 하락에서 상승으로 뒤집히는 순간과, 그 뒤 반등이 어느
+    선을 건드리는지를 본다. 세 자리 다 알린다:
 
-      **장기선**(위쪽 저항) — 반등이 아직 하락인 장기 추세선까지 되돌린 자리.
-      **단기선**(아래쪽 지지) — 방금 넘긴 선을 다시 눌러 보는 자리.
+      **단기선 돌파**(abc_flip) — 단기가 상승으로 뒤집힌 봉 자체. 종가가
+        단기 추세선을 넘겨 마감한 자리이고, 되돌림을 기다리지 않는다.
+      **장기선 터치**(위쪽 저항) — 반등이 아직 하락인 장기선까지 되돌린 자리.
+      **단기선 터치**(아래쪽 지지) — 방금 넘긴 선을 다시 눌러 보는 자리.
 
     장기가 하락이면 장기선은 상단 밴드라 저항이고, 종가가 그 선을 넘겼다면
     장기도 뒤집혀 여기 안 걸린다 — '터치'와 '돌파'는 자동으로 갈린다
@@ -311,10 +318,22 @@ def _detect_abc(df: pd.DataFrame, symbol: str, params: Params,
         line = st["line"].iloc[i]
         return not pd.isna(line) and low.iloc[i] <= line <= high.iloc[i]
 
-    # 장기선을 먼저 본다 — 한 봉에서 둘 다 닿으면 저항 쪽이 더 큰 사건이고,
-    # dedup 키가 (종목·봉·stage)라 어차피 하나만 남는다.
-    lines = ([(SLOW_LINE, slow)] if params.abc_touch_slow else []) \
-        + ([(FAST_LINE, fast)] if params.abc_touch_fast else [])
+    def flipping(t: int) -> bool:
+        """이 봉에서 단기가 상승으로 뒤집혔는지 — 장기는 아직 하락."""
+        return _up(fast, t) and _down(fast, t - 1) and _down(slow, t)
+
+    # 한 봉이 여러 조건에 걸리면 앞의 것 하나만 남는다 — dedup 키가
+    # (종목·봉·stage)라 어차피 하나뿐이고, 순서가 곧 우선순위다.
+    # 장기선 터치(저항 도달) > 단기선 돌파(전환) > 단기선 터치(지지 확인).
+    checks = []
+    if params.abc_touch_slow:
+        checks.append((SLOW_LINE, TOUCH,
+                       lambda t: touching(t, slow) and not touching(t - 1, slow)))
+    if params.abc_flip:
+        checks.append((FAST_LINE, BREAK, flipping))
+    if params.abc_touch_fast:
+        checks.append((FAST_LINE, TOUCH,
+                       lambda t: touching(t, fast) and not touching(t - 1, fast)))
 
     look = params.grace_bars
     if params.abc_track_days > 0:
@@ -323,12 +342,13 @@ def _detect_abc(df: pd.DataFrame, symbol: str, params: Params,
     for t in range(max(1, n - 1 - look), n):
         if not vwap_ok(t):
             continue
-        for name, st in lines:
+        for name, kind, hit in checks:
             # 연속 터치는 첫 봉만 — 선마다 따로 센다. 장기선을 며칠 훑고 있는
             # 중에 단기선을 새로 누르면 그건 별개의 사건이다.
-            if touching(t, st) and not touching(t - 1, st):
+            if hit(t):
                 e = _event(df, symbol, t, ABC, fast, slow, params, rets)
                 e.detail["touched"] = name
+                e.detail["kind"] = kind
                 out.append(e)
                 break
     return out

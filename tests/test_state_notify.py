@@ -420,7 +420,7 @@ def test_wave_tracking_gets_one_subheader_per_variant():
            _wave("CUSDT", "임펄스", 0.30), _wave("DUSDT", "임펄스", 0.05)]
     out = format_events([], [], {}, ongoing_crypto=evs)
     body = [ln for ln in out.splitlines() if ln.startswith("↳ ") or "ⓐ" in ln or "ⓑ" in ln]
-    assert body[0].strip().startswith("ⓐ") and "4h 추세선 터치" in body[0]
+    assert body[0].strip().startswith("ⓐ") and "4h 돌파·터치" in body[0]
     assert [ln.split()[1] for ln in body[1:3]] == ["A", "B"]
     assert body[3].strip().startswith("ⓑ") and "일봉 터치" in body[3]
     assert [ln.split()[1] for ln in body[4:6]] == ["C", "D"]

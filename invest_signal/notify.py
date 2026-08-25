@@ -155,7 +155,7 @@ def _returns_tag(d: dict) -> str | None:
 # 소제목이 수익률 세 칸의 순서까지 말해 준다 — 줄에서는 숫자만 이어 붙여
 # 폭을 줄인다. 파동 줄은 라벨을 반복하면 62칸이 되어 폰에서 두 줄로 접힌다
 # (다른 칸은 41칸이라 한 줄에 들어간다).
-WAVE_HEADERS = {"ABC": "  ⓐ <b>ABC</b> · 4h 추세선 터치 · 4h/24h/7d",
+WAVE_HEADERS = {"ABC": "  ⓐ <b>ABC</b> · 4h 돌파·터치 · 4h/24h/7d",
                 "임펄스": "  ⓑ <b>임펄스</b> · 일봉 터치 · 4h/24h/7d"}
 
 
@@ -182,7 +182,7 @@ def _wave_tag(d: dict) -> str:
     """
     stage = d.get("stage", "")
     line = d.get("touched") or ("장기선" if stage == "ABC" else "단기선")
-    return f"{stage} {line} 터치"
+    return f"{stage} {line} {d.get('kind', '터치')}"
 
 
 def _event_line(e, url: str, name: str, kind: str) -> str:
@@ -321,9 +321,9 @@ def format_events(events_crypto: list, events_etf: list,
             if rt:
                 tags.append(rt)
             if d.get("touched"):
-                # ⓐ는 장기선·단기선 두 자리를 다 잡으므로 소제목만으론
-                # 구분이 안 된다. 세 글자라 한 줄 폭에 들어간다.
-                tags.append(d["touched"])
+                # ⓐ는 세 자리를 다 잡으므로 소제목만으론 구분이 안 된다.
+                # 돌파는 선이 하나뿐이라 '돌파'만 적으면 짧고 명확하다.
+                tags.append("돌파" if d.get("kind") == "돌파" else d["touched"])
         else:
             day = _daily_gain(d)
             if day is not None:
