@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 
+from invest_signal.indicators import supertrend_full
 from invest_signal.signals import leader_break
 from invest_signal.signals.leader_break import Params
 
@@ -390,3 +391,42 @@ def test_retrace_is_none_below_the_threshold():
 
 def test_retrace_off_by_config():
     assert leader_break.retrace(_wave_frame(), Params(fib_enabled=False)) is None
+
+
+def _turn_frame(n=200, pop=0.06, rising=True):
+    """4h 프레임 — 길게 오르다 눌린 뒤 마지막 봉에서 되살아나는 모양."""
+    if rising:
+        base = list(np.linspace(100.0, 300.0, n - 30))      # 장기 상승 만들기
+        base += list(np.linspace(300.0, 250.0, 29))         # 눌림 (단기만 하락)
+    else:
+        base = list(np.linspace(300.0, 100.0, n - 1))
+    return _df4h(base + [base[-1] * (1 + pop)])
+
+
+def test_turn_up_needs_the_long_term_rising():
+    """4h 장기가 상승인 채로 단기가 막 뒤집혀야 한다."""
+    up = _turn_frame()
+    fast = supertrend_full(up, P.turn_fast_period, P.turn_fast_mult)["dir"]
+    slow = supertrend_full(up, P.turn_slow_period, P.turn_slow_mult)["dir"]
+    assert slow.iloc[-1] > 0 and fast.iloc[-1] > 0 and fast.iloc[-2] < 0
+    assert leader_break.turn_up(up, P) is True
+
+    # 장기가 하락이면 이 자리가 아니다 (그건 파동 ⓐABC가 잡는 자리)
+    down = _turn_frame(rising=False)
+    assert supertrend_full(down, P.turn_slow_period, P.turn_slow_mult)["dir"].iloc[-1] < 0
+    assert leader_break.turn_up(down, P) is False
+
+
+def test_turn_up_holds_for_a_few_bars():
+    """전환 봉 하나만 보면 4시간 만에 사라진다 — turn_bars 안이면 계속 표시."""
+    df = _turn_frame()
+    last = float(df["Close"].iloc[-1])
+    later = _df4h(list(df["Close"]) + [last * 1.001, last * 1.002])
+    assert leader_break.turn_up(later, P) is True                  # 2봉 뒤에도 유지
+    assert leader_break.turn_up(later, Params(turn_bars=1)) is False  # 창을 좁히면 빠짐
+
+
+def test_turn_up_is_none_when_undecidable():
+    assert leader_break.turn_up(None, P) is None
+    assert leader_break.turn_up(_df4h(np.linspace(100.0, 110.0, 20)), P) is None
+    assert leader_break.turn_up(_turn_frame(), Params(turn_enabled=False)) is None

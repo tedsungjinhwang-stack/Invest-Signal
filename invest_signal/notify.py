@@ -196,6 +196,8 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tags.append(QUIET_TAG)      # 거래대금·변동성이 작은 종목 (leader_break.quiet)
     if _early(e):
         tags.append(EARLY_TAG)
+    if d.get("turn_up"):
+        tags.append(TURN_TAG)
     ft = _fib_tag(d)
     if ft:
         tags.append(ft)
@@ -239,6 +241,10 @@ LEADER_LABEL = "크립토 모멘텀 눌림목/이탈"
 # 뜻이고, 거르지는 않는다 — 왜 이 축을 표시하는지는 leader_break.quiet 참고.
 # 줄 앞쪽(수익률보다 먼저)에 둔다: 뒤에 붙이면 모바일에서 줄바꿈에 묻힌다.
 QUIET_TAG = "🍃조용"
+
+# ⚡ 줄에만. 4h 장기가 상승인 채로 단기가 막 상승 전환한 자리 —
+# 눌림이 끝나고 다시 붙는 지점이다(leader_break.turn_up).
+TURN_TAG = "🔼단기전환"
 
 # ⚡ 역배열 줄에 붙는 표시. 정배열이 '상승 추세 안의 눌림'이라면 역배열은
 # '하락 추세에서 막 돌아서는 자리'라 성격이 정반대인데, 두 종류가 한 칸에
@@ -318,6 +324,8 @@ def format_events(events_crypto: list, events_etf: list,
             ft = _fib_tag(d)
             if ft:
                 tags.insert(0, ft)
+            if d.get("turn_up"):
+                tags.insert(0, TURN_TAG)
             if _early(e):
                 tags.insert(0, EARLY_TAG)
             if d.get("quiet"):

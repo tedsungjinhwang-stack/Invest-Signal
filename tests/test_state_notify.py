@@ -581,3 +581,19 @@ def test_no_fib_tag_without_the_value():
     """값이 없으면 아무것도 안 붙는다."""
     out = format_events([_leader("XUSDT")], [], {})
     assert "📐" not in out
+
+
+def test_turn_up_mark_on_momentum_rows():
+    """🔼단기전환은 ⚡ 신규·추적 양쪽에 붙고, 없으면 안 붙는다."""
+    def lead(symbol, turn, hold=False):
+        e = _leader(symbol, hold=hold)
+        if turn:
+            e.detail["turn_up"] = True
+        return e
+    out = format_events([lead("TURNUSDT", True), lead("FLATUSDT", False)], [], {},
+                        ongoing_crypto=[lead("HTURNUSDT", True, hold=True)])
+    line = {n: [ln for ln in out.splitlines() if f">{n}</a>" in ln][0]
+            for n in ("TURN", "FLAT")}
+    assert "🔼단기전환" in line["TURN"]
+    assert "🔼" not in line["FLAT"]
+    assert "🔼단기전환" in [ln for ln in out.splitlines() if ln.startswith("↳")][0]

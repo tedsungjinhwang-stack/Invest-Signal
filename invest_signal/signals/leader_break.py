@@ -59,6 +59,14 @@ class Params:
     fib_slow_period: int = 30       # 장기 수퍼트렌드 — 저점 구간의 시작
     fib_slow_mult: float = 6.0
     fib_min: float = 0.618          # 이 아래면 표시하지 않는다
+    # 🔼 단기전환 — 4h 장기가 상승인 채로 단기가 하락→상승으로 뒤집힌 자리.
+    # 눌림이 끝나고 다시 붙는 지점이다(되돌림이 '얼마나'라면 이건 '언제').
+    turn_enabled: bool = True
+    turn_fast_period: int = 22
+    turn_fast_mult: float = 3.0
+    turn_slow_period: int = 30
+    turn_slow_mult: float = 6.0
+    turn_bars: int = 3              # 전환 후 이 봉 수까지 표시 (3 × 4h = 12시간)
 
 
 def leaders(ticker: dict[str, dict], symbols: set[str],
@@ -240,6 +248,39 @@ def retrace(df: pd.DataFrame, params: Params = Params()) -> float | None:
     lo, hi = wave
     back = (hi - float(df["Close"].iloc[-1])) / (hi - lo)
     return back if back >= params.fib_min else None
+
+
+def turn_up(df4h: pd.DataFrame, params: Params = Params()) -> bool | None:
+    """4h에서 **장기는 상승인 채로 단기가 막 상승 전환**했는지.
+
+    눌림이 끝나고 다시 붙는 자리다. 📐되돌림이 '얼마나 밀렸나'를 말한다면
+    이건 '돌아섰나'를 말한다 — 되돌림 레벨에 닿는 것과 거기서 반등하는 건
+    다른 사건이고, 진입은 후자에서 난다.
+
+    장기가 **상승**이어야 한다는 게 파동 ⓐABC와 정반대다. 거기선 하락 추세
+    안의 반등을 잡지만, 여기는 이미 선 추세 안의 눌림이 끝나는 자리다.
+
+    전환 봉 하나만 보면 표시가 4시간 만에 사라진다 — 스캔은 매시간 도는데
+    그 사이 상태는 그대로다. turn_bars(기본 3봉 = 12시간) 안에 전환이 있으면
+    계속 표시한다. 판단할 봉이 모자라면 None.
+    """
+    if not params.turn_enabled or df4h is None:
+        return None
+    need = max(params.turn_fast_period, params.turn_slow_period) + 2
+    if len(df4h) < need:
+        return None
+    fast = supertrend_full(df4h, params.turn_fast_period, params.turn_fast_mult)
+    slow = supertrend_full(df4h, params.turn_slow_period, params.turn_slow_mult)
+    last = len(df4h) - 1
+    sd = slow["dir"].iloc[last]
+    if pd.isna(sd) or sd <= 0:
+        return False                    # 장기가 상승이 아니면 이 자리가 아니다
+    fd = fast["dir"]
+    for i in range(last, max(0, last - params.turn_bars), -1):
+        a, b = fd.iloc[i - 1], fd.iloc[i]
+        if not pd.isna(a) and not pd.isna(b) and b > 0 >= a:
+            return True
+    return False
 
 
 def tracking(df: pd.DataFrame, params: Params = Params()) -> dict | None:
