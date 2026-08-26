@@ -196,6 +196,9 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tags.append(QUIET_TAG)      # 거래대금·변동성이 작은 종목 (leader_break.quiet)
     if _early(e):
         tags.append(EARLY_TAG)
+    ft = _fib_tag(d)
+    if ft:
+        tags.append(ft)
     if e.signal in RETURN_SIGNALS:
         rt = _returns_tag(d)
         if rt:
@@ -243,6 +246,18 @@ QUIET_TAG = "🍃조용"
 # (🌱는 꺼져 있는 🌱펌핑초기 칸의 이모지이기도 하다 — 그 시그널을 되살리면
 #  둘 중 하나를 바꿔야 한다.)
 EARLY_TAG = "🌱상승초기"
+
+
+def _fib_tag(d: dict) -> str | None:
+    """📐 되돌림 — 직전 파동의 고점·저점 대비 지금 어디까지 밀렸는지.
+
+    1.0을 넘으면 저점을 깬 것이라 되돌림이 아니라 이탈이다. 구간 이름
+    (0.618/0.786)이 아니라 실제 값을 적는다 — 어디쯤인지가 바로 보인다.
+    """
+    v = d.get("fib")
+    if v is None:
+        return None
+    return f"📐{v:.2f} 저점이탈" if v >= 1.0 else f"📐{v:.2f}"
 
 
 def _early(e) -> bool:
@@ -300,6 +315,9 @@ def format_events(events_crypto: list, events_etf: list,
             tags = [f"{d['rank']}위" if d.get("rank")
                     else f"추적 {d.get('watch_days', 0)}일차",
                     f"{ma}선 위" if d.get("above_ma") else f"🔻{ma}선 아래"]
+            ft = _fib_tag(d)
+            if ft:
+                tags.insert(0, ft)
             if _early(e):
                 tags.insert(0, EARLY_TAG)
             if d.get("quiet"):

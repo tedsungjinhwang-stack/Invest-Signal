@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..indicators import alignment, atr, pct_over, sma
+from ..indicators import alignment, atr, pct_over, sma, supertrend_full
 from . import SignalEvent
 
 NAME = "leader_break"
@@ -50,6 +50,15 @@ class Params:
     quiet_turnover_usd: float = 6_000_000    # 24h 거래대금이 이 아래이고
     quiet_atr_pct: float = 0.073             # 4h ATR÷종가가 이 아래면 조용
     quiet_atr_period: int = 14
+    # 📐 되돌림 표시 — 30m 파동의 저점·고점 대비 지금 어디까지 밀렸는지.
+    fib_enabled: bool = True
+    fib_interval: str = "30m"       # 파동을 재는 봉
+    fib_limit: int = 500            # 받아올 봉 수 (500 × 30m ≈ 10일)
+    fib_fast_period: int = 22       # 단기 수퍼트렌드 — 파동의 시작·끝
+    fib_fast_mult: float = 3.0
+    fib_slow_period: int = 30       # 장기 수퍼트렌드 — 저점 구간의 시작
+    fib_slow_mult: float = 6.0
+    fib_min: float = 0.618          # 이 아래면 표시하지 않는다
 
 
 def leaders(ticker: dict[str, dict], symbols: set[str],
@@ -160,6 +169,77 @@ def quiet(stat: dict | None, df4h: pd.DataFrame | None,
         return None
     return bool(float(turnover) < params.quiet_turnover_usd
                 and float(a) / close < params.quiet_atr_pct)
+
+
+def last_wave(df: pd.DataFrame, params: Params = Params()):
+    """마지막으로 **닫힌** 파동의 (저점, 고점). 없으면 None.
+
+    파동 한 사이클:
+        장기 하락 전환 ─┐  이 구간 최저 저가 = 저점
+        단기 상향 돌파 ─┘
+                        │  이 구간 최고 고가 = 고점
+        단기 하향 돌파 ──  파동 확정 (= 눌림 시작)
+
+    저점은 **장기가 다시 깨질 때까지 고정**이다. 그동안 단기가 여러 번
+    오르내리면 같은 저점에 고점만 다른 파동이 이어진다 — 되돌림을 매번
+    원래 파동 바닥 기준으로 재려는 것이다.
+
+    저점 구간을 장기 기준으로 잡는 이유: 장기는 단기보다 늦게 깨지므로
+    그 창이 하락의 깊은 부분만 덮고, 하락 중의 잔 반등에 흔들리지 않는다.
+    단기 기준으로 자르면 마지막 짧은 다리만 봐서 진짜 바닥을 놓친다.
+    """
+    n = len(df)
+    if n < max(params.fib_fast_period, params.fib_slow_period) + 2:
+        return None
+    fast = supertrend_full(df, params.fib_fast_period, params.fib_fast_mult)
+    slow = supertrend_full(df, params.fib_slow_period, params.fib_slow_mult)
+    fd, sd = fast["dir"], slow["dir"]
+    high, low = df["High"], df["Low"]
+
+    def flip(series, i, up):
+        a, b = series.iloc[i - 1], series.iloc[i]
+        if pd.isna(a) or pd.isna(b):
+            return False
+        return (b > 0 >= a) if up else (b < 0 <= a)
+
+    lo = lo_from = start = None
+    closed = None
+    for i in range(1, n):
+        if flip(sd, i, up=False):           # 장기 하락 전환 → 저점 구간 시작
+            lo, lo_from, start = None, i, None
+        if flip(fd, i, up=True):            # 단기 상향 돌파 → 파동 시작
+            if lo is None:
+                if lo_from is None:
+                    continue                # 장기 전환을 아직 못 봤다
+                lo = float(low.iloc[lo_from:i + 1].min())
+            start = i
+        elif start is not None and flip(fd, i, up=False):
+            closed = (lo, float(high.iloc[start:i].max()))
+            start = None
+    if closed is None or closed[1] <= closed[0]:
+        return None
+    return closed
+
+
+def retrace(df: pd.DataFrame, params: Params = Params()) -> float | None:
+    """마지막 닫힌 파동 대비 **지금** 되돌림 비율. 표시 기준 미만이면 None.
+
+    (고점 − 현재가) ÷ (고점 − 저점). 1.0을 넘으면 저점을 깬 것이라
+    되돌림이 아니라 이탈인데, 값은 그대로 돌려주고 표시 쪽에서 가른다.
+
+    매 스캔 현재가로 다시 재는 값이다 — 되돌아 올라가면 표시도 사라진다.
+    파동이 닫힌 시점의 값으로 재면 안 된다: 단기 수퍼트렌드는 고점에서
+    조금만 밀려도 뒤집혀서, 그 순간 되돌림은 구조적으로 0.3 언저리다
+    (PTB 10일 실측 9개 파동이 전부 0.09~0.34였다).
+    """
+    if not params.fib_enabled or not len(df):
+        return None
+    wave = last_wave(df, params)
+    if wave is None:
+        return None
+    lo, hi = wave
+    back = (hi - float(df["Close"].iloc[-1])) / (hi - lo)
+    return back if back >= params.fib_min else None
 
 
 def tracking(df: pd.DataFrame, params: Params = Params()) -> dict | None:

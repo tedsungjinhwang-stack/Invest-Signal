@@ -349,3 +349,44 @@ def test_the_480_cut_applies_to_bullish_stacks_only():
     assert down[-1] < ref                                    # 역배열은 480선 아래가 정상
     # allow_bearish를 켠 상태에서도 480선 컷은 역배열에 걸리지 않는다
     assert leader_break.blocked(bear, Params(allow_bearish=True)) is False
+
+
+def _wave_frame(down=150, up=150, back=100, top=120.0, bottom=60.0, start=100.0):
+    """하락 → 상승 → 되돌림 3구간짜리 30m 프레임."""
+    c = np.concatenate([np.linspace(start, bottom, down),
+                        np.linspace(bottom, top, up),
+                        np.linspace(top, top - (top - bottom) * 0.75, back)])
+    idx = pd.date_range("2026-08-01", periods=len(c), freq="30min", tz="UTC")
+    return pd.DataFrame({"Open": c, "High": c * 1.004, "Low": c * 0.996,
+                         "Close": c, "Volume": 1000.0}, index=idx)
+
+
+def test_last_wave_spans_the_bottom_to_the_peak():
+    """저점은 하락 구간 바닥, 고점은 그 뒤 상승 구간 꼭대기."""
+    df = _wave_frame()
+    lo, hi = leader_break.last_wave(df, P)
+    assert 59 < lo < 62          # 바닥 60 근처
+    assert 118 < hi < 122        # 꼭대기 120 근처
+
+
+def test_retrace_measures_from_the_current_price():
+    """되돌림은 지금 가격 기준 — 파동이 닫힌 시점 값이 아니다."""
+    df = _wave_frame()
+    lo, hi = leader_break.last_wave(df, P)
+    got = leader_break.retrace(df, P)
+    expected = (hi - float(df["Close"].iloc[-1])) / (hi - lo)
+    assert got == expected
+    assert 0.7 < got < 0.8       # 75% 되돌린 프레임
+
+
+def test_retrace_is_none_below_the_threshold():
+    """기준(기본 0.618) 미만이면 표시하지 않는다."""
+    shallow = _wave_frame(back=100, top=120.0, bottom=60.0)
+    shallow = shallow.iloc[:-60]          # 덜 되돌린 시점에서 자른다
+    v = leader_break.retrace(shallow, P)
+    assert v is None or v >= P.fib_min
+    assert leader_break.retrace(_wave_frame(), Params(fib_min=0.99)) is None
+
+
+def test_retrace_off_by_config():
+    assert leader_break.retrace(_wave_frame(), Params(fib_enabled=False)) is None

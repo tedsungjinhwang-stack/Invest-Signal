@@ -560,3 +560,24 @@ def test_early_mark_is_momentum_only():
     line = [ln for ln in format_events([], [], {}, ongoing_crypto=[e]).splitlines()
             if ln.startswith("↳")][0]
     assert "🌱" not in line
+
+
+def test_fib_tag_shows_the_actual_ratio():
+    """📐는 구간 이름이 아니라 실제 되돌림 값 — 1.0 이상은 저점이탈."""
+    def lead(symbol, fib, hold=False):
+        e = _leader(symbol, hold=hold)
+        e.detail["fib"] = fib
+        return e
+    out = format_events([lead("AUSDT", 0.73), lead("BUSDT", 1.032)], [], {},
+                        ongoing_crypto=[lead("CUSDT", 0.9, hold=True)])
+    line = {n: [ln for ln in out.splitlines() if f">{n}</a>" in ln][0]
+            for n in ("A", "B")}
+    assert "📐0.73" in line["A"] and "저점이탈" not in line["A"]
+    assert "📐1.03 저점이탈" in line["B"]
+    assert "📐0.90" in [ln for ln in out.splitlines() if ln.startswith("↳")][0]
+
+
+def test_no_fib_tag_without_the_value():
+    """값이 없으면 아무것도 안 붙는다."""
+    out = format_events([_leader("XUSDT")], [], {})
+    assert "📐" not in out

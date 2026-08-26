@@ -172,6 +172,10 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         exhausted_below=int(s.get("exhausted_below", 480)),
         quiet_turnover_usd=float(s.get("quiet_turnover_usd", 6_000_000)),
         quiet_atr_pct=float(s.get("quiet_atr_pct", 0.073)),
+        fib_enabled=bool(s.get("fib_enabled", True)),
+        fib_interval=str(s.get("fib_interval", "30m")),
+        fib_limit=int(s.get("fib_limit", 500)),
+        fib_min=float(s.get("fib_min", 0.618)),
     )
     if ticker is None:              # 호출 측이 미리 받아두지 않았을 때만 직접 조회
         ticker = _crypto_ticker(session, source, log)
@@ -255,11 +259,24 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             log(f"[binance] {sym} 15m 수집 실패: {data_binance._safe(e)}")
             continue
         stat = ticker.get(sym) or {}
+        # 📐 되돌림 — 30m 파동은 15m·4h 어느 프레임으로도 못 만들어서 따로 받는다.
+        # blocked()를 통과한 종목만 여기까지 오므로 요청이 대상 수만큼만 는다.
+        fib = None
+        if params.fib_enabled:
+            try:
+                d30 = data_binance.klines(session, sym, source, params.fib_interval,
+                                          limit=params.fib_limit)
+                fib = leader_break.retrace(d30, params)
+            except Exception as e:              # noqa: BLE001 — 표시용이라 실패는 무시
+                log(f"[binance] {sym} {params.fib_interval} 수집 실패: "
+                    f"{data_binance._safe(e)}")
 
         def annotate(detail: dict) -> dict:
             """순위·추적일·24h 지표를 신규/유지 양쪽에 같은 모양으로 붙인다."""
             detail["gain_24h"] = stat.get("change_pct")
             detail["turnover_24h"] = stat.get("quote_volume")
+            if fib is not None:
+                detail["fib"] = fib
             # 거르지는 않고 '조용한 종목'만 표시 — 판단 불가면 키를 안 만든다
             df4 = trend_frame(sym)
             q = leader_break.quiet(stat, df4, params)
