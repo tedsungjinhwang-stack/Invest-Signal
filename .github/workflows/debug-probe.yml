@@ -36,7 +36,7 @@ jobs:
           BINANCE_FAPI_BASE: ${{ secrets.BINANCE_FAPI_BASE }}
           # PROBE_MODE=turnover면 심볼 진단 대신 거래대금 하한 스윕을 돈다 —
           # 하한별 통과 종목 수와, 최근 발송된 알림의 종목이 살아남는지.
-          PROBE_MODE: ""
+          PROBE_MODE: "wave"
           PROBE_SIGNAL: "wave_setup"
           PROBE_REPLAY: "1"        # 알림 기록 대신 과거 캔들에서 재현 (④ 🍃 룰 분해 포함)
           PROBE_DAYS_BACK: "30"
@@ -44,6 +44,10 @@ jobs:
           PROBE_BAD: "15"          # 쪽박 기준 — 7일 내 MAE ≤ -15%
           PROBE_FLOORS: "1,2,3,5,10"
           PROBE_RECENT_MSGS: "6"
-          PROBE_SYMBOLS: "TLMUSDT"
+          PROBE_SYMBOLS: "PTBUSDT"
           PROBE_DAYS: "2026-08-21,2026-08-22,2026-08-23"
+          PROBE_WAVE_TF: "1h"        # 파동 판정 봉
+          PROBE_WAVE_ST: "30x6"      # 장기 수퍼트렌드 (흰 선)
+          PROBE_WAVE_ST_FAST: "22x3" # 단기 (초록/빨강)
+          PROBE_WAVE_BARS: "500"
         run: python scripts/debug_probe.py

@@ -369,6 +369,76 @@ def _rank_gate(frames4: dict, rcfg: dict):
     return ok
 
 
+def _wave_spans(sess) -> None:
+    """1h 장기 수퍼트렌드가 상승인 구간 = 한 파동 — 구간별 저점·고점을 찍는다.
+
+    파동의 경계를 '되돌림 몇 %'가 아니라 **장기 추세가 깨지는 지점**으로 잡는다.
+    상승 구간이 시작된 뒤의 최저 저가가 파동 저점, 그 구간의 최고 고가가 파동
+    고점이고, 장기가 하락으로 뒤집히면 거기서 파동이 확정된다. 마지막 구간이
+    아직 상승 중이면 진행 중인 파동이다(고점이 계속 갱신된다).
+
+    PROBE_WAVE_TF(기본 1h)·PROBE_WAVE_ST("30x6")로 봉 주기와 설정을 바꾼다.
+    """
+    import pandas as pd
+
+    from invest_signal import config as cfg_mod
+
+    tf = os.environ.get("PROBE_WAVE_TF", "1h")
+    slow_s = os.environ.get("PROBE_WAVE_ST", "30x6")
+    fast_s = os.environ.get("PROBE_WAVE_ST_FAST", "22x3")
+
+    def parse(spec):
+        a, b = spec.lower().split("x")
+        return int(a), float(b)
+
+    sp, sm = parse(slow_s)
+    fp, fm = parse(fast_s)
+    cfg = cfg_mod.load()
+    c = cfg.get("crypto") or {}
+    source, _ = data_binance.resolve_source(sess, c.get("source", "auto"),
+                                            set(c.get("exclude") or []), print)
+    limit = int(os.environ.get("PROBE_WAVE_BARS", "500"))
+    for sym in symbols:
+        try:
+            df = data_binance.klines(sess, sym, source, tf, limit=limit,
+                                     include_live=True)
+        except Exception as e:                      # noqa: BLE001
+            print(f"== {sym}: {tf} 수집 실패 {e}")
+            continue
+        slow = indicators.supertrend_full(df, sp, sm)
+        fast = indicators.supertrend_full(df, fp, fm)
+        d = slow["dir"]
+        print(f"\n== {sym} — {tf}봉 {len(df)}개 · 장기 {sp}×{sm:g} 상승 구간 = 한 파동"
+              f" (단기 {fp}×{fm:g})")
+        # 방향이 바뀌는 지점으로 구간을 자른다
+        spans, start = [], None
+        for i in range(len(df)):
+            up = (not pd.isna(d.iloc[i])) and d.iloc[i] > 0
+            if up and start is None:
+                start = i
+            elif not up and start is not None:
+                spans.append((start, i - 1))
+                start = None
+        if start is not None:
+            spans.append((start, len(df) - 1))
+        if not spans:
+            print("   상승 구간 없음")
+            continue
+        print(f"   {'시작(KST)':<14}{'끝(KST)':<14}{'봉수':>5}"
+              f"{'저점':>12}{'고점':>12}{'폭':>8}  단기전환")
+        for a, b in spans[-8:]:
+            seg = df.iloc[a:b + 1]
+            lo, hi = float(seg["Low"].min()), float(seg["High"].max())
+            flips = sum(1 for i in range(a + 1, b + 1)
+                        if (not pd.isna(fast["dir"].iloc[i]))
+                        and fast["dir"].iloc[i] > 0 >= fast["dir"].iloc[i - 1])
+            live = "  ← 진행 중" if b == len(df) - 1 else ""
+            print(f"   {df.index[a].tz_convert('Asia/Seoul').strftime('%m-%d %H시'):<14}"
+                  f"{df.index[b].tz_convert('Asia/Seoul').strftime('%m-%d %H시'):<14}"
+                  f"{b - a + 1:>5}{lo:>12.6g}{hi:>12.6g}"
+                  f"{(hi / lo - 1) * 100:>7.0f}%{flips:>7}{live}")
+
+
 def _signal_segment(sess) -> None:
     """한 시그널의 알림을 **발화 시점 피처**로 쪼개, 대박과 쪽박을 가르는 축을 찾는다.
 
@@ -779,6 +849,9 @@ with requests.Session() as sess:
         raise SystemExit(0)
     if _mode == "perf":
         _performance(sess)
+        raise SystemExit(0)
+    if _mode == "wave":
+        _wave_spans(sess)
         raise SystemExit(0)
     if _mode in ("leaders", "segment"):
         _signal_segment(sess)
