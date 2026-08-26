@@ -1,5 +1,6 @@
 """스캐너 헬퍼 테스트."""
 
+import numpy as np
 import pandas as pd
 
 from invest_signal.scanner import _collapse
@@ -296,3 +297,49 @@ def test_market_value_prefers_crypto_key():
     assert market_value(s, "x", 0, crypto=False) == 1
     assert market_value({}, "x", 9, crypto=True) == 9      # 둘 다 없으면 기본값
     assert market_value({"x": 1}, "x", 0, crypto=True) == 1  # 오버라이드 없으면 공용
+
+
+def test_leader_break_frames_follow_the_scan_mode(monkeypatch):
+    """인트라바 스캔이면 ⚡가 따로 받는 4h·30m도 진행봉을 포함해야 한다.
+
+    🔼단기전환은 4h 수퍼트렌드로 판정하므로, 여기만 마감봉을 쓰면 프레임이
+    어느 경로로 왔느냐에 따라 표시가 최대 4시간 늦어진다.
+    """
+    from invest_signal import scanner
+
+    calls = []
+
+    SHAPE = {"15m": (400, "15min"), "30m": (500, "30min"), "4h": (750, "4h")}
+
+    def fake_klines(session, symbol, source, interval, limit=None,
+                    include_live=False, **kw):
+        calls.append((interval, include_live))
+        n, freq = SHAPE[interval]
+        idx = pd.date_range("2026-01-01", periods=n, freq=freq, tz="UTC")
+        c = pd.Series(np.linspace(100.0, 200.0, n), index=idx)
+        return pd.DataFrame({"Open": c, "High": c, "Low": c, "Close": c,
+                             "Volume": 1000.0})
+
+    monkeypatch.setattr(scanner.data_binance, "resolve_source",
+                        lambda *a, **k: ("fapi", ["XUSDT"]))
+    monkeypatch.setattr(scanner.data_binance, "fetch_all", lambda *a, **k: {})
+    monkeypatch.setattr(scanner.data_binance, "klines", fake_klines)
+    monkeypatch.setattr(scanner, "_crypto_ticker", lambda *a, **k: {
+        "XUSDT": {"change_pct": 30.0, "quote_volume": 50_000_000.0,
+                  "last": 1.0}})
+
+    # require_aligned를 켜야 is_blocked()가 4h를 받는다(우상향이라 통과한다)
+    cfg = {"crypto": {"enabled": True},
+           "signal": {"leader_break": {"enabled": True, "fib_enabled": True,
+                                       "require_aligned": True,
+                                       "exhausted_filter": False}}}
+
+    for intrabar in (False, True):
+        calls.clear()
+        scanner.scan_crypto(cfg, [], log=lambda *a: None, intrabar=intrabar)
+        got = {i for i, _ in calls}
+        assert {"4h", "30m"} <= got, f"프레임을 다 안 받았다: {got}"
+        for interval, live in calls:
+            # 15m 본판정은 마감봉 그대로 — 표시용 프레임만 모드를 따른다
+            want = intrabar if interval in ("4h", "30m") else False
+            assert live is want, f"{interval} include_live={live}"

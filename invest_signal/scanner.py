@@ -138,7 +138,8 @@ def _crypto_rank_eligible(frames: dict, rcfg: dict) -> set:
 
 def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                        state=None, log=print, frames: dict | None = None,
-                       ticker: dict | None = None) -> tuple[list, list]:
+                       ticker: dict | None = None,
+                       intrabar: bool = False) -> tuple[list, list]:
     """크립토 모멘텀 눌림목/이탈 — 24h 상승률 상위 N종을 15m봉으로 따로 판정한다.
 
     나머지 시그널과 달리 4h 프레임을 쓰지 않는다: 대상 선정은 24hr 티커
@@ -220,6 +221,10 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         스캔이 이미 받아온 750봉이 있으면 그걸 쓰고, 없으면(인트라바에 4h
         대상 시그널이 없는 경우) 해당 종목만 따로 받아 캐시한다. 조회 실패는
         None — 어느 판정도 하지 않는다.
+
+        폴백도 스캔 모드를 따라간다(`include_live=intrabar`) — 인트라바인데
+        여기만 마감봉을 쓰면 🔼단기전환이 어느 경로로 왔느냐에 따라 최대
+        4시간 늦게 붙는다.
         """
         if sym in trend_cache:
             return trend_cache[sym]
@@ -229,7 +234,8 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             try:
                 df4 = data_binance.klines(session, sym, source,
                                           leader_break.TREND_INTERVAL,
-                                          limit=leader_break.TREND_LIMIT)
+                                          limit=leader_break.TREND_LIMIT,
+                                          include_live=intrabar)
             except Exception as e:              # noqa: BLE001
                 log(f"[binance] {sym} 4h 수집 실패: {data_binance._safe(e)}")
                 df4 = None
@@ -267,7 +273,8 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         if params.fib_enabled:
             try:
                 d30 = data_binance.klines(session, sym, source, params.fib_interval,
-                                          limit=params.fib_limit)
+                                          limit=params.fib_limit,
+                                          include_live=intrabar)
                 fib = leader_break.retrace(d30, params)
             except Exception as e:              # noqa: BLE001 — 표시용이라 실패는 무시
                 log(f"[binance] {sym} {params.fib_interval} 수집 실패: "
@@ -422,7 +429,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         # 15m 판정이라 마감·인트라바 양쪽에서 매번 돈다. 4h 프레임은 제외 조건
         # (정배열 + 480선 아래) 판정에만 쓰고, 없으면 대상 종목만 따로 받는다.
         leader_events, leader_ongoing, board = _scan_leader_break(
-            s, source, symbols, cfg, state, log, frames, ticker)
+            s, source, symbols, cfg, state, log, frames, ticker, intrabar=intrabar)
         if not detectors:           # 인트라바인데 4h 대상 시그널이 없을 때
             return leader_events, leader_ongoing, board
     events, ongoing = _detect_all(frames, detectors, log)
