@@ -383,6 +383,9 @@ def _wave_spans(sess) -> None:
 
     from invest_signal import config as cfg_mod
 
+    # 되돌림 구간 — 도달한 가장 깊은 레벨을 표시로 쓴다
+    FIBS = [float(x) for x in
+            os.environ.get("PROBE_FIBS", "0.618,0.786,0.886").split(",") if x.strip()]
     tf = os.environ.get("PROBE_WAVE_TF", "1h")
     slow_s = os.environ.get("PROBE_WAVE_ST", "30x6")
     fast_s = os.environ.get("PROBE_WAVE_ST_FAST", "22x3")
@@ -407,43 +410,57 @@ def _wave_spans(sess) -> None:
             continue
         slow = indicators.supertrend_full(df, sp, sm)
         fast = indicators.supertrend_full(df, fp, fm)
-        d = fast["dir"]
-        print(f"\n== {sym} — {tf}봉 {len(df)}개 · 파동 = 단기 {fp}×{fm:g} 상승 구간"
-              f" (장기 {sp}×{sm:g}는 상태만 표시)")
-        # 단기 방향이 바뀌는 지점으로 구간을 자른다. 상승 구간이 한 파동이고,
-        # 그 **직전 하락 구간**의 최저 저가가 그 파동의 저점이다.
-        spans, start = [], None
-        for i in range(len(df)):
-            up = (not pd.isna(d.iloc[i])) and d.iloc[i] > 0
-            if up and start is None:
+        fd, sd = fast["dir"], slow["dir"]
+        print(f"\n== {sym} — {tf}봉 {len(df)}개 · 단기 {fp}×{fm:g} / 장기 {sp}×{sm:g}")
+
+        def flip(series, i, up):
+            """i봉에서 방향이 바뀌었는지."""
+            a, b = series.iloc[i - 1], series.iloc[i]
+            if pd.isna(a) or pd.isna(b):
+                return False
+            return (b > 0 >= a) if up else (b < 0 <= a)
+
+        # 저점은 **장기가 깨진 뒤 단기가 되살아나기까지**의 최저가다.
+        # 장기가 다시 깨질 때까지 그 저점을 계속 쓴다 — 단기가 여러 번
+        # 오르내리면 같은 저점에 고점만 여러 개인 파동이 된다.
+        waves, lo, lo_from = [], None, None
+        for i in range(1, len(df)):
+            if flip(sd, i, up=False):       # 장기 하락 돌파 → 저점 구간 시작
+                lo, lo_from = None, i
+            if lo_from is not None and lo is None and flip(fd, i, up=True):
+                lo = float(df["Low"].iloc[lo_from:i + 1].min())
                 start = i
-            elif not up and start is not None:
-                spans.append((start, i - 1))
-                start = None
-        if start is not None:
-            spans.append((start, len(df) - 1))
-        if not spans:
-            print("   상승 구간 없음")
+            elif lo is not None and flip(fd, i, up=True):
+                start = i               # 같은 저점으로 다음 파동 시작
+            if lo is not None and flip(fd, i, up=False) and 'start' in dir():
+                waves.append((start, i - 1, lo))
+        if lo is not None and 'start' in dir() and (not waves or waves[-1][0] != start):
+            waves.append((start, len(df) - 1, lo))    # 진행 중
+        if not waves:
+            print("   파동 없음")
             continue
-        print(f"   {'저점(KST)':<13}{'고점까지':<13}{'봉수':>4}"
-              f"{'저점':>11}{'고점':>11}{'폭':>7}{'0.618':>11}{'현재':>11}  장기")
-        prev_end = None
-        for a, b in spans[-10:]:
-            # 저점 — 직전 단기 하락 구간(= 이전 파동의 눌림)의 최저 저가
-            lo_from = 0 if prev_end is None else prev_end + 1
-            down = df.iloc[lo_from:a]
-            lo = float(down["Low"].min()) if len(down) else float(df["Low"].iloc[a])
+
+        now = float(df["Close"].iloc[-1])
+        print(f"   {'상향돌파(KST)':<14}{'끝(KST)':<14}{'봉수':>4}"
+              f"{'저점':>11}{'고점':>11}{'폭':>7}{'되돌림':>7}{'레벨':>7}"
+              f"   " + "  ".join(f"{lv:.3f}" for lv in FIBS))
+        for a, b, lo in waves[-12:]:
             hi = float(df.iloc[a:b + 1]["High"].max())
-            fib = hi - (hi - lo) * 0.618
-            now = float(df["Close"].iloc[-1])
-            sd = slow["dir"].iloc[b]
-            live = " ← 진행 중" if b == len(df) - 1 else ""
-            print(f"   {df.index[a].tz_convert('Asia/Seoul').strftime('%m-%d %H:%M'):<13}"
-                  f"{df.index[b].tz_convert('Asia/Seoul').strftime('%m-%d %H:%M'):<13}"
+            if hi <= lo:
+                continue
+            ref = float(df["Close"].iloc[b]) if b < len(df) - 1 else now
+            back = (hi - ref) / (hi - lo)
+            band = ""
+            for lv in FIBS:                     # 도달한 가장 깊은 레벨을 적는다
+                if back >= lv:
+                    band = f"{lv:.3f}"
+            live = " ←진행" if b == len(df) - 1 else ""
+            lvls = "  ".join(f"{hi - (hi - lo) * lv:.6g}" for lv in FIBS)
+            print(f"   {df.index[a].tz_convert('Asia/Seoul').strftime('%m-%d %H:%M'):<14}"
+                  f"{df.index[b].tz_convert('Asia/Seoul').strftime('%m-%d %H:%M'):<14}"
                   f"{b - a + 1:>4}{lo:>11.6g}{hi:>11.6g}"
-                  f"{(hi / lo - 1) * 100:>6.0f}%{fib:>11.6g}{now:>11.6g}"
-                  f"  {'상승' if (not pd.isna(sd) and sd > 0) else '하락'}{live}")
-            prev_end = b
+                  f"{(hi / lo - 1) * 100:>6.0f}%{back:>7.2f}{band:>7}"
+                  f"   {lvls}{live}")
 
 
 def _signal_segment(sess) -> None:
