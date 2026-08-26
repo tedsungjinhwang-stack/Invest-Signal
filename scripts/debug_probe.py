@@ -401,10 +401,32 @@ def _wave_spans(sess) -> None:
     source, _ = data_binance.resolve_source(sess, c.get("source", "auto"),
                                             set(c.get("exclude") or []), print)
     limit = int(os.environ.get("PROBE_WAVE_BARS", "500"))
+    since = os.environ.get("PROBE_WAVE_FROM", "")   # 표시 구간 (UTC 날짜)
+    until = os.environ.get("PROBE_WAVE_TO", "")
+
+    def fetch_paged(sym: str):
+        """1000봉 상한을 넘겨 받는다 — endTime을 앞으로 밀며 이어 붙인다."""
+        if source == "fapi":
+            base, path = data_binance.fapi_base(), "/fapi/v1/klines"
+        else:
+            base, path = data_binance.SPOT_MIRROR_BASE, "/api/v3/klines"
+        rows, end = [], None
+        while len(rows) < limit:
+            q = {"symbol": sym, "interval": tf, "limit": 1000}
+            if end is not None:
+                q["endTime"] = end
+            page = data_binance._get(sess, base, path, q).json()
+            if not page:
+                break
+            rows = page + rows
+            end = int(page[0][0]) - 1
+            if len(page) < 1000:
+                break
+        return data_binance.parse_klines(rows[-limit:], include_live=True)
+
     for sym in symbols:
         try:
-            df = data_binance.klines(sess, sym, source, tf, limit=limit,
-                                     include_live=True)
+            df = fetch_paged(sym)
         except Exception as e:                      # noqa: BLE001
             print(f"== {sym}: {tf} 수집 실패 {e}")
             continue
@@ -441,10 +463,15 @@ def _wave_spans(sess) -> None:
             continue
 
         now = float(df["Close"].iloc[-1])
+        if since or until:
+            lo_t = pd.Timestamp(since, tz="UTC") if since else df.index[0]
+            hi_t = pd.Timestamp(until, tz="UTC") if until else df.index[-1]
+            waves = [w for w in waves if lo_t <= df.index[w[0]] <= hi_t]
+            print(f"   ({since or '처음'} ~ {until or '지금'} UTC 구간, {len(waves)}개)")
         print(f"   {'상향돌파(KST)':<14}{'끝(KST)':<14}{'봉수':>4}"
               f"{'저점':>11}{'고점':>11}{'폭':>7}{'되돌림':>7}{'레벨':>7}"
               f"   " + "  ".join(f"{lv:.3f}" for lv in FIBS))
-        for a, b, lo in waves[-12:]:
+        for a, b, lo in waves[-20:]:
             hi = float(df.iloc[a:b + 1]["High"].max())
             if hi <= lo:
                 continue

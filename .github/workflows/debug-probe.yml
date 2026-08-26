@@ -49,6 +49,8 @@ jobs:
           PROBE_WAVE_TF: "30m"        # 파동 판정 봉
           PROBE_WAVE_ST: "30x6"      # 장기 수퍼트렌드 (흰 선)
           PROBE_WAVE_ST_FAST: "22x3" # 단기 (초록/빨강)
-          PROBE_WAVE_BARS: "700"
+          PROBE_WAVE_BARS: "1600"
           PROBE_FIBS: "0.618,0.786,0.886"
+          PROBE_WAVE_FROM: "2026-07-31"
+          PROBE_WAVE_TO: "2026-08-10"
         run: python scripts/debug_probe.py
