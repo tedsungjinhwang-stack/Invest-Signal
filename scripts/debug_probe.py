@@ -468,26 +468,38 @@ def _wave_spans(sess) -> None:
             hi_t = pd.Timestamp(until, tz="UTC") if until else df.index[-1]
             waves = [w for w in waves if lo_t <= df.index[w[0]] <= hi_t]
             print(f"   ({since or '처음'} ~ {until or '지금'} UTC 구간, {len(waves)}개)")
-        print(f"   {'상향돌파(KST)':<14}{'끝(KST)':<14}{'봉수':>4}"
-              f"{'저점':>11}{'고점':>11}{'폭':>7}{'되돌림':>7}{'레벨':>7}"
-              f"   " + "  ".join(f"{lv:.3f}" for lv in FIBS))
-        for a, b, lo in waves[-20:]:
+        print(f"   {'상향돌파(KST)':<13}{'고점(KST)':<13}{'봉수':>4}"
+              f"{'저점':>11}{'고점':>11}{'폭':>7}"
+              f"{'되돌림':>7}{'레벨':>7}{'도달(KST)':>14}")
+        for k, (a, b, lo) in enumerate(waves[-20:]):
             hi = float(df.iloc[a:b + 1]["High"].max())
             if hi <= lo:
                 continue
-            ref = float(df["Close"].iloc[b]) if b < len(df) - 1 else now
-            back = (hi - ref) / (hi - lo)
-            band = ""
-            for lv in FIBS:                     # 도달한 가장 깊은 레벨을 적는다
+            # 되돌림은 **파동이 닫힌 뒤**를 본다. 단기가 뒤집히는 순간은
+            # 고점에서 조금 밀린 자리라 그때 재면 구조적으로 얕게 나온다.
+            nxt = None
+            for a2, _, _ in waves:
+                if a2 > b:
+                    nxt = a2
+                    break
+            seg = df.iloc[b + 1:nxt if nxt is not None else len(df)]
+            if not len(seg):
+                continue
+            deep = float(seg["Low"].min())
+            back = (hi - deep) / (hi - lo)
+            band, when = "", ""
+            for lv in FIBS:
                 if back >= lv:
                     band = f"{lv:.3f}"
-            live = " ←진행" if b == len(df) - 1 else ""
-            lvls = "  ".join(f"{hi - (hi - lo) * lv:.6g}" for lv in FIBS)
-            print(f"   {df.index[a].tz_convert('Asia/Seoul').strftime('%m-%d %H:%M'):<14}"
-                  f"{df.index[b].tz_convert('Asia/Seoul').strftime('%m-%d %H:%M'):<14}"
+            if band:
+                lvl = hi - (hi - lo) * float(band)
+                hit = seg.index[seg["Low"] <= lvl]
+                if len(hit):
+                    when = hit[0].tz_convert("Asia/Seoul").strftime("%m-%d %H:%M")
+            print(f"   {df.index[a].tz_convert('Asia/Seoul').strftime('%m-%d %H:%M'):<13}"
+                  f"{df.index[b].tz_convert('Asia/Seoul').strftime('%m-%d %H:%M'):<13}"
                   f"{b - a + 1:>4}{lo:>11.6g}{hi:>11.6g}"
-                  f"{(hi / lo - 1) * 100:>6.0f}%{back:>7.2f}{band:>7}"
-                  f"   {lvls}{live}")
+                  f"{(hi / lo - 1) * 100:>6.0f}%{back:>7.2f}{band:>7}{when:>14}")
 
 
 def _signal_segment(sess) -> None:
