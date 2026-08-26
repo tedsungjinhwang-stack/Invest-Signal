@@ -66,7 +66,8 @@ class Params:
     turn_fast_mult: float = 3.0
     turn_slow_period: int = 30
     turn_slow_mult: float = 6.0
-    turn_bars: int = 3              # 전환 후 이 봉 수까지 표시 (3 × 4h = 12시간)
+    turn_bars: int = 3              # 전환·터치 후 이 봉 수까지 표시 (3 × 4h = 12시간)
+    turn_touch: bool = True         # 단기선 터치도 같이 표시할지
 
 
 def leaders(ticker: dict[str, dict], symbols: set[str],
@@ -250,19 +251,27 @@ def retrace(df: pd.DataFrame, params: Params = Params()) -> float | None:
     return back if back >= params.fib_min else None
 
 
-def turn_up(df4h: pd.DataFrame, params: Params = Params()) -> bool | None:
-    """4h에서 **장기는 상승인 채로 단기가 막 상승 전환**했는지.
+TURN_FLIP = "전환"
+TURN_TOUCH = "터치"
 
-    눌림이 끝나고 다시 붙는 자리다. 📐되돌림이 '얼마나 밀렸나'를 말한다면
-    이건 '돌아섰나'를 말한다 — 되돌림 레벨에 닿는 것과 거기서 반등하는 건
-    다른 사건이고, 진입은 후자에서 난다.
+
+def turn_up(df4h: pd.DataFrame, params: Params = Params()) -> "str | bool | None":
+    """4h에서 **장기가 상승인 채로** 단기가 눌림을 끝냈는지. 두 모양이 있다.
+
+    - ``"전환"`` — 단기가 하락에서 상승으로 막 뒤집혔다.
+    - ``"터치"`` — 단기가 이미 상승인데 봉이 단기선까지 밀렸다 닿았다.
+
+    같은 사건의 앞뒤다. 전환은 선을 되찾는 순간이고, 터치는 그 뒤 눌릴
+    때마다 선이 받쳐 주는 자리다. 전환을 놓치고 들어온 종목은 터치에서만
+    보인다 — 그래서 둘 다 잡되 어느 쪽인지는 줄에 적는다. 한 봉이 둘 다면
+    **전환이 이긴다**(선을 되찾는 게 다시 받히는 것보다 큰 사건이다).
 
     장기가 **상승**이어야 한다는 게 파동 ⓐABC와 정반대다. 거기선 하락 추세
     안의 반등을 잡지만, 여기는 이미 선 추세 안의 눌림이 끝나는 자리다.
 
-    전환 봉 하나만 보면 표시가 4시간 만에 사라진다 — 스캔은 매시간 도는데
-    그 사이 상태는 그대로다. turn_bars(기본 3봉 = 12시간) 안에 전환이 있으면
-    계속 표시한다. 판단할 봉이 모자라면 None.
+    봉 하나만 보면 표시가 4시간 만에 사라진다 — 스캔은 매시간 도는데 그 사이
+    상태는 그대로다. turn_bars(기본 3봉 = 12시간) 안이면 계속 표시한다.
+    해당 없으면 False, 판단할 봉이 모자라면 None.
     """
     if not params.turn_enabled or df4h is None:
         return None
@@ -275,12 +284,21 @@ def turn_up(df4h: pd.DataFrame, params: Params = Params()) -> bool | None:
     sd = slow["dir"].iloc[last]
     if pd.isna(sd) or sd <= 0:
         return False                    # 장기가 상승이 아니면 이 자리가 아니다
-    fd = fast["dir"]
+    fd, fl = fast["dir"], fast["line"]
+    touched = False
     for i in range(last, max(0, last - params.turn_bars), -1):
         a, b = fd.iloc[i - 1], fd.iloc[i]
-        if not pd.isna(a) and not pd.isna(b) and b > 0 >= a:
-            return True
-    return False
+        if pd.isna(a) or pd.isna(b):
+            continue
+        if b > 0 >= a:
+            return TURN_FLIP            # 전환이 터치를 이긴다
+        # 단기가 상승인 채로 봉이 선까지 밀렸다 — 눌림을 선이 받은 자리
+        if params.turn_touch and b > 0 and not touched:
+            line = fl.iloc[i]
+            if not pd.isna(line) and float(df4h["Low"].iloc[i]) <= float(line) \
+                    <= float(df4h["High"].iloc[i]):
+                touched = True
+    return TURN_TOUCH if touched else False
 
 
 def tracking(df: pd.DataFrame, params: Params = Params()) -> dict | None:

@@ -584,16 +584,26 @@ def test_no_fib_tag_without_the_value():
 
 
 def test_turn_up_mark_on_momentum_rows():
-    """🔼단기전환은 ⚡ 신규·추적 양쪽에 붙고, 없으면 안 붙는다."""
+    """🔼는 ⚡ 신규·추적 양쪽에 붙고, 전환과 터치를 말로 나눈다."""
     def lead(symbol, turn, hold=False):
         e = _leader(symbol, hold=hold)
         if turn:
-            e.detail["turn_up"] = True
+            e.detail["turn_up"] = turn
         return e
-    out = format_events([lead("TURNUSDT", True), lead("FLATUSDT", False)], [], {},
-                        ongoing_crypto=[lead("HTURNUSDT", True, hold=True)])
+
+    out = format_events([lead("FLIPUSDT", "전환"), lead("TOUCHUSDT", "터치"),
+                         lead("FLATUSDT", None)], [], {},
+                        ongoing_crypto=[lead("HTURNUSDT", "터치", hold=True)])
     line = {n: [ln for ln in out.splitlines() if f">{n}</a>" in ln][0]
-            for n in ("TURN", "FLAT")}
-    assert "🔼단기전환" in line["TURN"]
+            for n in ("FLIP", "TOUCH", "FLAT")}
+    assert "🔼단기전환" in line["FLIP"]
+    assert "🔼단기선터치" in line["TOUCH"]
     assert "🔼" not in line["FLAT"]
-    assert "🔼단기전환" in [ln for ln in out.splitlines() if ln.startswith("↳")][0]
+    assert "🔼단기선터치" in [ln for ln in out.splitlines() if ln.startswith("↳")][0]
+
+
+def test_turn_up_mark_reads_pre_kind_events_as_a_flip():
+    """kind 없이 True로 저장된 예전 이벤트는 전환으로 읽는다."""
+    e = _leader("OLDUSDT")
+    e.detail["turn_up"] = True
+    assert "🔼단기전환" in format_events([e], [], {})

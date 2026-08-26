@@ -409,7 +409,7 @@ def test_turn_up_needs_the_long_term_rising():
     fast = supertrend_full(up, P.turn_fast_period, P.turn_fast_mult)["dir"]
     slow = supertrend_full(up, P.turn_slow_period, P.turn_slow_mult)["dir"]
     assert slow.iloc[-1] > 0 and fast.iloc[-1] > 0 and fast.iloc[-2] < 0
-    assert leader_break.turn_up(up, P) is True
+    assert leader_break.turn_up(up, P) == leader_break.TURN_FLIP
 
     # 장기가 하락이면 이 자리가 아니다 (그건 파동 ⓐABC가 잡는 자리)
     down = _turn_frame(rising=False)
@@ -422,11 +422,47 @@ def test_turn_up_holds_for_a_few_bars():
     df = _turn_frame()
     last = float(df["Close"].iloc[-1])
     later = _df4h(list(df["Close"]) + [last * 1.001, last * 1.002])
-    assert leader_break.turn_up(later, P) is True                  # 2봉 뒤에도 유지
-    assert leader_break.turn_up(later, Params(turn_bars=1)) is False  # 창을 좁히면 빠짐
+    assert leader_break.turn_up(later, P) == leader_break.TURN_FLIP   # 2봉 뒤에도 유지
+    # 창을 좁히면 전환 봉이 빠진다 — 터치까지 끄면 아무것도 안 남는다
+    assert leader_break.turn_up(later, Params(turn_bars=1,
+                                             turn_touch=False)) is False
 
 
 def test_turn_up_is_none_when_undecidable():
     assert leader_break.turn_up(None, P) is None
     assert leader_break.turn_up(_df4h(np.linspace(100.0, 110.0, 20)), P) is None
     assert leader_break.turn_up(_turn_frame(), Params(turn_enabled=False)) is None
+
+
+def test_turn_up_marks_a_pullback_that_the_fast_line_caught():
+    """전환 뒤 눌림이 단기선에 닿으면 터치로 표시한다."""
+    df = _turn_frame()                              # 마지막 봉이 전환 봉
+    # 전환 봉을 turn_bars 밖으로 밀어내고, 마지막 봉만 저가가 단기선까지
+    # 내려오게 한다 — 종가는 선 위(받히고 되돌아온 모양).
+    closes = list(df["Close"]) + [df["Close"].iloc[-1] * (1 + 0.01 * i)
+                                  for i in range(1, 6)]
+    out = _df4h(closes)
+
+    def fast(frame):
+        return supertrend_full(frame, P.turn_fast_period, P.turn_fast_mult)
+
+    # 저가를 내리면 ATR·hl2가 같이 움직여 선도 따라 내려온다 — 넉넉히 넘긴다
+    out.iloc[-1, out.columns.get_loc("Low")] = float(fast(out)["line"].iloc[-1]) * 0.97
+    f = fast(out)
+    line = float(f["line"].iloc[-1])
+    assert f["dir"].iloc[-1] > 0                    # 단기는 상승인 채로
+    assert float(out["Low"].iloc[-1]) <= line <= float(out["High"].iloc[-1])
+
+    assert leader_break.turn_up(out, P) == leader_break.TURN_TOUCH
+    # 전환은 이미 창 밖이라, 터치를 끄면 남는 게 없다
+    assert leader_break.turn_up(out, Params(turn_touch=False)) is False
+
+
+def test_turn_up_ignores_a_touch_while_the_fast_line_is_down():
+    """단기가 하락 중이면 선에 닿아도 지지가 아니라 저항이다 — 표시 안 함."""
+    down = _df4h(list(np.linspace(100.0, 300.0, 170))
+                 + list(np.linspace(300.0, 250.0, 30)))
+    f = supertrend_full(down, P.turn_fast_period, P.turn_fast_mult)
+    assert f["dir"].iloc[-1] < 0                    # 단기는 아직 하락
+    down.iloc[-1, down.columns.get_loc("High")] = float(f["line"].iloc[-1]) * 1.03
+    assert leader_break.turn_up(down, P) is False

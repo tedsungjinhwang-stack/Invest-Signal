@@ -179,6 +179,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         fib_min=float(s.get("fib_min", 0.618)),
         turn_enabled=bool(s.get("turn_enabled", True)),
         turn_bars=int(s.get("turn_bars", 3)),
+        turn_touch=bool(s.get("turn_touch", True)),
     )
     if ticker is None:              # 호출 측이 미리 받아두지 않았을 때만 직접 조회
         ticker = _crypto_ticker(session, source, log)
@@ -287,9 +288,10 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             if fib is not None:
                 detail["fib"] = fib
             df4 = trend_frame(sym)
-            # 🔼 단기전환 — 4h는 이미 받아 둔 프레임이라 추가 요청이 없다
-            if leader_break.turn_up(df4, params):
-                detail["turn_up"] = True
+            # 🔼 단기전환·단기선터치 — 4h는 이미 받아 둔 프레임이라 추가 요청이 없다
+            t = leader_break.turn_up(df4, params)
+            if t:
+                detail["turn_up"] = t
             # 거르지는 않고 '조용한 종목'만 표시 — 판단 불가면 키를 안 만든다
             q = leader_break.quiet(stat, df4, params)
             if q is not None:
