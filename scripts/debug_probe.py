@@ -407,10 +407,11 @@ def _wave_spans(sess) -> None:
             continue
         slow = indicators.supertrend_full(df, sp, sm)
         fast = indicators.supertrend_full(df, fp, fm)
-        d = slow["dir"]
-        print(f"\n== {sym} — {tf}봉 {len(df)}개 · 장기 {sp}×{sm:g} 상승 구간 = 한 파동"
-              f" (단기 {fp}×{fm:g})")
-        # 방향이 바뀌는 지점으로 구간을 자른다
+        d = fast["dir"]
+        print(f"\n== {sym} — {tf}봉 {len(df)}개 · 파동 = 단기 {fp}×{fm:g} 상승 구간"
+              f" (장기 {sp}×{sm:g}는 상태만 표시)")
+        # 단기 방향이 바뀌는 지점으로 구간을 자른다. 상승 구간이 한 파동이고,
+        # 그 **직전 하락 구간**의 최저 저가가 그 파동의 저점이다.
         spans, start = [], None
         for i in range(len(df)):
             up = (not pd.isna(d.iloc[i])) and d.iloc[i] > 0
@@ -424,19 +425,25 @@ def _wave_spans(sess) -> None:
         if not spans:
             print("   상승 구간 없음")
             continue
-        print(f"   {'시작(KST)':<14}{'끝(KST)':<14}{'봉수':>5}"
-              f"{'저점':>12}{'고점':>12}{'폭':>8}  단기전환")
-        for a, b in spans[-8:]:
-            seg = df.iloc[a:b + 1]
-            lo, hi = float(seg["Low"].min()), float(seg["High"].max())
-            flips = sum(1 for i in range(a + 1, b + 1)
-                        if (not pd.isna(fast["dir"].iloc[i]))
-                        and fast["dir"].iloc[i] > 0 >= fast["dir"].iloc[i - 1])
-            live = "  ← 진행 중" if b == len(df) - 1 else ""
-            print(f"   {df.index[a].tz_convert('Asia/Seoul').strftime('%m-%d %H시'):<14}"
-                  f"{df.index[b].tz_convert('Asia/Seoul').strftime('%m-%d %H시'):<14}"
-                  f"{b - a + 1:>5}{lo:>12.6g}{hi:>12.6g}"
-                  f"{(hi / lo - 1) * 100:>7.0f}%{flips:>7}{live}")
+        print(f"   {'저점(KST)':<13}{'고점까지':<13}{'봉수':>4}"
+              f"{'저점':>11}{'고점':>11}{'폭':>7}{'0.618':>11}{'현재':>11}  장기")
+        prev_end = None
+        for a, b in spans[-10:]:
+            # 저점 — 직전 단기 하락 구간(= 이전 파동의 눌림)의 최저 저가
+            lo_from = 0 if prev_end is None else prev_end + 1
+            down = df.iloc[lo_from:a]
+            lo = float(down["Low"].min()) if len(down) else float(df["Low"].iloc[a])
+            hi = float(df.iloc[a:b + 1]["High"].max())
+            fib = hi - (hi - lo) * 0.618
+            now = float(df["Close"].iloc[-1])
+            sd = slow["dir"].iloc[b]
+            live = " ← 진행 중" if b == len(df) - 1 else ""
+            print(f"   {df.index[a].tz_convert('Asia/Seoul').strftime('%m-%d %H:%M'):<13}"
+                  f"{df.index[b].tz_convert('Asia/Seoul').strftime('%m-%d %H:%M'):<13}"
+                  f"{b - a + 1:>4}{lo:>11.6g}{hi:>11.6g}"
+                  f"{(hi / lo - 1) * 100:>6.0f}%{fib:>11.6g}{now:>11.6g}"
+                  f"  {'상승' if (not pd.isna(sd) and sd > 0) else '하락'}{live}")
+            prev_end = b
 
 
 def _signal_segment(sess) -> None:

@@ -46,8 +46,8 @@ jobs:
           PROBE_RECENT_MSGS: "6"
           PROBE_SYMBOLS: "PTBUSDT"
           PROBE_DAYS: "2026-08-21,2026-08-22,2026-08-23"
-          PROBE_WAVE_TF: "1h"        # 파동 판정 봉
+          PROBE_WAVE_TF: "30m"        # 파동 판정 봉
           PROBE_WAVE_ST: "30x6"      # 장기 수퍼트렌드 (흰 선)
           PROBE_WAVE_ST_FAST: "22x3" # 단기 (초록/빨강)
-          PROBE_WAVE_BARS: "500"
+          PROBE_WAVE_BARS: "700"
         run: python scripts/debug_probe.py
