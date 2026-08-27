@@ -466,3 +466,60 @@ def test_turn_up_ignores_a_touch_while_the_fast_line_is_down():
     assert f["dir"].iloc[-1] < 0                    # 단기는 아직 하락
     down.iloc[-1, down.columns.get_loc("High")] = float(f["line"].iloc[-1]) * 1.03
     assert leader_break.turn_up(down, P) is False
+
+
+def _resist_frame(n=200):
+    """1h 프레임 — 길게 내리다 마지막에 살짝 반등하는 모양(단기·장기 모두 하락)."""
+    return _df4h(list(np.linspace(300.0, 100.0, n - 6))
+                 + [100.0 * (1 + 0.004 * i) for i in range(1, 7)])
+
+
+def test_resist_test_marks_a_touch_from_below():
+    """단기선이 위에 있는데 고가가 거기 닿으면 터치."""
+    df = _resist_frame()
+    fast = supertrend_full(df, P.turn_fast_period, P.turn_fast_mult)
+    assert fast["dir"].iloc[-1] < 0                 # 단기는 하락 — 선이 위에 있다
+    line = float(fast["line"].iloc[-1])
+    assert line > float(df["Close"].iloc[-1])
+    df.iloc[-1, df.columns.get_loc("High")] = line * 1.03    # 넉넉히 넘겨 닿게
+
+    f = supertrend_full(df, P.turn_fast_period, P.turn_fast_mult)
+    assert f["dir"].iloc[-1] < 0                    # 종가는 그대로라 아직 하락
+    assert leader_break.resist_test(df, P) == leader_break.RESIST_TOUCH
+
+
+def test_resist_test_calls_a_close_above_the_line_a_break():
+    """종가가 선을 넘겨 단기가 뒤집히면 돌파 — 터치보다 우선한다."""
+    df = _resist_frame()
+    line = float(supertrend_full(df, P.turn_fast_period,
+                                 P.turn_fast_mult)["line"].iloc[-1])
+    out = _df4h(list(df["Close"])[:-1] + [line * 1.05])
+    assert supertrend_full(out, P.turn_fast_period,
+                           P.turn_fast_mult)["dir"].iloc[-1] > 0
+    assert leader_break.resist_test(out, P) == leader_break.RESIST_BREAK
+
+
+def test_resist_test_can_require_the_long_term_falling():
+    """1h 장기가 상승이면 기본값에선 안 붙고, 조건을 끄면 붙는다."""
+    # 봉마다 ±1% 폭을 줘야 ATR이 성립한다 — 폭이 0이면 밴드가 종가에
+    # 달라붙어 얕은 눌림에도 장기까지 같이 뒤집힌다.
+    closes = list(np.linspace(100.0, 300.0, 170)) + list(np.linspace(300.0, 276.0, 20))
+    idx = pd.date_range("2024-01-01", periods=len(closes), freq="1h", tz="UTC")
+    c = pd.Series(closes, index=idx)
+    df = pd.DataFrame({"Open": c, "High": c * 1.01, "Low": c * 0.99,
+                       "Close": c, "Volume": 1.0})
+    fast = supertrend_full(df, P.turn_fast_period, P.turn_fast_mult)
+    slow = supertrend_full(df, P.turn_slow_period, P.turn_slow_mult)
+    assert slow["dir"].iloc[-1] > 0 and fast["dir"].iloc[-1] < 0   # 장기만 상승
+    df.iloc[-1, df.columns.get_loc("High")] = float(fast["line"].iloc[-1]) * 1.02
+
+    assert leader_break.resist_test(df, P) is False                # 장기 상승이라 제외
+    assert leader_break.resist_test(
+        df, Params(turn1h_require_bearish=False)) == leader_break.RESIST_TOUCH
+
+
+def test_resist_test_is_none_when_undecidable():
+    assert leader_break.resist_test(None, P) is None
+    assert leader_break.resist_test(_df4h(np.linspace(100.0, 110.0, 20)), P) is None
+    assert leader_break.resist_test(_resist_frame(),
+                                    Params(turn1h_enabled=False)) is None

@@ -607,3 +607,31 @@ def test_turn_up_mark_reads_pre_kind_events_as_a_flip():
     e = _leader("OLDUSDT")
     e.detail["turn_up"] = True
     assert "🔼단기전환" in format_events([e], [], {})
+
+
+def test_resist_1h_mark_on_momentum_rows():
+    """↗️1h는 ⚡ 신규·추적 양쪽에 붙고, 터치와 돌파를 말로 나눈다."""
+    def lead(symbol, kind, hold=False):
+        e = _leader(symbol, hold=hold)
+        if kind:
+            e.detail["resist_1h"] = kind
+        return e
+
+    out = format_events([lead("TCHUSDT", "터치"), lead("BRKUSDT", "돌파"),
+                         lead("NONEUSDT", None)], [], {},
+                        ongoing_crypto=[lead("HRESUSDT", "돌파", hold=True)])
+    line = {n: [ln for ln in out.splitlines() if f">{n}</a>" in ln][0]
+            for n in ("TCH", "BRK", "NONE")}
+    assert "↗️1h단기선터치" in line["TCH"]
+    assert "↗️1h단기선돌파" in line["BRK"]
+    assert "↗️" not in line["NONE"]
+    assert "↗️1h단기선돌파" in [ln for ln in out.splitlines() if ln.startswith("↳")][0]
+
+
+def test_resist_1h_and_turn_up_can_share_a_row():
+    """4h 🔼와 1h ↗️는 서로 다른 프레임이라 한 줄에 같이 붙을 수 있다."""
+    e = _leader("BOTHUSDT")
+    e.detail["turn_up"] = "전환"
+    e.detail["resist_1h"] = "돌파"
+    out = format_events([e], [], {})
+    assert "🔼단기전환" in out and "↗️1h단기선돌파" in out

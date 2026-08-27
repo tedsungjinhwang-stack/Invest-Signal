@@ -68,6 +68,13 @@ class Params:
     turn_slow_mult: float = 6.0
     turn_bars: int = 3              # 전환·터치 후 이 봉 수까지 표시 (3 × 4h = 12시간)
     turn_touch: bool = True         # 단기선 터치도 같이 표시할지
+    # ↗️ 1h 저항 테스트 — 위 🔼와 정반대 국면. 1h 단기선이 **위에** 있고
+    # 캔들이 아래에서 올라와 그 선을 건드리거나 뚫는 자리다(resist_test()).
+    turn1h_enabled: bool = True
+    turn1h_interval: str = "1h"
+    turn1h_limit: int = 500         # 500 × 1h ≈ 20일
+    turn1h_bars: int = 3            # 터치·돌파 후 이 봉 수까지 표시 (3시간)
+    turn1h_require_bearish: bool = True   # 1h 장기도 하락이어야 하는지
 
 
 def leaders(ticker: dict[str, dict], symbols: set[str],
@@ -299,6 +306,61 @@ def turn_up(df4h: pd.DataFrame, params: Params = Params()) -> "str | bool | None
                     <= float(df4h["High"].iloc[i]):
                 touched = True
     return TURN_TOUCH if touched else False
+
+
+RESIST_TOUCH = "터치"
+RESIST_BREAK = "돌파"
+
+
+def resist_test(df1h: pd.DataFrame, params: Params = Params()) -> "str | bool | None":
+    """1h에서 **단기선이 위에 있는 채로** 캔들이 아래에서 올라와 닿았는지.
+
+    - ``"터치"`` — 단기가 아직 하락인데 고가가 선까지 올라갔다(저항 확인).
+    - ``"돌파"`` — 종가가 선을 넘어 단기가 상승으로 뒤집혔다.
+
+    🔼(4h)와 정반대 국면이다. 거기는 **장기 상승** 안에서 눌림이 끝나는
+    자리를 보지만, 여기는 아직 꺾여 있는 종목이 위쪽 저항을 처음 건드리는
+    자리다 — 뚫으면 국면이 바뀌고 못 뚫으면 저항이 확인된다. 어느 쪽이든
+    지금 무슨 일이 벌어지는지가 그 줄에서 보여야 한다.
+
+    turn1h_require_bearish면 1h 장기까지 하락이어야 한다. 이걸 끄면 장기
+    방향과 무관하게 단기선 접촉만 본다.
+
+    한 봉이 둘 다면 **돌파가 이긴다**. turn1h_bars(기본 3봉 = 3시간) 안이면
+    계속 표시하고, 해당 없으면 False, 판단할 봉이 모자라면 None.
+    """
+    if not params.turn1h_enabled or df1h is None:
+        return None
+    need = max(params.turn_fast_period, params.turn_slow_period) + 2
+    if len(df1h) < need:
+        return None
+    fast = supertrend_full(df1h, params.turn_fast_period, params.turn_fast_mult)
+    last = len(df1h) - 1
+    sd = None
+    if params.turn1h_require_bearish:
+        sd = supertrend_full(df1h, params.turn_slow_period,
+                             params.turn_slow_mult)["dir"]
+    fd, fl = fast["dir"], fast["line"]
+    touched = False
+    for i in range(last, max(0, last - params.turn1h_bars), -1):
+        a, b = fd.iloc[i - 1], fd.iloc[i]
+        if pd.isna(a) or pd.isna(b):
+            continue
+        # 장기는 **직전 봉** 기준으로 본다 — 세게 뚫는 봉은 장기까지 같이
+        # 뒤집혀서, 그 봉으로 재면 정작 잡고 싶은 돌파가 통째로 걸러진다.
+        if sd is not None:
+            prev = sd.iloc[i - 1]
+            if pd.isna(prev) or prev >= 0:
+                continue
+        if b > 0 >= a:
+            return RESIST_BREAK     # 돌파가 터치를 이긴다
+        # 단기가 아직 하락 — 선이 위에 있으므로 고가가 닿으면 저항 테스트다
+        if b <= 0 and not touched:
+            line = fl.iloc[i]
+            if not pd.isna(line) and float(df1h["Low"].iloc[i]) <= float(line) \
+                    <= float(df1h["High"].iloc[i]):
+                touched = True
+    return RESIST_TOUCH if touched else False
 
 
 def tracking(df: pd.DataFrame, params: Params = Params()) -> dict | None:

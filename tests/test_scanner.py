@@ -309,7 +309,8 @@ def test_leader_break_frames_follow_the_scan_mode(monkeypatch):
 
     calls = []
 
-    SHAPE = {"15m": (400, "15min"), "30m": (500, "30min"), "4h": (750, "4h")}
+    SHAPE = {"15m": (400, "15min"), "30m": (500, "30min"),
+             "1h": (500, "1h"), "4h": (750, "4h")}
 
     def fake_klines(session, symbol, source, interval, limit=None,
                     include_live=False, **kw):
@@ -338,8 +339,8 @@ def test_leader_break_frames_follow_the_scan_mode(monkeypatch):
         calls.clear()
         scanner.scan_crypto(cfg, [], log=lambda *a: None, intrabar=intrabar)
         got = {i for i, _ in calls}
-        assert {"4h", "30m"} <= got, f"프레임을 다 안 받았다: {got}"
+        assert {"4h", "30m", "1h"} <= got, f"프레임을 다 안 받았다: {got}"
         for interval, live in calls:
             # 15m 본판정은 마감봉 그대로 — 표시용 프레임만 모드를 따른다
-            want = intrabar if interval in ("4h", "30m") else False
+            want = intrabar if interval in ("4h", "30m", "1h") else False
             assert live is want, f"{interval} include_live={live}"

@@ -180,6 +180,11 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         turn_enabled=bool(s.get("turn_enabled", True)),
         turn_bars=int(s.get("turn_bars", 3)),
         turn_touch=bool(s.get("turn_touch", True)),
+        turn1h_enabled=bool(s.get("turn1h_enabled", True)),
+        turn1h_interval=str(s.get("turn1h_interval", "1h")),
+        turn1h_limit=int(s.get("turn1h_limit", 500)),
+        turn1h_bars=int(s.get("turn1h_bars", 3)),
+        turn1h_require_bearish=bool(s.get("turn1h_require_bearish", True)),
     )
     if ticker is None:              # 호출 측이 미리 받아두지 않았을 때만 직접 조회
         ticker = _crypto_ticker(session, source, log)
@@ -280,6 +285,17 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             except Exception as e:              # noqa: BLE001 — 표시용이라 실패는 무시
                 log(f"[binance] {sym} {params.fib_interval} 수집 실패: "
                     f"{data_binance._safe(e)}")
+        # ↗️ 1h 저항 테스트 — 4h·30m 어느 쪽으로도 못 만드는 프레임이라 따로 받는다
+        resist = None
+        if params.turn1h_enabled:
+            try:
+                d1h = data_binance.klines(session, sym, source, params.turn1h_interval,
+                                          limit=params.turn1h_limit,
+                                          include_live=intrabar)
+                resist = leader_break.resist_test(d1h, params)
+            except Exception as e:              # noqa: BLE001 — 표시용이라 실패는 무시
+                log(f"[binance] {sym} {params.turn1h_interval} 수집 실패: "
+                    f"{data_binance._safe(e)}")
 
         def annotate(detail: dict) -> dict:
             """순위·추적일·24h 지표를 신규/유지 양쪽에 같은 모양으로 붙인다."""
@@ -292,6 +308,8 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             t = leader_break.turn_up(df4, params)
             if t:
                 detail["turn_up"] = t
+            if resist:
+                detail["resist_1h"] = resist
             # 거르지는 않고 '조용한 종목'만 표시 — 판단 불가면 키를 안 만든다
             q = leader_break.quiet(stat, df4, params)
             if q is not None:
