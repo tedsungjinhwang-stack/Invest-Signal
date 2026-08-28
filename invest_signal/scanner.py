@@ -157,7 +157,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     if not s.get("enabled", True):
         return [], [], []
     params = leader_break.Params(
-        top_n=int(s.get("top_n", 5)),
+        top_n=int(s.get("top_n", 10)),
         board_top=int(s.get("board_top", 5)),
         ma=int(s.get("ma", 60)),
         grace_bars=int(s.get("grace_bars", 4)),
