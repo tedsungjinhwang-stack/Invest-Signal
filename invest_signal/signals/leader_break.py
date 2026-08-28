@@ -1,6 +1,6 @@
 """크립토 모멘텀 눌림목/이탈 시그널 (15m봉) — 크립토 선물 전용.
 
-24시간 상승률 **상위 top_n종** 중 **4h가 정배열인 종목**만 대상으로,
+24시간 상승률 **상위 top_n종** 중 **1h가 정배열인 종목**만 대상으로,
 15분봉 종가가 ma(기본 20)선을 **하향 이탈하는 첫 봉**에서 알린다.
 하루 사이 가장 많이 오른 주도주가 단기 추세선을 깨는 자리를 잡는다.
 제외 규칙은 blocked() 참고.
@@ -26,8 +26,10 @@ LABEL = "크립토 모멘텀 눌림목/이탈"
 CRYPTO_ONLY = True      # ETF·주식 스캔에서는 돌리지 않는다
 INTERVAL = "15m"
 KLINE_LIMIT = 200       # ma + grace + 여유 (ma를 키워도 넉넉하도록)
-TREND_INTERVAL = "4h"   # 아래 exhausted() 판정용 — 4h 프레임이 없을 때만 따로 받는다
-TREND_LIMIT = 600       # MA480 성립(480봉) + 여유
+ALIGN_INTERVAL = "1h"   # blocked() 구조 판정용 — 종목마다 따로 받는다
+ALIGN_LIMIT = 600       # MA480 성립(480봉 = 20일) + 여유
+TREND_INTERVAL = "4h"   # quiet()·turn_up() 판정용 — 스캔이 받아둔 프레임을 쓴다
+TREND_LIMIT = 600
 
 
 @dataclass(frozen=True)
@@ -41,10 +43,10 @@ class Params:
     max_watch: int = 60         # 한 스캔에서 15m 캔들을 받을 최대 종목 수
     track_break_only: bool = True   # 추적도 '20선 아래'인 동안만 (복귀하면 제외)
     exhausted_filter: bool = True        # 아래 blocked() 조건에 걸리면 대상에서 제외
-    require_aligned: bool = True         # 4h 배열을 보는지 (끄면 배열 무관 전부 통과)
+    require_aligned: bool = True         # 1h 배열을 보는지 (끄면 배열 무관 전부 통과)
     allow_bearish: bool = False          # 켜면 역배열도 통과 (혼조는 어느 쪽이든 제외)
     allow_short_history: bool = False    # 이력이 짧아 배열 판정 불가면 통과시킬지
-    exhausted_mas: tuple = (120, 240)    # 4h봉 정배열 판정선 (480은 아래에서 따로)
+    exhausted_mas: tuple = (120, 240, 480)   # 1h봉 정배열 판정선
     exhausted_below: int = 480               # 정배열이어도 종가가 이 선 아래면 제외
     # '조용한' 종목 표시 기준 — 거르지 않고 태그만 붙인다(quiet() 참고)
     quiet_turnover_usd: float = 6_000_000    # 24h 거래대금이 이 아래이고
@@ -70,9 +72,8 @@ class Params:
     turn_touch: bool = True         # 단기선 터치도 같이 표시할지
     # ↗️ 1h 저항 테스트 — 위 🔼와 정반대 국면. 1h 단기선이 **위에** 있고
     # 캔들이 아래에서 올라와 그 선을 건드리거나 뚫는 자리다(resist_test()).
+    # 프레임은 구조 판정과 같은 것을 쓴다(ALIGN_INTERVAL/ALIGN_LIMIT).
     turn1h_enabled: bool = True
-    turn1h_interval: str = "1h"
-    turn1h_limit: int = 500         # 500 × 1h ≈ 20일
     turn1h_bars: int = 3            # 터치·돌파 후 이 봉 수까지 표시 (3시간)
     turn1h_require_bearish: bool = True   # 1h 장기도 하락이어야 하는지
 
@@ -122,10 +123,10 @@ def watch_list(top: list[tuple[str, dict]], recent: dict, symbols: set[str],
     return out
 
 
-def blocked(df4h: pd.DataFrame, params: Params = Params()) -> bool:
-    """대상에서 뺄 자리인지 — True면 제외.
+def blocked(df1h: pd.DataFrame, params: Params = Params()) -> bool:
+    """대상에서 뺄 자리인지 — True면 제외. **1h 프레임으로 본다.**
 
-    ① **정배열이 아니면 제외**(require_aligned). 24h 상승률 상위라도 4h
+    ① **정배열이 아니면 제외**(require_aligned). 24h 상승률 상위라도 1h
        구조가 역배열·혼조면 그 상승은 하락 추세 안의 반등이거나 방향이
        아직 안 잡힌 것이다 — 주도주의 눌림으로 볼 자리가 아니다.
 
@@ -139,11 +140,12 @@ def blocked(df4h: pd.DataFrame, params: Params = Params()) -> bool:
        적용하지 않는다** — 역배열은 480선 아래인 게 정상이라, 걸면 역배열이
        통째로 다시 잘린다.
 
-    MA480을 못 구할 만큼 이력이 짧으면(상장 80일 미만) alignment가 None을
-    주므로 ①에서 걸린다. 신규 상장이 24h 상승률 상위를 자주 차지하는
-    만큼 이 컷은 체감이 크다 — 통과시키려면 allow_short_history를 켠다.
+    MA480을 못 구할 만큼 이력이 짧으면 alignment가 None을 주므로 ①에서
+    걸린다. 1h 프레임이라 480봉 = **20일**이다 — 4h로 보던 때의 80일보다
+    문턱이 훨씬 낮아 신규 상장이 덜 잘린다. 그래도 통과시키려면
+    allow_short_history를 켠다.
     """
-    aligned = alignment(df4h, tuple(params.exhausted_mas))
+    aligned = alignment(df1h, tuple(params.exhausted_mas))
     passable = {"정배열"} | ({"역배열"} if params.allow_bearish else set())
     if params.require_aligned and aligned not in passable:
         if aligned is None and params.allow_short_history:
@@ -151,10 +153,10 @@ def blocked(df4h: pd.DataFrame, params: Params = Params()) -> bool:
         return True
     if not params.exhausted_filter or aligned != "정배열":
         return False
-    ref = sma(df4h["Close"], params.exhausted_below)
+    ref = sma(df1h["Close"], params.exhausted_below)
     if pd.isna(ref.iloc[-1]):
         return False
-    return bool(float(df4h["Close"].iloc[-1]) < float(ref.iloc[-1]))
+    return bool(float(df1h["Close"].iloc[-1]) < float(ref.iloc[-1]))
 
 
 def quiet(stat: dict | None, df4h: pd.DataFrame | None,

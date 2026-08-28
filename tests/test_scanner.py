@@ -329,10 +329,12 @@ def test_leader_break_frames_follow_the_scan_mode(monkeypatch):
         "XUSDT": {"change_pct": 30.0, "quote_volume": 50_000_000.0,
                   "last": 1.0}})
 
-    # require_aligned를 켜야 is_blocked()가 4h를 받는다(우상향이라 통과한다)
+    # require_aligned를 켜야 is_blocked()가 1h를 받고(우상향이라 통과한다),
+    # track_break_only를 꺼야 추적 줄이 생겨 annotate가 4h까지 만진다
     cfg = {"crypto": {"enabled": True},
            "signal": {"leader_break": {"enabled": True, "fib_enabled": True,
                                        "require_aligned": True,
+                                       "track_break_only": False,
                                        "exhausted_filter": False}}}
 
     for intrabar in (False, True):

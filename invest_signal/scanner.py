@@ -169,7 +169,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         require_aligned=bool(s.get("require_aligned", True)),
         allow_bearish=bool(s.get("allow_bearish", True)),
         allow_short_history=bool(s.get("allow_short_history", False)),
-        exhausted_mas=tuple(s.get("exhausted_mas", (120, 240))),
+        exhausted_mas=tuple(s.get("exhausted_mas", (120, 240, 480))),
         exhausted_below=int(s.get("exhausted_below", 480)),
         quiet_turnover_usd=float(s.get("quiet_turnover_usd", 6_000_000)),
         quiet_atr_pct=float(s.get("quiet_atr_pct", 0.073)),
@@ -181,8 +181,6 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         turn_bars=int(s.get("turn_bars", 3)),
         turn_touch=bool(s.get("turn_touch", True)),
         turn1h_enabled=bool(s.get("turn1h_enabled", True)),
-        turn1h_interval=str(s.get("turn1h_interval", "1h")),
-        turn1h_limit=int(s.get("turn1h_limit", 500)),
         turn1h_bars=int(s.get("turn1h_bars", 3)),
         turn1h_require_bearish=bool(s.get("turn1h_require_bearish", True)),
     )
@@ -220,9 +218,10 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             f"max_watch={params.max_watch} 초과 {len(stale) - thin}종")
 
     trend_cache: dict[str, "pd.DataFrame | None"] = {}
+    hour_cache: dict[str, "pd.DataFrame | None"] = {}
 
     def trend_frame(sym: str):
-        """이 종목의 4h 프레임 — 제외 판정과 조용 판정이 같이 쓴다.
+        """이 종목의 4h 프레임 — 🍃조용과 🔼단기전환이 쓴다.
 
         스캔이 이미 받아온 750봉이 있으면 그걸 쓰고, 없으면(인트라바에 4h
         대상 시그널이 없는 경우) 해당 종목만 따로 받아 캐시한다. 조회 실패는
@@ -234,9 +233,8 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         """
         if sym in trend_cache:
             return trend_cache[sym]
-        need = max(params.exhausted_mas + (params.exhausted_below,))
         df4 = (frames or {}).get(sym)
-        if df4 is None or len(df4) < need:
+        if df4 is None or len(df4) < leader_break.TREND_LIMIT // 2:
             try:
                 df4 = data_binance.klines(session, sym, source,
                                           leader_break.TREND_INTERVAL,
@@ -248,16 +246,35 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         trend_cache[sym] = df4
         return df4
 
+    def hour_frame(sym: str):
+        """이 종목의 1h 프레임 — 구조 판정(blocked·배열 표기)과 ↗️가 같이 쓴다.
+
+        4h 프레임에서 못 만드는 데다 감시 대상 전 종목이 쓰므로 종목마다
+        한 번만 받아 캐시한다. 조회 실패는 None.
+        """
+        if sym in hour_cache:
+            return hour_cache[sym]
+        try:
+            df = data_binance.klines(session, sym, source,
+                                     leader_break.ALIGN_INTERVAL,
+                                     limit=leader_break.ALIGN_LIMIT,
+                                     include_live=intrabar)
+        except Exception as e:                  # noqa: BLE001
+            log(f"[binance] {sym} 1h 수집 실패: {data_binance._safe(e)}")
+            df = None
+        hour_cache[sym] = df
+        return df
+
     def is_blocked(sym: str) -> bool:
-        """4h 구조로 걸러낼 종목인지 — 정배열이 아니거나, 정배열인데 480선 아래.
+        """1h 구조로 걸러낼 종목인지 — 정배열이 아니거나, 정배열인데 480선 아래.
 
         **조회 실패는 제외하지 않는다** — 네트워크 문제로 주도주가 통째로
         사라지면 안 되니, 판단 자체가 불가능한 경우만 통과로 둔다.
         """
         if not (params.require_aligned or params.exhausted_filter):
             return False
-        df4 = trend_frame(sym)
-        return False if df4 is None else leader_break.blocked(df4, params)
+        df1 = hour_frame(sym)
+        return False if df1 is None else leader_break.blocked(df1, params)
 
     now = pd.Timestamp.now(tz="UTC")
     rank = {sym: i + 1 for i, (sym, _) in enumerate(top)}
@@ -285,17 +302,8 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             except Exception as e:              # noqa: BLE001 — 표시용이라 실패는 무시
                 log(f"[binance] {sym} {params.fib_interval} 수집 실패: "
                     f"{data_binance._safe(e)}")
-        # ↗️ 1h 저항 테스트 — 4h·30m 어느 쪽으로도 못 만드는 프레임이라 따로 받는다
-        resist = None
-        if params.turn1h_enabled:
-            try:
-                d1h = data_binance.klines(session, sym, source, params.turn1h_interval,
-                                          limit=params.turn1h_limit,
-                                          include_live=intrabar)
-                resist = leader_break.resist_test(d1h, params)
-            except Exception as e:              # noqa: BLE001 — 표시용이라 실패는 무시
-                log(f"[binance] {sym} {params.turn1h_interval} 수집 실패: "
-                    f"{data_binance._safe(e)}")
+        # ↗️ 1h 저항 테스트 — 구조 판정에서 이미 받아둔 프레임을 그대로 쓴다
+        resist = leader_break.resist_test(hour_frame(sym), params)
 
         def annotate(detail: dict) -> dict:
             """순위·추적일·24h 지표를 신규/유지 양쪽에 같은 모양으로 붙인다."""
@@ -316,8 +324,11 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                 detail["quiet"] = q
             # 정배열(추세 안의 눌림)과 역배열(하락 중 반등)이 한 칸에 섞이므로
             # 어느 쪽인지 줄에 적는다 — notify가 align 키를 그대로 렌더한다.
-            if df4 is not None and len(df4):
-                al = indicators.alignment(df4, tuple(params.exhausted_mas))
+            # **판정과 같은 1h 프레임을 쓴다** — 4h로 적으면 게이트를 통과한
+            # 줄에 '역배열'이 찍히는 식으로 표기와 조건이 어긋난다.
+            df1 = hour_frame(sym)
+            if df1 is not None and len(df1):
+                al = indicators.alignment(df1, tuple(params.exhausted_mas))
                 if al:
                     detail["align"] = al
             if sym in rank:
@@ -340,9 +351,9 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     if spent:
         why = []
         if params.require_aligned:
-            why.append("4h 혼조·이력부족" if params.allow_bearish else "4h 정배열 아님")
+            why.append("1h 혼조·이력부족" if params.allow_bearish else "1h 정배열 아님")
         if params.exhausted_filter:
-            why.append(f"정배열이나 {params.exhausted_below}선 아래")
+            why.append(f"정배열이나 1h {params.exhausted_below}선 아래")
         log(f"[binance] 크립토 모멘텀 눌림목/이탈 제외 {len(spent)}/{len(watch)}종 "
             f"({' 또는 '.join(why)}): {', '.join(spent)}")
     # 알림 맨 위에 실을 순위표 — 조건(60선 이탈·제외 필터)과 무관하게 상위 그대로
