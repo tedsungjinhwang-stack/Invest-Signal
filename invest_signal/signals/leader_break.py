@@ -47,7 +47,7 @@ class Params:
     allow_bearish: bool = False          # 켜면 역배열도 통과 (혼조는 어느 쪽이든 제외)
     allow_short_history: bool = False    # 이력이 짧아 배열 판정 불가면 통과시킬지
     exhausted_mas: tuple = (120, 240, 480)   # 1h봉 정배열 판정선
-    exhausted_below: int = 480               # 정배열이어도 종가가 이 선 아래면 제외
+    # ② 4h 장기 수퍼트렌드가 상승이어야 한다 — 선은 turn_slow_* 를 같이 쓴다
     # '조용한' 종목 표시 기준 — 거르지 않고 태그만 붙인다(quiet() 참고)
     quiet_turnover_usd: float = 6_000_000    # 24h 거래대금이 이 아래이고
     quiet_atr_pct: float = 0.073             # 4h ATR÷종가가 이 아래면 조용
@@ -123,7 +123,8 @@ def watch_list(top: list[tuple[str, dict]], recent: dict, symbols: set[str],
     return out
 
 
-def blocked(df1h: pd.DataFrame, params: Params = Params()) -> bool:
+def blocked(df1h: pd.DataFrame, params: Params = Params(),
+            df4h: pd.DataFrame | None = None) -> bool:
     """대상에서 뺄 자리인지 — True면 제외. **1h 프레임으로 본다.**
 
     ① **정배열이 아니면 제외**(require_aligned). 24h 상승률 상위라도 1h
@@ -134,16 +135,24 @@ def blocked(df1h: pd.DataFrame, params: Params = Params()) -> bool:
        돌려 봤다가 껐다 — 통과 종목이 15종에서 48종으로 3배 늘고 알림도
        그만큼 늘었다. 켤 때는 알림 줄의 🌱상승초기 마크로 두 종류가
        구분된다.
-    ② **정배열일 때만 종가가 exhausted_below선 아래면 제외**
-       (exhausted_filter). 상승 구조가 완성된 상태에서 480선까지 밀렸으면
-       오를 만큼 오른 뒤 꺾인 것이라 새로 잡을 눌림이 아니다. **역배열엔
-       적용하지 않는다** — 역배열은 480선 아래인 게 정상이라, 걸면 역배열이
-       통째로 다시 잘린다.
+    ② **정배열일 때만 4h 장기 수퍼트렌드가 하락이면 제외**
+       (exhausted_filter). 캔들이 4h 장기선 **위**에 있어야 통과다. 큰
+       추세가 아직 안 꺾였다는 확인이고, 꺾였으면 오를 만큼 오른 뒤
+       돌아선 것이라 새로 잡을 눌림이 아니다. **역배열엔 적용하지 않는다** —
+       역배열은 장기선 아래인 게 정상이라, 걸면 역배열이 통째로 다시 잘린다.
+
+       고정 이동평균 대신 수퍼트렌드를 쓴다. 트레일링 스톱이라 얕은 눌림엔
+       안 꺾이고 추세가 실제로 돌아설 때 꺾인다 — '오를 만큼 오른 뒤'를
+       묻는 조건에 이쪽이 맞다. 선은 🔼단기전환이 쓰는 4h 장기선과 같다
+       (turn_slow_period × turn_slow_mult).
 
     MA480을 못 구할 만큼 이력이 짧으면 alignment가 None을 주므로 ①에서
     걸린다. 1h 프레임이라 480봉 = **20일**이다 — 4h로 보던 때의 80일보다
     문턱이 훨씬 낮아 신규 상장이 덜 잘린다. 그래도 통과시키려면
     allow_short_history를 켠다.
+
+    df4h가 없거나 봉이 모자라면 ②를 건너뛴다 — ①과 같이 **판단 불가는
+    제외하지 않는다**.
     """
     aligned = alignment(df1h, tuple(params.exhausted_mas))
     passable = {"정배열"} | ({"역배열"} if params.allow_bearish else set())
@@ -153,10 +162,11 @@ def blocked(df1h: pd.DataFrame, params: Params = Params()) -> bool:
         return True
     if not params.exhausted_filter or aligned != "정배열":
         return False
-    ref = sma(df1h["Close"], params.exhausted_below)
-    if pd.isna(ref.iloc[-1]):
+    if df4h is None or len(df4h) < params.turn_slow_period + 2:
         return False
-    return bool(float(df1h["Close"].iloc[-1]) < float(ref.iloc[-1]))
+    d = supertrend_full(df4h, params.turn_slow_period,
+                        params.turn_slow_mult)["dir"].iloc[-1]
+    return bool(not pd.isna(d) and d <= 0)
 
 
 def quiet(stat: dict | None, df4h: pd.DataFrame | None,

@@ -182,17 +182,24 @@ def _df4h(closes):
     return pd.DataFrame({"Open": c, "High": c, "Low": c, "Close": c, "Volume": 1.0})
 
 
-def test_blocked_excludes_bullish_stack_that_fell_under_the_long_ma():
-    """정배열인데 종가가 480선 아래 — 오를 만큼 오르고 꺾인 자리라 제외."""
+def test_blocked_excludes_bullish_stack_whose_4h_supertrend_turned_down():
+    """1h 정배열이어도 4h 장기 수퍼트렌드가 꺾였으면 제외."""
     up = list(np.linspace(100.0, 400.0, 600))    # 우상향 → MA120>MA240>MA480 정배열
-    df = _df4h(up)
-    assert alignment_of(df) == "정배열"
-    assert leader_break.blocked(df, P) is False     # 아직 480선 위 → 통과
+    df1h = _df4h(up)
+    assert alignment_of(df1h) == "정배열"
 
-    ma480 = float(pd.Series(up).rolling(480).mean().iloc[-1])
-    df_down = _df4h(up + [ma480 - 20])           # 480선 아래로 밀린 봉
-    assert alignment_of(df_down) == "정배열"       # 배열은 아직 정배열
-    assert leader_break.blocked(df_down, P) is True
+    rising = _df4h(up)                            # 4h도 우상향 — 장기선 위
+    assert supertrend_full(rising, P.turn_slow_period,
+                           P.turn_slow_mult)["dir"].iloc[-1] > 0
+    assert leader_break.blocked(df1h, P, rising) is False
+
+    fell = _df4h(up + list(np.linspace(400.0, 250.0, 40)))   # 크게 밀려 장기선 이탈
+    assert supertrend_full(fell, P.turn_slow_period,
+                           P.turn_slow_mult)["dir"].iloc[-1] < 0
+    assert leader_break.blocked(df1h, P, fell) is True
+
+    # 4h를 못 주면 ②를 건너뛴다 — 판단 불가는 제외하지 않는다
+    assert leader_break.blocked(df1h, P) is False
 
 
 THREE = Params(exhausted_mas=(120, 240, 480))    # 혼조가 나오려면 선이 셋 이상
@@ -226,9 +233,8 @@ def test_require_aligned_off_lets_even_mixed_through():
 def test_blocked_excludes_short_history_unless_allowed():
     """가장 긴 선이 안 잡히면 배열 판정 불가 — 기본은 제외.
 
-    기본값은 240봉(40일)이 요건이다. 480을 배열 판정에서 뺐기 때문에 예전
-    80일에서 내려왔다 — 상장 40~80일 종목은 배열은 잡히고 MA480이 없어
-    exhausted_below 검사를 그냥 통과하므로 새로 들어온다.
+    판정은 1h 프레임이라 요건이 480봉 = **20일**이다. 4h로 보던 때의 80일
+    보다 문턱이 낮아 신규 상장이 덜 잘린다.
     """
     new_listing = _df4h(np.linspace(100.0, 200.0, 200))
     assert alignment_of(new_listing) is None
@@ -243,15 +249,17 @@ def test_blocked_excludes_short_history_unless_allowed():
 
 
 def test_filters_can_be_turned_off_independently():
-    up = list(np.linspace(100.0, 400.0, 600))
-    ma480 = float(pd.Series(up).rolling(480).mean().iloc[-1])
-    fell = _df4h(up + [ma480 - 20])              # 정배열 + 480선 아래
-    assert leader_break.blocked(fell, Params(exhausted_filter=False)) is False
-    down = _df4h(np.linspace(400.0, 100.0, 600))  # 역배열
-    assert leader_break.blocked(down, Params(require_aligned=False)) is False
+    bull = _df4h(np.linspace(100.0, 400.0, 600))            # 1h 정배열
+    broke = _df4h(list(np.linspace(100.0, 400.0, 600))
+                  + list(np.linspace(400.0, 250.0, 40)))    # 4h 장기선 이탈
+    assert leader_break.blocked(bull, P, broke) is True      # 둘 다 켜면 컷
+    assert leader_break.blocked(bull, Params(exhausted_filter=False), broke) is False
+    down = _df4h(np.linspace(400.0, 100.0, 600))             # 역배열
+    assert leader_break.blocked(down, Params(require_aligned=False), broke) is False
     # 둘 다 끄면 아무것도 안 걸린다
     off = Params(require_aligned=False, exhausted_filter=False)
-    assert leader_break.blocked(fell, off) is False and leader_break.blocked(down, off) is False
+    assert leader_break.blocked(bull, off, broke) is False
+    assert leader_break.blocked(down, off, broke) is False
 
 
 def alignment_of(df, periods=None):
@@ -336,20 +344,21 @@ def test_blocked_still_cuts_mixed_alignment():
     assert leader_break.blocked(df, THREE) is True
 
 
-def test_the_480_cut_applies_to_bullish_stacks_only():
-    """480선 컷은 정배열 전용 — 역배열은 그 아래인 게 정상이라 안 건다."""
-    up = list(np.linspace(100.0, 400.0, 600))
-    ma480 = float(pd.Series(up).rolling(480).mean().iloc[-1])
-    bull_below = _df4h(up + [ma480 - 20])
-    assert alignment_of(bull_below) == "정배열"
-    assert leader_break.blocked(bull_below, P) is True      # 정배열 + 480선 아래 → 컷
+def test_the_supertrend_cut_applies_to_bullish_stacks_only():
+    """수퍼트렌드 컷은 정배열 전용 — 역배열은 장기선 아래인 게 정상이라 안 건다."""
+    fell = _df4h(list(np.linspace(100.0, 400.0, 600))
+                 + list(np.linspace(400.0, 250.0, 40)))
+    assert supertrend_full(fell, P.turn_slow_period,
+                           P.turn_slow_mult)["dir"].iloc[-1] < 0
 
-    down = list(np.linspace(400.0, 100.0, 600))
-    bear = _df4h(down)
-    ref = float(pd.Series(down).rolling(480).mean().iloc[-1])
-    assert down[-1] < ref                                    # 역배열은 480선 아래가 정상
-    # allow_bearish를 켠 상태에서도 480선 컷은 역배열에 걸리지 않는다
-    assert leader_break.blocked(bear, Params(allow_bearish=True)) is False
+    bull = _df4h(np.linspace(100.0, 400.0, 600))
+    assert alignment_of(bull) == "정배열"
+    assert leader_break.blocked(bull, P, fell) is True       # 정배열 + 장기선 이탈 → 컷
+
+    bear = _df4h(np.linspace(400.0, 100.0, 600))
+    assert alignment_of(bear) == "역배열"
+    # allow_bearish를 켠 상태에서도 수퍼트렌드 컷은 역배열에 걸리지 않는다
+    assert leader_break.blocked(bear, Params(allow_bearish=True), fell) is False
 
 
 def _wave_frame(down=150, up=150, back=100, top=120.0, bottom=60.0, start=100.0):

@@ -170,7 +170,6 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         allow_bearish=bool(s.get("allow_bearish", True)),
         allow_short_history=bool(s.get("allow_short_history", False)),
         exhausted_mas=tuple(s.get("exhausted_mas", (120, 240, 480))),
-        exhausted_below=int(s.get("exhausted_below", 480)),
         quiet_turnover_usd=float(s.get("quiet_turnover_usd", 6_000_000)),
         quiet_atr_pct=float(s.get("quiet_atr_pct", 0.073)),
         fib_enabled=bool(s.get("fib_enabled", True)),
@@ -274,7 +273,12 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         if not (params.require_aligned or params.exhausted_filter):
             return False
         df1 = hour_frame(sym)
-        return False if df1 is None else leader_break.blocked(df1, params)
+        if df1 is None:
+            return False
+        # ②는 4h 장기 수퍼트렌드라 프레임이 하나 더 든다. 스캔이 받아둔
+        # 것을 쓰므로 대개 추가 요청이 없다.
+        df4 = trend_frame(sym) if params.exhausted_filter else None
+        return leader_break.blocked(df1, params, df4)
 
     now = pd.Timestamp.now(tz="UTC")
     rank = {sym: i + 1 for i, (sym, _) in enumerate(top)}
@@ -353,7 +357,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         if params.require_aligned:
             why.append("1h 혼조·이력부족" if params.allow_bearish else "1h 정배열 아님")
         if params.exhausted_filter:
-            why.append(f"정배열이나 1h {params.exhausted_below}선 아래")
+            why.append("정배열이나 4h 장기 수퍼트렌드 하락")
         log(f"[binance] 크립토 모멘텀 눌림목/이탈 제외 {len(spent)}/{len(watch)}종 "
             f"({' 또는 '.join(why)}): {', '.join(spent)}")
     # 알림 맨 위에 실을 순위표 — 조건(60선 이탈·제외 필터)과 무관하게 상위 그대로
