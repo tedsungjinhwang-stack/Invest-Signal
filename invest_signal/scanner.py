@@ -173,8 +173,6 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         quiet_turnover_usd=float(s.get("quiet_turnover_usd", 6_000_000)),
         quiet_atr_pct=float(s.get("quiet_atr_pct", 0.073)),
         fib_enabled=bool(s.get("fib_enabled", True)),
-        fib_interval=str(s.get("fib_interval", "30m")),
-        fib_limit=int(s.get("fib_limit", 500)),
         fib_min=float(s.get("fib_min", 0.618)),
         turn_enabled=bool(s.get("turn_enabled", True)),
         turn_bars=int(s.get("turn_bars", 3)),
@@ -294,19 +292,9 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             log(f"[binance] {sym} 15m 수집 실패: {data_binance._safe(e)}")
             continue
         stat = ticker.get(sym) or {}
-        # 📐 되돌림 — 30m 파동은 15m·4h 어느 프레임으로도 못 만들어서 따로 받는다.
-        # blocked()를 통과한 종목만 여기까지 오므로 요청이 대상 수만큼만 는다.
-        fib = None
-        if params.fib_enabled:
-            try:
-                d30 = data_binance.klines(session, sym, source, params.fib_interval,
-                                          limit=params.fib_limit,
-                                          include_live=intrabar)
-                fib = leader_break.retrace(d30, params)
-            except Exception as e:              # noqa: BLE001 — 표시용이라 실패는 무시
-                log(f"[binance] {sym} {params.fib_interval} 수집 실패: "
-                    f"{data_binance._safe(e)}")
-        # ↗️ 1h 저항 테스트 — 구조 판정에서 이미 받아둔 프레임을 그대로 쓴다
+        # 📐 되돌림과 ↗️ 저항 테스트 — 구조 판정에서 이미 받아둔 1h 프레임을
+        # 그대로 쓴다. 셋이 같은 프레임이라 종목당 1h 요청은 한 번뿐이다.
+        fib = leader_break.retrace(hour_frame(sym), params)
         resist = leader_break.resist_test(hour_frame(sym), params)
 
         def annotate(detail: dict) -> dict:

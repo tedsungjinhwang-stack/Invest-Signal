@@ -300,17 +300,18 @@ def test_market_value_prefers_crypto_key():
 
 
 def test_leader_break_frames_follow_the_scan_mode(monkeypatch):
-    """인트라바 스캔이면 ⚡가 따로 받는 4h·30m도 진행봉을 포함해야 한다.
+    """인트라바 스캔이면 ⚡가 따로 받는 4h·1h도 진행봉을 포함해야 한다.
 
     🔼단기전환은 4h 수퍼트렌드로 판정하므로, 여기만 마감봉을 쓰면 프레임이
-    어느 경로로 왔느냐에 따라 표시가 최대 4시간 늦어진다.
+    어느 경로로 왔느냐에 따라 표시가 최대 4시간 늦어진다. 프레임 구성 자체도
+    같이 고정한다 — 📐가 30m을 따로 받다가 1h으로 합쳐진 적이 있어서, 요청이
+    조용히 늘거나 줄면 여기서 걸리게 해 둔다.
     """
     from invest_signal import scanner
 
     calls = []
 
-    SHAPE = {"15m": (400, "15min"), "30m": (500, "30min"),
-             "1h": (500, "1h"), "4h": (750, "4h")}
+    SHAPE = {"15m": (400, "15min"), "1h": (600, "1h"), "4h": (750, "4h")}
 
     def fake_klines(session, symbol, source, interval, limit=None,
                     include_live=False, **kw):
@@ -341,8 +342,8 @@ def test_leader_break_frames_follow_the_scan_mode(monkeypatch):
         calls.clear()
         scanner.scan_crypto(cfg, [], log=lambda *a: None, intrabar=intrabar)
         got = {i for i, _ in calls}
-        assert {"4h", "30m", "1h"} <= got, f"프레임을 다 안 받았다: {got}"
+        assert {"4h", "1h", "15m"} == got, f"프레임 구성이 달라졌다: {got}"
         for interval, live in calls:
             # 15m 본판정은 마감봉 그대로 — 표시용 프레임만 모드를 따른다
-            want = intrabar if interval in ("4h", "30m", "1h") else False
+            want = intrabar if interval in ("4h", "1h") else False
             assert live is want, f"{interval} include_live={live}"

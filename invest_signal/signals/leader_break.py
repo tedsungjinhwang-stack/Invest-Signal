@@ -52,10 +52,9 @@ class Params:
     quiet_turnover_usd: float = 6_000_000    # 24h 거래대금이 이 아래이고
     quiet_atr_pct: float = 0.073             # 4h ATR÷종가가 이 아래면 조용
     quiet_atr_period: int = 14
-    # 📐 되돌림 표시 — 30m 파동의 저점·고점 대비 지금 어디까지 밀렸는지.
+    # 📐 되돌림 표시 — 1h 파동의 저점·고점 대비 지금 어디까지 밀렸는지.
+    # 프레임은 구조 판정과 같은 것을 쓴다(ALIGN_INTERVAL/ALIGN_LIMIT).
     fib_enabled: bool = True
-    fib_interval: str = "30m"       # 파동을 재는 봉
-    fib_limit: int = 500            # 받아올 봉 수 (500 × 30m ≈ 10일)
     fib_fast_period: int = 22       # 단기 수퍼트렌드 — 파동의 시작·끝
     fib_fast_mult: float = 3.0
     fib_slow_period: int = 30       # 장기 수퍼트렌드 — 저점 구간의 시작
@@ -200,7 +199,7 @@ def quiet(stat: dict | None, df4h: pd.DataFrame | None,
 
 
 def last_wave(df: pd.DataFrame, params: Params = Params()):
-    """마지막으로 **닫힌** 파동의 (저점, 고점). 없으면 None.
+    """마지막으로 **닫힌** 파동의 (저점, 고점). 없으면 None. **1h 프레임.**
 
     파동 한 사이클:
         장기 하락 전환 ─┐  이 구간 최저 저가 = 저점
@@ -215,6 +214,11 @@ def last_wave(df: pd.DataFrame, params: Params = Params()):
     저점 구간을 장기 기준으로 잡는 이유: 장기는 단기보다 늦게 깨지므로
     그 창이 하락의 깊은 부분만 덮고, 하락 중의 잔 반등에 흔들리지 않는다.
     단기 기준으로 자르면 마지막 짧은 다리만 봐서 진짜 바닥을 놓친다.
+
+    **30m에서 1h으로 옮겼다.** 30m 파동은 폭이 2~8%밖에 안 돼서 분모가
+    작았고, 조금만 밀려도 되돌림이 1.0을 훌쩍 넘었다(📐2.28·📐9.28 같은
+    값이 실제로 나왔다). 같은 종목을 1h으로 재면 폭이 8~79%가 되고 값도
+    0.6~1.2로 돌아온다. 게이트가 이미 받아 두는 프레임이라 요청도 준다.
     """
     n = len(df)
     if n < max(params.fib_fast_period, params.fib_slow_period) + 2:
@@ -260,7 +264,7 @@ def retrace(df: pd.DataFrame, params: Params = Params()) -> float | None:
     조금만 밀려도 뒤집혀서, 그 순간 되돌림은 구조적으로 0.3 언저리다
     (PTB 10일 실측 9개 파동이 전부 0.09~0.34였다).
     """
-    if not params.fib_enabled or not len(df):
+    if not params.fib_enabled or df is None or not len(df):
         return None
     wave = last_wave(df, params)
     if wave is None:
