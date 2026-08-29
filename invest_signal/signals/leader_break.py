@@ -59,7 +59,7 @@ class Params:
     fib_fast_mult: float = 3.0
     fib_slow_period: int = 30       # 장기 수퍼트렌드 — 저점 구간의 시작
     fib_slow_mult: float = 6.0
-    fib_min: float = 0.618          # 이 아래면 표시하지 않는다
+    fib_min: float = 0.5            # 이 아래면 표시하지 않는다
     # 🔼 단기전환 — 4h 장기가 상승인 채로 단기가 하락→상승으로 뒤집힌 자리.
     # 눌림이 끝나고 다시 붙는 지점이다(되돌림이 '얼마나'라면 이건 '언제').
     turn_enabled: bool = True
