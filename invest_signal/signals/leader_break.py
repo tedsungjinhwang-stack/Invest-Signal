@@ -74,8 +74,8 @@ class Params:
     # 캔들이 아래에서 올라와 그 선을 건드리거나 뚫는 자리다(resist_test()).
     # 프레임은 구조 판정과 같은 것을 쓴다(ALIGN_INTERVAL/ALIGN_LIMIT).
     turn1h_enabled: bool = True
-    turn1h_bars: int = 3            # 터치·돌파 후 이 봉 수까지 표시 (3시간)
-    turn1h_require_bearish: bool = True   # 1h 장기도 하락이어야 하는지
+    turn1h_bars: int = 24           # 터치·돌파 후 이 봉 수까지 표시 (24시간)
+    turn1h_require_bearish: bool = False  # 1h 장기도 하락이어야 하는지
 
 
 def leaders(ticker: dict[str, dict], symbols: set[str],
@@ -335,8 +335,11 @@ def resist_test(df1h: pd.DataFrame, params: Params = Params()) -> "str | bool | 
     자리다 — 뚫으면 국면이 바뀌고 못 뚫으면 저항이 확인된다. 어느 쪽이든
     지금 무슨 일이 벌어지는지가 그 줄에서 보여야 한다.
 
-    turn1h_require_bearish면 1h 장기까지 하락이어야 한다. 이걸 끄면 장기
-    방향과 무관하게 단기선 접촉만 본다.
+    turn1h_require_bearish면 1h 장기까지 하락이어야 한다. **기본은 꺼져
+    있다** — ⚡ 게이트가 1h 정배열을 요구하므로 통과 종목의 1h 장기는 거의
+    항상 상승이고, 켜 두면 이 표시가 구조적으로 안 붙는다. 꺼진 상태에서는
+    '큰 추세는 살아 있는데 1h 단기가 꺾인 눌림'에서 그 단기선을 다시
+    건드리거나 뚫는 자리를 잡는다.
 
     한 봉이 둘 다면 **돌파가 이긴다**. turn1h_bars(기본 3봉 = 3시간) 안이면
     계속 표시하고, 해당 없으면 False, 판단할 봉이 모자라면 None.

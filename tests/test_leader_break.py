@@ -509,7 +509,11 @@ def test_resist_test_calls_a_close_above_the_line_a_break():
 
 
 def test_resist_test_can_require_the_long_term_falling():
-    """1h 장기가 상승이면 기본값에선 안 붙고, 조건을 끄면 붙는다."""
+    """기본은 1h 장기 방향을 안 본다 — 켜면 장기 상승인 종목이 빠진다.
+
+    ⚡ 게이트가 1h 정배열을 요구하므로 통과 종목의 1h 장기는 거의 항상
+    상승이다. 그래서 이 조건을 켜 두면 표시가 구조적으로 안 붙는다.
+    """
     # 봉마다 ±1% 폭을 줘야 ATR이 성립한다 — 폭이 0이면 밴드가 종가에
     # 달라붙어 얕은 눌림에도 장기까지 같이 뒤집힌다.
     closes = list(np.linspace(100.0, 300.0, 170)) + list(np.linspace(300.0, 276.0, 20))
@@ -522,9 +526,9 @@ def test_resist_test_can_require_the_long_term_falling():
     assert slow["dir"].iloc[-1] > 0 and fast["dir"].iloc[-1] < 0   # 장기만 상승
     df.iloc[-1, df.columns.get_loc("High")] = float(fast["line"].iloc[-1]) * 1.02
 
-    assert leader_break.resist_test(df, P) is False                # 장기 상승이라 제외
+    assert leader_break.resist_test(df, P) == leader_break.RESIST_TOUCH   # 기본은 붙는다
     assert leader_break.resist_test(
-        df, Params(turn1h_require_bearish=False)) == leader_break.RESIST_TOUCH
+        df, Params(turn1h_require_bearish=True)) is False   # 켜면 장기 상승이라 제외
 
 
 def test_resist_test_is_none_when_undecidable():
