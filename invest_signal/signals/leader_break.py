@@ -142,8 +142,8 @@ def blocked(df1h: pd.DataFrame, params: Params = Params(),
 
        고정 이동평균 대신 수퍼트렌드를 쓴다. 트레일링 스톱이라 얕은 눌림엔
        안 꺾이고 추세가 실제로 돌아설 때 꺾인다 — '오를 만큼 오른 뒤'를
-       묻는 조건에 이쪽이 맞다. 선은 🔼단기전환이 쓰는 4h 장기선과 같다
-       (turn_slow_period × turn_slow_mult).
+       묻는 조건에 이쪽이 맞다. 선은 turn_slow_period × turn_slow_mult
+       (기본 30×6)이며, turn_enabled를 꺼도 이 게이트는 계속 쓴다.
 
     MA480을 못 구할 만큼 이력이 짧으면 alignment가 None을 주므로 ①에서
     걸린다. 1h 프레임이라 480봉 = **20일**이다 — 4h로 보던 때의 80일보다
