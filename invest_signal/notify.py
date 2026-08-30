@@ -199,9 +199,7 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     tt = _turn_tag(d)
     if tt:
         tags.append(tt)
-    rt1 = _resist_tag(d)
-    if rt1:
-        tags.append(rt1)
+    tags += _resist_tags(d)
     ft = _fib_tag(d)
     if ft:
         tags.append(ft)
@@ -264,11 +262,17 @@ def _turn_tag(d: dict) -> str | None:
 # ⚡ 줄에만. 1h 단기선이 **위에** 있는 채로 캔들이 아래에서 올라와 닿은 자리 —
 # 🔼와 정반대 국면이라 아이콘을 따로 쓴다(leader_break.resist_test).
 RESIST_TAGS = {"터치": "↗️1h단기선터치", "돌파": "↗️1h단기선돌파"}
+RESIST15_TAGS = {"터치": "↗️15m단기선터치", "돌파": "↗️15m단기선돌파"}
 
 
-def _resist_tag(d: dict) -> str | None:
-    r = d.get("resist_1h")
-    return RESIST_TAGS.get(r) if isinstance(r, str) else None
+def _resist_tags(d: dict) -> list[str]:
+    """1h·15m 저항 테스트 표시 — 큰 눈금부터. 둘 다 붙을 수 있다."""
+    out = []
+    for key, tags in (("resist_1h", RESIST_TAGS), ("resist_15m", RESIST15_TAGS)):
+        r = d.get(key)
+        if isinstance(r, str) and r in tags:
+            out.append(tags[r])
+    return out
 
 # ⚡ 역배열 줄에 붙는 표시. 정배열이 '상승 추세 안의 눌림'이라면 역배열은
 # '하락 추세에서 막 돌아서는 자리'라 성격이 정반대인데, 두 종류가 한 칸에
@@ -348,9 +352,8 @@ def format_events(events_crypto: list, events_etf: list,
             ft = _fib_tag(d)
             if ft:
                 tags.insert(0, ft)
-            rt1 = _resist_tag(d)
-            if rt1:
-                tags.insert(0, rt1)
+            for t in reversed(_resist_tags(d)):
+                tags.insert(0, t)
             tt = _turn_tag(d)
             if tt:
                 tags.insert(0, tt)

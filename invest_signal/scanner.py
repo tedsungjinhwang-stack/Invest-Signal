@@ -180,6 +180,9 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         turn1h_enabled=bool(s.get("turn1h_enabled", True)),
         turn1h_bars=int(s.get("turn1h_bars", 3)),
         turn1h_require_bearish=bool(s.get("turn1h_require_bearish", True)),
+        turn15m_enabled=bool(s.get("turn15m_enabled", True)),
+        turn15m_bars=int(s.get("turn15m_bars", 8)),
+        turn15m_require_bearish=bool(s.get("turn15m_require_bearish", False)),
     )
     if ticker is None:              # 호출 측이 미리 받아두지 않았을 때만 직접 조회
         ticker = _crypto_ticker(session, source, log)
@@ -296,6 +299,8 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         # 그대로 쓴다. 셋이 같은 프레임이라 종목당 1h 요청은 한 번뿐이다.
         fib = leader_break.retrace(hour_frame(sym), params)
         resist = leader_break.resist_test(hour_frame(sym), params)
+        # 15m은 이탈 본판정용으로 방금 받은 프레임을 그대로 쓴다
+        resist15 = leader_break.resist_test_15m(df, params)
 
         def annotate(detail: dict) -> dict:
             """순위·추적일·24h 지표를 신규/유지 양쪽에 같은 모양으로 붙인다."""
@@ -310,6 +315,8 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                 detail["turn_up"] = t
             if resist:
                 detail["resist_1h"] = resist
+            if resist15:
+                detail["resist_15m"] = resist15
             # 거르지는 않고 '조용한 종목'만 표시 — 판단 불가면 키를 안 만든다
             q = leader_break.quiet(stat, df4, params)
             if q is not None:

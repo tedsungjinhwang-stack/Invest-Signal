@@ -75,6 +75,11 @@ class Params:
     turn1h_enabled: bool = True
     turn1h_bars: int = 24           # 터치·돌파 후 이 봉 수까지 표시 (24시간)
     turn1h_require_bearish: bool = False  # 1h 장기도 하락이어야 하는지
+    # ↗️ 15m 저항 테스트 — 같은 판정을 한 단계 더 잘게. 15m 프레임은 이탈
+    # 본판정용으로 이미 받아 두므로 추가 요청이 없다.
+    turn15m_enabled: bool = True
+    turn15m_bars: int = 8           # 터치·돌파 후 이 봉 수까지 표시 (2시간)
+    turn15m_require_bearish: bool = False
 
 
 def leaders(ticker: dict[str, dict], symbols: set[str],
@@ -328,40 +333,34 @@ RESIST_TOUCH = "터치"
 RESIST_BREAK = "돌파"
 
 
-def resist_test(df1h: pd.DataFrame, params: Params = Params()) -> "str | bool | None":
-    """1h에서 **단기선이 위에 있는 채로** 캔들이 아래에서 올라와 닿았는지.
+def _line_test(df: pd.DataFrame, params: Params, bars: int,
+               require_bearish: bool) -> "str | bool | None":
+    """**단기선이 위에 있는 채로** 캔들이 아래에서 올라와 닿았는지.
 
     - ``"터치"`` — 단기가 아직 하락인데 고가가 선까지 올라갔다(저항 확인).
     - ``"돌파"`` — 종가가 선을 넘어 단기가 상승으로 뒤집혔다.
 
-    🔼(4h)와 정반대 국면이다. 거기는 **장기 상승** 안에서 눌림이 끝나는
-    자리를 보지만, 여기는 아직 꺾여 있는 종목이 위쪽 저항을 처음 건드리는
-    자리다 — 뚫으면 국면이 바뀌고 못 뚫으면 저항이 확인된다. 어느 쪽이든
-    지금 무슨 일이 벌어지는지가 그 줄에서 보여야 한다.
+    뚫으면 국면이 바뀌고 못 뚫으면 저항이 확인된다. 어느 쪽이든 지금 무슨
+    일이 벌어지는지가 그 줄에서 보여야 하므로 둘 다 잡되 말로 나눈다.
+    한 봉이 둘 다면 **돌파가 이긴다**.
 
-    turn1h_require_bearish면 1h 장기까지 하락이어야 한다. **기본은 꺼져
-    있다** — ⚡ 게이트가 1h 정배열을 요구하므로 통과 종목의 1h 장기는 거의
-    항상 상승이고, 켜 두면 이 표시가 구조적으로 안 붙는다. 꺼진 상태에서는
-    '큰 추세는 살아 있는데 1h 단기가 꺾인 눌림'에서 그 단기선을 다시
-    건드리거나 뚫는 자리를 잡는다.
-
-    한 봉이 둘 다면 **돌파가 이긴다**. turn1h_bars(기본 3봉 = 3시간) 안이면
-    계속 표시하고, 해당 없으면 False, 판단할 봉이 모자라면 None.
+    프레임에 무관한 계산이라 1h·15m이 같이 쓴다 — 눈금만 다르고 묻는 건
+    같다. bars 안이면 계속 표시하고, 해당 없으면 False, 봉이 모자라면 None.
     """
-    if not params.turn1h_enabled or df1h is None:
+    if df is None:
         return None
     need = max(params.turn_fast_period, params.turn_slow_period) + 2
-    if len(df1h) < need:
+    if len(df) < need:
         return None
-    fast = supertrend_full(df1h, params.turn_fast_period, params.turn_fast_mult)
-    last = len(df1h) - 1
+    fast = supertrend_full(df, params.turn_fast_period, params.turn_fast_mult)
+    last = len(df) - 1
     sd = None
-    if params.turn1h_require_bearish:
-        sd = supertrend_full(df1h, params.turn_slow_period,
+    if require_bearish:
+        sd = supertrend_full(df, params.turn_slow_period,
                              params.turn_slow_mult)["dir"]
     fd, fl = fast["dir"], fast["line"]
     touched = False
-    for i in range(last, max(0, last - params.turn1h_bars), -1):
+    for i in range(last, max(0, last - bars), -1):
         a, b = fd.iloc[i - 1], fd.iloc[i]
         if pd.isna(a) or pd.isna(b):
             continue
@@ -376,10 +375,42 @@ def resist_test(df1h: pd.DataFrame, params: Params = Params()) -> "str | bool | 
         # 단기가 아직 하락 — 선이 위에 있으므로 고가가 닿으면 저항 테스트다
         if b <= 0 and not touched:
             line = fl.iloc[i]
-            if not pd.isna(line) and float(df1h["Low"].iloc[i]) <= float(line) \
-                    <= float(df1h["High"].iloc[i]):
+            if not pd.isna(line) and float(df["Low"].iloc[i]) <= float(line) \
+                    <= float(df["High"].iloc[i]):
                 touched = True
     return RESIST_TOUCH if touched else False
+
+
+def resist_test(df1h: pd.DataFrame, params: Params = Params()) -> "str | bool | None":
+    """1h 단기선 저항 테스트 — _line_test를 1h 설정으로 부른다.
+
+    turn1h_require_bearish면 1h 장기까지 하락이어야 한다. **기본은 꺼져
+    있다** — ⚡ 게이트가 1h 정배열을 요구하므로 통과 종목의 1h 장기는 거의
+    항상 상승이고, 켜 두면 이 표시가 구조적으로 안 붙는다. 꺼진 상태에서는
+    '큰 추세는 살아 있는데 1h 단기가 꺾인 눌림'에서 그 단기선을 다시
+    건드리거나 뚫는 자리를 잡는다.
+    """
+    if not params.turn1h_enabled:
+        return None
+    return _line_test(df1h, params, params.turn1h_bars,
+                      params.turn1h_require_bearish)
+
+
+def resist_test_15m(df15: pd.DataFrame,
+                    params: Params = Params()) -> "str | bool | None":
+    """15m 단기선 저항 테스트 — 1h과 같은 판정을 한 단계 더 잘게.
+
+    15m 프레임은 이탈 본판정용으로 이미 받아 두므로 **추가 요청이 없다.**
+    1h이 '눌림이 돌아서나'를 보면 이건 그 안의 잔 파동을 본다 — 같은
+    종목에 1h과 15m이 같이 붙으면 두 눈금이 함께 돌아섰다는 뜻이다.
+
+    창은 turn15m_bars(기본 8봉 = 2시간)다. 스캔이 매시간 도니 4봉이면 겨우
+    한 스캔 간격이라, 그 두 배를 둬서 직전 스캔에서 난 사건도 한 번 더 보인다.
+    """
+    if not params.turn15m_enabled:
+        return None
+    return _line_test(df15, params, params.turn15m_bars,
+                      params.turn15m_require_bearish)
 
 
 def tracking(df: pd.DataFrame, params: Params = Params()) -> dict | None:

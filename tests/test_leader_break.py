@@ -536,3 +536,18 @@ def test_resist_test_is_none_when_undecidable():
     assert leader_break.resist_test(_df4h(np.linspace(100.0, 110.0, 20)), P) is None
     assert leader_break.resist_test(_resist_frame(),
                                     Params(turn1h_enabled=False)) is None
+
+
+def test_resist_test_15m_shares_the_1h_judgement():
+    """15m은 같은 판정을 프레임만 바꿔 쓴다 — 창과 스위치만 따로."""
+    df = _resist_frame()
+    fast = supertrend_full(df, P.turn_fast_period, P.turn_fast_mult)
+    df.iloc[-1, df.columns.get_loc("High")] = float(fast["line"].iloc[-1]) * 1.03
+    assert leader_break.resist_test_15m(df, P) == leader_break.RESIST_TOUCH
+    assert leader_break.resist_test_15m(df, Params(turn15m_enabled=False)) is None
+    # 창을 1봉으로 좁히면 마지막 봉만 보므로 터치는 그대로 남는다
+    assert leader_break.resist_test_15m(
+        df, Params(turn15m_bars=1)) == leader_break.RESIST_TOUCH
+    # 1h 스위치는 15m에 영향이 없다 — 둘은 서로 독립이다
+    assert leader_break.resist_test_15m(
+        df, Params(turn1h_enabled=False)) == leader_break.RESIST_TOUCH

@@ -635,3 +635,19 @@ def test_resist_1h_and_turn_up_can_share_a_row():
     e.detail["resist_1h"] = "돌파"
     out = format_events([e], [], {})
     assert "🔼단기전환" in out and "↗️1h단기선돌파" in out
+
+
+def test_resist_1h_and_15m_can_share_a_row():
+    """1h·15m 저항 표시는 같은 줄에 큰 눈금부터 나란히 붙는다."""
+    e = _leader("BOTHUSDT")
+    e.detail["resist_1h"] = "돌파"
+    e.detail["resist_15m"] = "터치"
+    out = format_events([e], [], {})
+    line = [ln for ln in out.splitlines() if ">BOTH</a>" in ln][0]
+    assert "↗️1h단기선돌파" in line and "↗️15m단기선터치" in line
+    assert line.index("1h단기선돌파") < line.index("15m단기선터치")
+
+    hold = _leader("HOLDUSDT", hold=True)
+    hold.detail["resist_15m"] = "돌파"
+    out2 = format_events([], [], {}, ongoing_crypto=[hold])
+    assert "↗️15m단기선돌파" in out2
