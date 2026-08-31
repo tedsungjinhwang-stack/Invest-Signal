@@ -504,11 +504,68 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         with requests.Session() as s2:
             _fill_hourly_return(events, _crypto_hourly(s2, source, need_1h, log))
 
+    _mark_wave_lines(events, ongoing, cfg, source, log, intrabar)
+
     # 크립토 모멘텀 눌림목/이탈은 자체 선정(24h 상승률 상위)이라 위 랭크 필터를 타지 않는다
     events.extend(leader_events)
     ongoing.extend(leader_ongoing)
     log(f"[binance] 시그널 {len(events)}건 · 유지 중 {len(ongoing)}건")
     return events, ongoing, board
+
+
+def _mark_wave_lines(events: list, ongoing: list, cfg: dict, source: str,
+                     log=print, intrabar: bool = False) -> None:
+    """🌊 줄에 ↗️1h·↗️15m 단기선 터치·돌파를 붙인다 — ⚡와 같은 표시.
+
+    파동은 하락 구조 안의 반등을 잡는데, 그 반등이 실제로 살아나는지는 더
+    잘은 눈금에서 먼저 보인다. ⚡가 쓰는 판정을 그대로 쓰되 프레임만 파동
+    줄에 얹는 것이라, 두 칸의 같은 표시가 같은 뜻이 된다.
+
+    파동은 4h 프레임만 받으므로 1h·15m은 여기서 따로 받는다 — 랭크 필터를
+    통과한 줄의 종목만이라 요청이 그 수만큼만 는다. 실패는 표시를 안 붙이고
+    넘어간다(표시용이라 스캔을 세울 이유가 없다).
+    """
+    p = (cfg.get("signal") or {}).get("leader_break") or {}
+    params = leader_break.Params(
+        turn1h_enabled=bool(p.get("turn1h_enabled", True)),
+        turn1h_bars=int(p.get("turn1h_bars", 24)),
+        turn1h_require_bearish=bool(p.get("turn1h_require_bearish", False)),
+        turn15m_enabled=bool(p.get("turn15m_enabled", True)),
+        turn15m_bars=int(p.get("turn15m_bars", 8)),
+        turn15m_require_bearish=bool(p.get("turn15m_require_bearish", False)),
+    )
+    if not (params.turn1h_enabled or params.turn15m_enabled):
+        return
+    rows = [e for e in events + ongoing if e.signal == "wave_setup"]
+    syms = sorted({e.symbol for e in rows})
+    if not syms:
+        return
+    marks: dict[str, dict] = {}
+    with requests.Session() as s:
+        for sym in syms:
+            got = {}
+            for key, fn, on, interval, limit in (
+                    ("resist_1h", leader_break.resist_test, params.turn1h_enabled,
+                     leader_break.ALIGN_INTERVAL, leader_break.ALIGN_LIMIT),
+                    ("resist_15m", leader_break.resist_test_15m,
+                     params.turn15m_enabled, leader_break.INTERVAL,
+                     leader_break.KLINE_LIMIT)):
+                if not on:
+                    continue
+                try:
+                    df = data_binance.klines(s, sym, source, interval, limit=limit,
+                                             include_live=intrabar)
+                except Exception as e:      # noqa: BLE001 — 표시용이라 실패는 무시
+                    log(f"[binance] {sym} {interval} 수집 실패: "
+                        f"{data_binance._safe(e)}")
+                    continue
+                v = fn(df, params)
+                if v:
+                    got[key] = v
+            if got:
+                marks[sym] = got
+    for e in rows:
+        e.detail.update(marks.get(e.symbol, {}))
 
 
 def _load_stock_tickers(cfg: dict, log=print) -> list[dict]:

@@ -651,3 +651,21 @@ def test_resist_1h_and_15m_can_share_a_row():
     hold.detail["resist_15m"] = "돌파"
     out2 = format_events([], [], {}, ongoing_crypto=[hold])
     assert "↗️15m단기선돌파" in out2
+
+
+def test_resist_marks_render_on_wave_rows_too():
+    """🌊 줄도 ⚡와 같은 ↗️ 표시를 받는다 — 신규·추적 양쪽."""
+    def wave(symbol, hold=False):
+        return SignalEvent(symbol=symbol, signal="wave_setup",
+                           bar_time=pd.Timestamp("2026-08-30T00:00:00Z"),
+                           price=1.5,
+                           detail={"label": "파동", "stage": "ABC",
+                                   "touched": "단기선", "kind": "돌파",
+                                   "last_price": 1.5})
+    new = wave("WNEWUSDT")
+    new.detail["resist_1h"] = "돌파"
+    hold = wave("WHOLDUSDT", hold=True)
+    hold.detail["resist_15m"] = "터치"
+    out = format_events([new], [], {}, ongoing_crypto=[hold])
+    assert "↗️1h단기선돌파" in out
+    assert "↗️15m단기선터치" in [ln for ln in out.splitlines() if ln.startswith("↳")][0]

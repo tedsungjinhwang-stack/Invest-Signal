@@ -259,8 +259,9 @@ def _turn_tag(d: dict) -> str | None:
     return TURN_TAGS.get(t, TURN_TAG) if isinstance(t, str) else TURN_TAG
 
 
-# ⚡ 줄에만. 1h 단기선이 **위에** 있는 채로 캔들이 아래에서 올라와 닿은 자리 —
-# 🔼와 정반대 국면이라 아이콘을 따로 쓴다(leader_break.resist_test).
+# ⚡·🌊 공통. 1h(·15m) 단기선이 **위에** 있는 채로 캔들이 아래에서 올라와
+# 닿은 자리다(leader_break.resist_test). 두 칸에서 같은 뜻으로 읽히도록
+# 판정도 같은 함수를 쓴다 — 파동 쪽은 scanner._mark_wave_lines가 붙인다.
 RESIST_TAGS = {"터치": "↗️1h단기선터치", "돌파": "↗️1h단기선돌파"}
 RESIST15_TAGS = {"터치": "↗️15m단기선터치", "돌파": "↗️15m단기선돌파"}
 
@@ -370,6 +371,7 @@ def format_events(events_crypto: list, events_etf: list,
         tags = [f"{_age_days(e.bar_time)}d"]
         if d.get("quiet"):
             tags.append(QUIET_TAG)      # ⚡·파동 공통 — 조용한 종목 표시
+        tags += _resist_tags(d)         # ⚡·파동 공통 — 1h·15m 단기선 터치·돌파
         if e.signal == "wave_setup":
             # 파동만 구간 세트를 싣는다 — refresh_detail이 매 스캔 갱신하므로
             # 세 값 모두 지금 값이다. 다른 시그널의 ret_4h는 트리거 봉에

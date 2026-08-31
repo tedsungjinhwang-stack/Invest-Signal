@@ -374,3 +374,41 @@ def test_rank_filter_takes_percentage_cuts_on_both_axes():
     rcfg["volume_top_pct"] = 0
     rcfg["volume_top"] = 3
     assert len(_crypto_rank_eligible(frames, rcfg)) == 3
+
+
+def test_wave_rows_get_the_resist_marks(monkeypatch):
+    """🌊 줄에도 ↗️1h·↗️15m이 붙는다 — ⚡와 같은 판정, 프레임만 따로 받는다."""
+    from invest_signal import scanner
+    from invest_signal.signals import SignalEvent
+
+    seen = []
+
+    def fake_klines(session, symbol, source, interval, limit=None,
+                    include_live=False, **kw):
+        seen.append((symbol, interval))
+        n = 400
+        idx = pd.date_range("2026-01-01", periods=n, freq=interval.replace("m", "min"),
+                            tz="UTC")
+        # 길게 내리다 마지막에 반등 — 단기 수퍼트렌드가 상승으로 뒤집힌다
+        c = pd.Series(list(np.linspace(300.0, 100.0, n - 6))
+                      + [100.0 * (1 + 0.02 * i) for i in range(1, 7)], index=idx)
+        return pd.DataFrame({"Open": c, "High": c * 1.01, "Low": c * 0.99,
+                             "Close": c, "Volume": 1000.0})
+
+    monkeypatch.setattr(scanner.data_binance, "klines", fake_klines)
+
+    def ev(sym, sig):
+        return SignalEvent(symbol=sym, signal=sig,
+                           bar_time=pd.Timestamp("2026-08-30T00:00:00Z"),
+                           price=1.0, detail={"label": "파동"})
+
+    wave, other = ev("WAVEUSDT", "wave_setup"), ev("XUSDT", "uptrend_onset")
+    hold = ev("HOLDUSDT", "wave_setup")
+    scanner._mark_wave_lines([wave, other], [hold], {}, "fapi", lambda *a: None)
+
+    assert wave.detail.get("resist_1h") or wave.detail.get("resist_15m")
+    assert hold.detail.get("resist_1h") or hold.detail.get("resist_15m")
+    assert not other.detail.get("resist_1h")     # 파동 줄만 건드린다
+    # 파동 종목만, 프레임은 1h·15m 둘
+    assert {s for s, _ in seen} == {"WAVEUSDT", "HOLDUSDT"}
+    assert {i for _, i in seen} == {"1h", "15m"}
