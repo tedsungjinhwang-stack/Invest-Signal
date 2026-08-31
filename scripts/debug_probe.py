@@ -969,8 +969,30 @@ with requests.Session() as sess:
             # 매 스캔 다시 하므로 하루 안에서도 통과/탈락이 갈린다.
             roll = (df["Close"] * df["Volume"]).rolling(6).sum()
             g24 = df["Close"] / df["Close"].shift(6) - 1
-            floor = 3_000_000
-            print(f"  -- ⚡ 게이트 재현 (롤링 24h · 거래대금 하한 ${floor / 1e6:.0f}M)")
+            from invest_signal import config as cfg_mod
+            lb = ((cfg_mod.load().get("signal") or {})
+                  .get("leader_break") or {})
+            floor = float(lb.get("min_turnover_usd", 1_000_000))
+            top_n = int(lb.get("top_n", 7))
+            # 순위는 횡단면이라 유니버스 전체가 있어야 한다 — '왜 상위권에
+            # 못 들었나'는 그 종목의 값만 봐서는 답이 안 나온다.
+            vrank = grank = None
+            try:
+                _src, _syms = data_binance.resolve_source(sess, "auto", set(),
+                                                          lambda *_: None)
+                _fr = data_binance.fetch_all(sess, _syms, _src, limit=750,
+                                             log=lambda *_: None, workers=6)
+                _c = pd.DataFrame({k: v["Close"] for k, v in _fr.items() if len(v)})
+                _v = pd.DataFrame({k: v["Volume"] for k, v in _fr.items() if len(v)})
+                _t = (_c * _v).rolling(6).sum()
+                _g = _c / _c.shift(6) - 1
+                vrank = _t.rank(axis=1, ascending=False)
+                grank = _g.rank(axis=1, ascending=False)
+                print(f"  -- 유니버스 {len(_fr)}종으로 횡단면 순위 계산")
+            except Exception as e:                  # noqa: BLE001
+                print(f"  -- 순위 계산 생략 (유니버스 수집 실패: {e})")
+            print(f"  -- ⚡ 게이트 재현 (롤링 24h · 거래대금 하한 "
+                  f"${floor / 1e6:.0f}M · 상위 {top_n}종)")
             for d in want:
                 for i in range(len(df)):
                     t = df.index[i]
@@ -980,9 +1002,18 @@ with requests.Session() as sess:
                     m = m480.iloc[i]
                     over = (None if pd.isna(m)
                             else float(df["Close"].iloc[i]) / float(m) - 1)
+
+                    def _rk(mat):
+                        if mat is None or sym not in mat.columns or t not in mat.index:
+                            return "  —"
+                        r = mat.at[t, sym]
+                        return "  —" if pd.isna(r) else f"{int(r):3d}"
+
                     print(f"     {t.strftime('%m-%d %H:%M')}Z  24h {g24.iloc[i] * 100:+6.1f}%"
                           f"  거래대금 ${roll.iloc[i] / 1e6:6.2f}M "
                           f"{'통과' if roll.iloc[i] >= floor else '미달'}"
+                          f"  거래대금순위 {_rk(vrank)}위"
+                          f"  상승률순위 {_rk(grank)}위"
                           f"  배열 {al or '이력부족':<5}"
                           f"  480선 {'—' if over is None else format(over, '+.0%')}")
 
