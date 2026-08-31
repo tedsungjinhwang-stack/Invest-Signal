@@ -108,11 +108,14 @@ def _crypto_rank_eligible(frames: dict, rcfg: dict) -> set:
     합집합(or, 기본) 또는 교집합(and)을 취하고, 24h 거래대금이
     min_turnover_usd 이상인 종목만 남긴다.
 
-    상승률 상위권 크기는 gain_top(절대 종목 수) 또는 gain_top_pct(유니버스
-    대비 비율)로 정한다 — 비율은 상장 종목 수가 변해도 기준이 흔들리지 않는다.
+    두 축 모두 절대 종목 수(volume_top·gain_top) 또는 유니버스 대비 비율
+    (volume_top_pct·gain_top_pct)로 크기를 정한다. **비율 쪽이 안전하다** —
+    같은 코드가 퍼프(525종)와 현물 미러(370종) 양쪽에서 도는데, 절대값은
+    유니버스가 바뀌면 실제로 자르는 지점이 같이 움직인다.
     mode=and는 "거래량도 상승률도 상위" = 그 시기의 주도주만 남기는 설정.
     """
     vol_top = int(rcfg.get("volume_top", 100))
+    vol_top_pct = float(rcfg.get("volume_top_pct", 0) or 0)
     gain_top = int(rcfg.get("gain_top", 50))
     gain_top_pct = float(rcfg.get("gain_top_pct", 0) or 0)
     lookback = int(rcfg.get("gain_lookback_bars", 42))
@@ -126,6 +129,8 @@ def _crypto_rank_eligible(frames: dict, rcfg: dict) -> set:
             base = float(df["Close"].iloc[-1 - lookback])
             if base > 0:
                 gain[sym] = float(df["Close"].iloc[-1]) / base - 1
+    if vol_top_pct > 0:
+        vol_top = max(1, round(len(turnover) * vol_top_pct))
     if gain_top_pct > 0:
         gain_top = max(1, round(len(gain) * gain_top_pct))
     top_vol = set(sorted(turnover, key=turnover.get, reverse=True)[:vol_top])

@@ -347,3 +347,30 @@ def test_leader_break_frames_follow_the_scan_mode(monkeypatch):
             # 15m 본판정은 마감봉 그대로 — 표시용 프레임만 모드를 따른다
             want = intrabar if interval in ("4h", "1h") else False
             assert live is want, f"{interval} include_live={live}"
+
+
+def test_rank_filter_takes_percentage_cuts_on_both_axes():
+    """거래대금·상승률 모두 비율로 자를 수 있다 — 유니버스가 바뀌어도 같은 지점."""
+    from invest_signal.scanner import _crypto_rank_eligible
+
+    def frame(close, vol):
+        idx = pd.date_range("2026-08-01", periods=30, freq="4h", tz="UTC")
+        c = pd.Series(np.linspace(close * 0.9, close, 30), index=idx)
+        return pd.DataFrame({"Open": c, "High": c, "Low": c, "Close": c,
+                             "Volume": float(vol)})
+
+    # 거래대금이 큰 순서대로 S00…S09, 상승률은 모두 같다
+    frames = {f"S{i:02d}": frame(100.0, 10_000 - i * 100) for i in range(10)}
+    rcfg = {"volume_top_pct": 0.5, "gain_top_pct": 0.0, "gain_top": 0,
+            "gain_lookback_bars": 18, "min_turnover_usd": 0}
+    got = _crypto_rank_eligible(frames, rcfg)
+    assert got == {f"S{i:02d}" for i in range(5)}, got     # 상위 50% = 5종
+
+    # 비율을 넓히면 그만큼 더 들어온다
+    rcfg["volume_top_pct"] = 0.8
+    assert len(_crypto_rank_eligible(frames, rcfg)) == 8
+
+    # 절대값(volume_top)은 비율이 0일 때만 쓰인다
+    rcfg["volume_top_pct"] = 0
+    rcfg["volume_top"] = 3
+    assert len(_crypto_rank_eligible(frames, rcfg)) == 3
