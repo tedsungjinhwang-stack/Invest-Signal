@@ -38,7 +38,7 @@ class Params:
     board_top: int = 10         # 알림 맨 위에 조건 없이 적어줄 상위 종목 수
     ma: int = 20                # 15m봉 SMA 기간 (20봉 = 5시간)
     grace_bars: int = 4         # 소급 판정 봉 수 — 15m×4 = 1시간(스캔 주기)
-    min_turnover_usd: float = 3_000_000   # 24h 거래대금 하한(유동성)
+    min_turnover_usd: float = 1_000_000   # 24h 거래대금 하한(유동성)
     watch_days: int = 5         # 상위권에서 밀려난 뒤에도 계속 볼 기간
     max_watch: int = 60         # 한 스캔에서 15m 캔들을 받을 최대 종목 수
     track_break_only: bool = True   # 추적도 '20선 아래'인 동안만 (복귀하면 제외)
