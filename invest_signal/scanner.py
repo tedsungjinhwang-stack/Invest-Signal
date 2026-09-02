@@ -172,7 +172,8 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         track_break_only=bool(s.get("track_break_only", True)),
         exhausted_filter=bool(s.get("exhausted_filter", True)),
         require_aligned=bool(s.get("require_aligned", True)),
-        allow_bearish=bool(s.get("allow_bearish", True)),
+        allow_bearish=bool(s.get("allow_bearish", False)),
+        allow_mixed=bool(s.get("allow_mixed", False)),
         allow_short_history=bool(s.get("allow_short_history", False)),
         exhausted_mas=tuple(s.get("exhausted_mas", (120, 240, 480))),
         quiet_turnover_usd=float(s.get("quiet_turnover_usd", 6_000_000)),
@@ -355,7 +356,12 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     if spent:
         why = []
         if params.require_aligned:
-            why.append("1h 혼조·이력부족" if params.allow_bearish else "1h 정배열 아님")
+            ok = ["정배열"]
+            if params.allow_mixed:
+                ok.append("혼조")
+            if params.allow_bearish:
+                ok.append("역배열")
+            why.append(f"1h {'·'.join(ok)} 아님")
         if params.exhausted_filter:
             why.append("정배열이나 4h 장기 수퍼트렌드 하락")
         log(f"[binance] 크립토 모멘텀 눌림목/이탈 제외 {len(spent)}/{len(watch)}종 "

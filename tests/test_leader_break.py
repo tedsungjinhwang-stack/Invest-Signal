@@ -3,6 +3,8 @@
 import numpy as np
 import pandas as pd
 
+from dataclasses import replace as dataclasses_replace
+
 from invest_signal.indicators import supertrend_full
 from invest_signal.signals import leader_break
 from invest_signal.signals.leader_break import Params
@@ -551,3 +553,74 @@ def test_resist_test_15m_shares_the_1h_judgement():
     # 1h 스위치는 15m에 영향이 없다 — 둘은 서로 독립이다
     assert leader_break.resist_test_15m(
         df, Params(turn1h_enabled=False)) == leader_break.RESIST_TOUCH
+
+
+def test_mixed_stacks_pass_only_when_allowed():
+    """혼조는 allow_mixed를 켤 때만 통과 — 역배열은 별개 스위치다.
+
+    옛 전제("역배열·혼조는 하락 추세 안의 반등이라 눌림이 아니다")는 31일
+    리플레이에서 뒤집혔다. 정배열이 경로 승률 57.6%로 세 버킷 중 꼴찌였고
+    혼조가 67.2%로 제일 좋았다 — blocked() 독스트링에 표가 있다.
+    """
+    df = _mixed_frame()
+    assert alignment_of(df, THREE.exhausted_mas) == "혼조"
+    assert leader_break.blocked(df, THREE) is True
+    mixed_ok = dataclasses_replace(THREE, allow_mixed=True)
+    assert leader_break.blocked(df, mixed_ok) is False
+    # 스위치가 서로 독립이다 — allow_mixed는 역배열을 열지 않는다
+    down = _df4h(list(np.linspace(400.0, 100.0, 600)))
+    assert alignment_of(down, THREE.exhausted_mas) == "역배열"
+    assert leader_break.blocked(down, mixed_ok) is True
+    both = dataclasses_replace(mixed_ok, allow_bearish=True)
+    assert leader_break.blocked(down, both) is False
+    assert leader_break.blocked(df, both) is False
+
+
+def test_allow_mixed_does_not_get_the_4h_supertrend_gate():
+    """②는 정배열에만 건다 — 혼조에 걸면 오히려 나빠진다.
+
+    혼조·수트↓(경로 승률 70.9%)가 혼조·수트↑(64.5%)보다 좋아서, 혼조에
+    ②를 걸면 정배열+혼조 승률이 61.8% → 59.8%로 떨어지고 알림도
+    566 → 468건/일로 준다. 역배열과 같은 이유의 예외다.
+    """
+    df = _mixed_frame()
+    mixed_ok = dataclasses_replace(THREE, allow_mixed=True)
+    fell = _df4h(list(np.linspace(100.0, 400.0, 560))
+                 + list(np.linspace(400.0, 150.0, 40)))     # 4h 장기 하락 전환
+    st = supertrend_full(fell, mixed_ok.turn_slow_period, mixed_ok.turn_slow_mult)
+    assert st["dir"].iloc[-1] < 0
+    assert leader_break.blocked(df, mixed_ok, fell) is False   # 혼조는 ②를 안 탄다
+    up = _df4h(list(np.linspace(100.0, 400.0, 600)))
+    assert alignment_of(up, THREE.exhausted_mas) == "정배열"
+    assert leader_break.blocked(up, mixed_ok, fell) is True     # 정배열은 탄다
+
+
+def test_config_yaml_reaches_the_alignment_switches():
+    """config.yaml의 배열 스위치가 실제로 Params까지 간다.
+
+    기본값이 코드(dataclass)와 scanner의 s.get() 두 곳에 있어서, 한쪽만
+    고치면 조용히 갈린다 — allow_bearish가 실제로 그랬다(코드 False /
+    scanner 기본값 True).
+    """
+    from invest_signal import config as config_mod
+    from invest_signal import scanner
+
+    cfg = config_mod.load("config.yaml")
+    s = (cfg.get("signal") or {}).get("leader_break") or {}
+    captured = {}
+    real = leader_break.Params
+
+    def spy(**kw):
+        captured.update(kw)
+        return real(**kw)
+
+    leader_break.Params = spy
+    try:
+        scanner._scan_leader_break(None, "", [], cfg, log=lambda *a, **k: None)
+    except Exception:                       # noqa: BLE001 — 파라미터만 보면 된다
+        pass
+    finally:
+        leader_break.Params = real
+    for key in ("require_aligned", "allow_mixed", "allow_bearish",
+                "exhausted_filter"):
+        assert captured.get(key) == s[key], (key, captured.get(key), s[key])
