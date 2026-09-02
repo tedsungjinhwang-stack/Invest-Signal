@@ -25,17 +25,26 @@
      ⓐ가 3일이면 사라지는데, 그 뒤에 실제로 움직이기 시작하는 종목을
      놓친다. **장기(30×6)가 상승으로 뒤집힌 뒤(=돌파)**, 그 파동의
      저점~고점에서 retrace_level(기본 0.5)까지 처음 밀린 봉을 다시 알린다.
-     좌표는 수퍼트렌드에 앵커하지 않고 **롤링 창**으로 대략 잡는다:
 
-       고점 = 돌파봉 이후 ~ 판정 봉 직전까지의 최고가, 단 최근 W봉까지만
-       저점 = 그 고점 앞 W봉의 최저가  (W = retrace_window_days × 6)
+     좌표는 **사건 순서**를 따라 잡는다 — 저점 → 단기 상승 전환 → 장기
+     돌파 → 고점:
 
-     저점은 돌파보다 앞에 있다 — 순서가 저점 → 단기 상승 전환 → 장기
-     돌파 → 고점이라, 저점을 장기선 기준으로 찾을 이유가 없다.
+       고점 = 돌파봉 이후 ~ 판정 봉 직전의 최고가 (러닝 맥스, 창 없음)
+       저점 = 그 돌파로 이어진 **단기 상승 전환 봉 앞 W봉**의 최저가
+              (W = retrace_window_days × 6)
+
+     저점 창을 고점에 붙이면 안 된다 — 고점이 W봉보다 늦게 서면 창이
+     통째로 돌파 뒤로 밀려 랠리 중간 눌림을 저점으로 집는다(실측 판정
+     봉의 33.6%). 고점에는 반대로 창을 두면 안 된다 — 진짜 고점이 창
+     밖으로 밀리면 📐의 분모가 거짓이 되어 화면 값이 뒷걸음질친다.
 
      알림은 **한 돌파당 한 번**이고, 그 뒤로는 추적 줄의 📐가 매 스캔
-     현재가로 다시 계산되어 0.52 → 0.63 → 0.79처럼 이어진다. 1.0을
-     넘으면 저점을 깬 것이라 줄이 빠진다.
+     현재가로 다시 계산된다(단조 상승은 아니다 — 가격이 오르면 📐은
+     내려간다). 1.0을 넘으면 저점을 깬 것이라 줄이 빠진다.
+
+     **이건 승률 장치가 아니라 화면 장치다.** 실측에서 되돌림을 기다릴수록
+     승자를 더 많이 버린다 — 0.5까지 안 밀려 아예 안 울린 돌파 133건이
+     경로 승률 92%·종료 수익 중앙 +9.0%인데, 발화군 725건은 64%·−3.7%다.
 
   ⓑ 임펄스 (일봉, 터치)
      일봉 단기(22×3)·장기(30×6)가 **둘 다 하락**인 채로, 캔들이 단기
@@ -136,7 +145,7 @@ class Params:
     # 되돌림을 기다려서 더 좋은 자리를 잡는 게 아니다.
     retrace_enabled: bool = True
     retrace_level: float = 0.5      # (고점−현재가)÷(고점−저점). leader_break.retrace와 같은 규약
-    retrace_window_days: int = 3    # 저·고점을 훑는 롤링 창(일). 3일 = 18봉
+    retrace_window_days: int = 3    # 저점을 훑는 창(일). 3일 = 18봉. 고점에는 창이 없다
     retrace_hold_bars: int = 2      # 고점이 이 봉 수 이상 갱신되지 않아야 무장
     retrace_expire_bars: int = 42   # 돌파 후 이 봉 수까지만 감시 (42봉 = 7일)
     retrace_track_days: int = 2     # 발화 후 추적 보유 일수 (0이면 공용 창)
@@ -404,10 +413,10 @@ def _detect_abc(df: pd.DataFrame, symbol: str, params: Params, rets: dict,
 @dataclass(frozen=True)
 class Wave:
     """장기 돌파 한 건의 되돌림 좌표. 봉 위치는 df 인덱스 기준 정수."""
-    break_i: int    # 장기가 상승으로 뒤집힌 봉
-    low: float      # 저점 — 고점 앞 W봉의 최저가
+    break_i: int    # 장기가 상승으로 뒤집힌 봉 (= 돌파)
+    low: float      # 저점 — 단기 상승 전환 봉 앞 W봉의 최저가 (돌파보다 앞)
     low_i: int
-    high: float     # 고점 — 돌파봉 이후 ~ 판정 봉 직전, 최근 W봉 안의 최고가
+    high: float     # 고점 — 돌파봉 이후 ~ 판정 봉 직전의 최고가 (러닝 맥스, 창 없음)
     high_i: int
     level: float    # high - retrace_level × (high - low)
 
@@ -432,18 +441,46 @@ def _break_index(slow: pd.DataFrame) -> np.ndarray:
     return out
 
 
+def _flip_index(fast: pd.DataFrame) -> np.ndarray:
+    """봉마다 '그 봉 이하에서 가장 최근의 단기 상승 전환 봉'. 없으면 -1.
+
+    _break_index와 같은 이유로 하락→상승만 센다(`dir[i-1] < 0`) — 워밍업
+    NaN을 하락으로 세면 워밍업이 끝나는 봉이 전환으로 잡힌다.
+    """
+    d = fast["dir"].to_numpy(float)
+    out = np.full(len(d), -1, dtype=int)
+    last = -1
+    for i in range(len(d)):
+        if i >= 1 and d[i] > 0 and d[i - 1] < 0:
+            last = i
+        out[i] = last
+    return out
+
+
 def wave_at(df: pd.DataFrame, i: int, params: Params = Params(),
-            slow: pd.DataFrame | None = None,
-            brk: np.ndarray | None = None) -> Wave | None:
+            fast: pd.DataFrame | None = None, slow: pd.DataFrame | None = None,
+            idx: tuple[np.ndarray, np.ndarray] | None = None) -> Wave | None:
     """i봉 시점에서 본 '살아 있는 장기 돌파'의 되돌림 좌표. 없으면 None.
 
     살아 있다 = i봉에서 장기가 상승이고, 그 상승이 시작된 돌파봉이
     retrace_expire_bars 안에 있다. 돌파봉 자체(i == break_i)는 아직
     되돌릴 게 없으므로 제외한다.
 
-    좌표는 수퍼트렌드에 앵커하지 않는다 — 롤링 창 W(= retrace_window_days
-    × 6봉)로 대략 잡는다. 고점은 돌파 뒤에 서므로 break_i 아래로는 안
-    내려가고, 저점은 돌파보다 앞이므로 고점에서 W봉 거슬러 찾는다.
+    좌표는 **사건 순서**를 따라 잡는다: 저점 → 단기 상승 전환 → 장기
+    돌파 → 고점.
+
+      고점 = 돌파봉 이후 ~ 판정 봉 직전의 최고가 (러닝 맥스, **창 없음**)
+      저점 = 돌파로 이어진 단기 상승 전환 봉 f0 앞 W봉의 최저가
+             (W = retrace_window_days × 6)
+
+    **저점 창은 f0에 붙인다.** 고점에 붙이면 고점이 늦게 설 때 창이 통째로
+    돌파 뒤로 밀려 랠리 중간 눌림을 저점으로 집는다 — 실측에서 판정 봉의
+    33.6%, 발화의 11.6%가 그렇게 순서를 어겼다. f0에 붙이면 정의상 100%다.
+
+    **고점에는 창을 두지 않는다.** 롤링 창을 씌우면 진짜 고점이 창 밖으로
+    밀리는 순간 고점이 낮아져(판정 봉의 28.9%, 중앙 −5.4%) 📐의 분모가
+    거짓이 되고 화면 값이 뒷걸음질친다. 오래된 고점의 만료는
+    retrace_expire_bars가 이미 처리한다.
 
     **판정 봉 i의 고가는 고점에서 뺀다.** 넣으면 봉이 자라는 동안 고점이
     같이 올라가 레벨이 내려오고, 그 봉의 저가가 자기 레벨에 걸린다.
@@ -451,22 +488,25 @@ def wave_at(df: pd.DataFrame, i: int, params: Params = Params(),
     n = len(df)
     if i < 1 or i >= n:
         return None
-    if brk is None:
+    if idx is None:
         if slow is None:
             slow = supertrend_full(df, params.slow_period, params.slow_mult)
-        brk = _break_index(slow)
+        if fast is None:
+            fast = supertrend_full(df, params.fast_period, params.fast_mult)
+        idx = (_break_index(slow), _flip_index(fast))
+    brk, flip = idx
     b = int(brk[i])
     if b < 0 or not 1 <= i - b <= params.retrace_expire_bars:
         return None
-    w = max(1, params.retrace_window_days * BARS_PER_DAY)
-    hi_start = max(b, i - w)
-    if hi_start >= i:
-        return None
-    highs = df["High"].to_numpy(float)[hi_start:i]
+    highs = df["High"].to_numpy(float)[b:i]
     k = int(highs.argmax())
-    high_i, high = hi_start + k, float(highs[k])
-    lo_start = max(0, high_i - w + 1)
-    lows = df["Low"].to_numpy(float)[lo_start:high_i + 1]
+    high_i, high = b + k, float(highs[k])
+    f0 = int(flip[b])
+    if f0 < 0:                      # 프레임 안에 단기 전환이 없다 — 돌파봉으로 폴백
+        f0 = b
+    w = max(1, params.retrace_window_days * BARS_PER_DAY)
+    lo_start = max(0, f0 - w + 1)
+    lows = df["Low"].to_numpy(float)[lo_start:f0 + 1]
     m = int(lows.argmin())
     low_i, low = lo_start + m, float(lows[m])
     if not high > low:
@@ -481,22 +521,22 @@ def _detect_retrace(df: pd.DataFrame, symbol: str, params: Params, rets: dict,
 
     한 돌파당 한 번만 알린다. 존을 나갔다 다시 들어와도, 새 고점이 서서
     레벨이 올라가도 재발화하지 않는다 — 실측에서 재발화를 허용하면 신규
-    알림이 7.0건/일에서 29건/일로 튄다(3일 창·0.5 기준). 되돌림이 더
-    깊어지는 건 추적 줄의 📐가 매 스캔 갱신하며 보여 준다.
+    알림이 6.0건/일에서 29건/일로 튄다. 되돌림이 더 깊어지는 건 추적 줄의
+    📐가 매 스캔 갱신하며 보여 준다.
 
-    고점 확정(retrace_hold_bars)이 이 시그널의 유일한 실질 레버다: 3일
-    창·0.5에서 경로 승률 55% → 63%, MAE −8.2% → −7.2%인데 발화율은
-    98% → 97%로만 깎인다. 레벨은 볼륨 다이얼에 가깝다.
+    고점 확정(retrace_hold_bars)이 이 시그널의 유일한 실질 레버다: 경로
+    승률이 어느 저점 정의에서도 +5~8%p 오르는데 발화율은 1~3%p만 깎인다.
+    레벨은 볼륨 다이얼에 가깝다.
     """
     n = len(df)
-    brk = _break_index(slow)
+    idx = (_break_index(slow), _flip_index(fast))
     lows = df["Low"].to_numpy(float)
     memo: dict[int, Wave | None] = {}
 
     def in_zone(t: int) -> Wave | None:
         """t봉이 그 시점 좌표의 되돌림 존 안인지 — 맞으면 그 좌표."""
         if t not in memo:
-            w = wave_at(df, t, params, slow, brk)
+            w = wave_at(df, t, params, idx=idx)
             if w is not None and (t - w.high_i < params.retrace_hold_bars
                                   or lows[t] > w.level):
                 w = None
@@ -587,12 +627,21 @@ def refresh_detail(df: pd.DataFrame, event: SignalEvent,
     if q is not None:
         event.detail["quiet"] = q
     if event.detail.get("stage") == RETRACE:
-        # ⓒ의 📐는 매 스캔 현재가로 다시 잰다 — 0.52 → 0.63 → 0.79처럼
-        # 되돌림이 깊어지는 게 이 줄의 유일한 라이브 정보다. 좌표
-        # (wave_low/high/level)는 트리거 시점 기록이라 갱신하지 않는다.
+        # ⓒ의 📐는 매 스캔 현재가로 다시 잰다 — 되돌림이 얼마나 깊어졌는지가
+        # 이 줄의 유일한 라이브 정보다. 저장 좌표(wave_low/high/level)는
+        # 트리거 시점 기록이라 갱신하지 않는다.
         lo, hi = event.detail.get("wave_low"), event.detail.get("wave_high")
-        if lo is not None and hi is not None and hi > lo:
-            event.detail["fib"] = _fib(lo, hi, float(df["Close"].iloc[-1]))
+        if lo is not None and hi is not None:
+            # 고점은 러닝 맥스라 트리거 뒤에도 자란다. 박제한 값만 쓰면
+            # 신고점을 낸 종목에서 분자가 음수가 되어 `📐-0.31`이 그대로
+            # 화면에 찍힌다(실측: 추적 스텝의 3.0%, 최대 10봉 연속).
+            # **마지막 봉을 포함**해야 한다 — 종가를 그 봉에서 가져오므로
+            # hi ≥ High[last] ≥ Close[last]가 되어 📐 ≥ 0이 정의상 보장된다.
+            t = int(df.index.searchsorted(event.bar_time, "left"))
+            if t < len(df):
+                hi = max(hi, float(df["High"].to_numpy(float)[t:].max()))
+            if hi > lo:
+                event.detail["fib"] = _fib(lo, hi, float(df["Close"].iloc[-1]))
 
 
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:
@@ -617,8 +666,13 @@ def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()
     last = len(frame) - 1
     if stage == RETRACE:
         # 장기가 다시 하락으로 꺾이면 돌파가 실패한 것이라 좌표도 같이
-        # 죽는다(실측 73%가 여기로 간다). 저점을 깨면(📐 1.0 초과) 되돌림이
-        # 아니라 이탈이라 거기서도 끝낸다 — 화면에 남는 건 0.5~1.0 구간뿐이다.
+        # 죽는다. 저점을 깨면(📐 1.0 초과) 되돌림이 아니라 이탈이라 거기서도
+        # 끝낸다.
+        #
+        # **📐 ≥ 1.0 ⟺ 종가 ≤ 저점이다** (high−price ≥ high−low ⟺ price ≤ low).
+        # 고점이 판정에 안 들어가고, 이 정의의 저점은 트리거 시점에 이미 전부
+        # 과거 봉이라 안 변한다 — 그래서 좌표를 박제하든 매 스캔 다시 재든
+        # 이탈 판정이 봉 단위로 완전히 같다(실측 차이 0건).
         if not _up(slow, last):
             return False
         lo, hi = event.detail.get("wave_low"), event.detail.get("wave_high")

@@ -608,11 +608,30 @@ def test_retrace_fires_when_price_first_reaches_the_level():
     assert "touched" not in d                # 선을 건드린 게 아니다
 
 
-def test_retrace_coordinates_come_from_the_rolling_window():
-    """저점·고점은 수퍼트렌드가 아니라 롤링 창에서 나온다.
+def _drift(df, bars, step=0.004):
+    """완만하게 흘러내리는 봉 — 장기 수퍼트렌드를 살려 둔 채 시간을 흘린다.
 
-    고점은 돌파봉 이후에서만 찾고, 저점은 그 고점 앞 W봉에서만 찾는다 —
-    창 밖에 더 낮은 저가를 심어도 안 뽑힌다.
+    _slide(3%/봉)는 대여섯 봉이면 장기가 꺾여 감시 창이 닫힌다. 고점이
+    창보다 늦게 서는 상황을 만들려면 스무 봉 넘게 살아 있어야 한다.
+    """
+    top = float(df["Close"].iloc[-1])
+    for k in range(1, bars + 1):
+        df = _add(df, [top * (1 - step * k)])
+    return df
+
+
+def _flip_bar(df, params=RETRACE_P, at=None):
+    """돌파봉(또는 at) 이하 마지막 단기 상승 전환 봉."""
+    fast = supertrend_full(df, params.fast_period, params.fast_mult)
+    i = len(df) - 1 if at is None else at
+    return int(wave_setup._flip_index(fast)[i])
+
+
+def test_retrace_low_sits_before_the_fast_flip():
+    """저점은 **단기 상승 전환 봉 앞 W봉**에서 나온다 — 사건 순서를 지킨다.
+
+    저점 → 단기 상승 전환 → 장기 돌파 → 고점. 창을 고점에 붙이면 고점이
+    늦게 설 때 창이 통째로 돌파 뒤로 밀려 랠리 중간 눌림을 저점으로 집는다.
     """
     p = RETRACE_P
     df, break_i, high_i = _broken(p)
@@ -620,14 +639,58 @@ def test_retrace_coordinates_come_from_the_rolling_window():
     t = len(df) - 1
     w = wave_setup.wave_at(df, t, p)
     win = p.retrace_window_days * wave_setup.BARS_PER_DAY
-    assert break_i <= w.high_i < t                    # 돌파 이후, 판정 봉 이전
-    assert w.high == float(df["High"].iloc[max(break_i, t - win):t].max())
-    assert w.high_i - win + 1 <= w.low_i <= w.high_i  # 저점은 고점보다 앞
-    assert w.low == float(df["Low"].iloc[max(0, w.high_i - win + 1):w.high_i + 1].min())
-    # 창보다 앞에 훨씬 낮은 저가를 심어도 저점은 그대로다
-    deep = df.copy()
-    deep.iloc[10, deep.columns.get_loc("Low")] = 0.01
-    assert wave_setup.wave_at(deep, t, p).low == w.low
+    f0 = _flip_bar(df, p, break_i)
+    assert 0 <= f0 <= break_i                         # 단기 전환이 돌파보다 앞
+    assert w.low_i <= f0 <= w.break_i                 # ← 회귀 방지의 핵심
+    assert w.low == float(df["Low"].iloc[max(0, f0 - win + 1):f0 + 1].min())
+    # 창보다 앞에 훨씬 낮은 저가를 심어도 안 뽑힌다
+    early = df.copy()
+    early.iloc[max(0, f0 - win) - 1, early.columns.get_loc("Low")] = 0.01
+    assert wave_setup.wave_at(early, t, p).low == w.low
+    # 창 안에 심으면 뽑힌다
+    inside = df.copy()
+    inside.iloc[f0, inside.columns.get_loc("Low")] = w.low * 0.5
+    assert wave_setup.wave_at(inside, t, p).low == w.low * 0.5
+
+
+def test_retrace_low_window_is_not_anchored_to_the_high():
+    """고점이 W봉보다 늦게 서도 저점 창은 안 밀린다.
+
+    옛 구현은 창을 고점에 붙여서, 고점이 늦게 서면 창이 통째로 돌파 뒤로
+    가 랠리 중간 눌림을 저점이라 불렀다(HEMIUSDT 2026-08-28 건).
+    """
+    p = RETRACE_P
+    df, break_i, _ = _broken(p)
+    win = p.retrace_window_days * wave_setup.BARS_PER_DAY
+    df = _drift(df, win + 2)                 # 눌림 — 여기가 옛 창의 '저점'이었다
+    df = _add(df, [float(df["High"].iloc[break_i:].max()) * 1.10])   # 늦은 새 고점
+    df = _drift(df, 2)
+    t = len(df) - 1
+    w = wave_setup.wave_at(df, t, p)
+    assert w.high_i - break_i > win          # 고점이 창 길이보다 늦게 섰다
+    assert w.low_i <= w.break_i              # 그래도 저점은 돌파 앞
+    # 옛 정의(창을 고점에 붙임)라면 돌파 뒤 눌림을 집었을 것이다
+    old_low = float(df["Low"].iloc[max(0, w.high_i - win + 1):w.high_i + 1].min())
+    assert old_low > w.low
+
+
+def test_retrace_high_is_a_running_max_with_no_window():
+    """고점에는 창이 없다 — 오래된 고점도 만료되지 않는다.
+
+    롤링 창을 씌우면 진짜 고점이 창 밖으로 밀리는 순간 고점이 낮아져
+    📐의 분모가 거짓이 되고 화면 값이 뒷걸음질친다. 만료는
+    retrace_expire_bars가 맡는다.
+    """
+    p = RETRACE_P
+    df, break_i, _ = _broken(p)
+    win = p.retrace_window_days * wave_setup.BARS_PER_DAY
+    peak = float(df["High"].iloc[break_i:].max())
+    df = _drift(df, win + 3)                 # 고점을 창 밖으로 밀어낸다
+    t = len(df) - 1
+    w = wave_setup.wave_at(df, t, p)
+    assert t - w.high_i > win                # 고점이 창 밖인데도
+    assert w.high == float(df["High"].iloc[break_i:t].max()) == peak
+    assert w.high > float(df["High"].iloc[t - win:t].max())
 
 
 def test_retrace_high_excludes_the_judging_bar():
