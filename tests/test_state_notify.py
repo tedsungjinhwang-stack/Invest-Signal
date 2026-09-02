@@ -669,3 +669,71 @@ def test_resist_marks_render_on_wave_rows_too():
     out = format_events([new], [], {}, ongoing_crypto=[hold])
     assert "↗️1h단기선돌파" in out
     assert "↗️15m단기선터치" in [ln for ln in out.splitlines() if ln.startswith("↳")][0]
+
+
+def _retrace(symbol, gain, fib, days_ago=0, level=0.8775):
+    e = _wave(symbol, "되돌림", gain, days_ago)
+    e.detail.update({"wave_low": 0.723, "wave_high": 1.032,
+                     "wave_level": level, "fib": fib})
+    return e
+
+
+def test_wave_retrace_sits_between_abc_and_impulse():
+    """파동 칸 순서는 시간 순서 — ⓐ 돌파 → ⓒ 되돌림 → ⓑ 임펄스."""
+    evs = [_wave("AUSDT", "임펄스", 0.50), _retrace("BUSDT", 0.30, 0.52),
+           _wave("CUSDT", "ABC", 0.10)]
+    out = format_events(evs, [], {})
+    order = [ln.split(">")[1].split("<")[0] for ln in out.splitlines()
+             if ln.startswith("• ")]
+    assert order == ["C", "B", "A"]
+
+
+def test_wave_retrace_line_shows_the_ratio_and_the_level():
+    """ⓒ 줄은 📐(지금 어디)와 되돌림 레벨(어디서 잡았나)을 같이 싣는다."""
+    out = format_events([_retrace("XUSDT", 0.02, 0.52)], [], {})
+    line = [ln for ln in out.splitlines() if ln.startswith("• ")][0]
+    assert "📐0.52" in line
+    assert "되돌림 0.8775" in line
+    assert "장기선" not in line and "단기선" not in line   # 선을 건드린 게 아니다
+
+
+def test_wave_retrace_hold_line_carries_the_live_ratio():
+    """추적 줄의 유일한 라이브 정보는 📐 — 매 스캔 갱신된 값이 실린다."""
+    e = _retrace("XUSDT", 0.02, 0.63, days_ago=1)
+    e.detail.update({"ret_4h": -0.01, "ret_7d": 0.10})
+    out = format_events([], [], {}, ongoing_crypto=[e])
+    body = [ln for ln in out.splitlines() if ln.startswith("↳ ") or "ⓒ" in ln]
+    assert body[0].strip().startswith("ⓒ") and "4h 돌파 후" in body[0]
+    assert "📐0.63" in body[1]
+    # ⓐ의 '장기선 터치' 같은 꼬리표는 안 붙는다
+    assert "터치" not in body[1] and "돌파" not in body[1]
+
+
+def test_wave_retrace_hold_line_is_no_wider_than_an_abc_line():
+    """ⓒ 추적 줄이 ⓐ보다 넓어지면 안 된다 — 파동 칸 폭은 ⓐ가 정한다.
+
+    ⓐ의 '장기선'(6칸)이 ⓒ에서는 '📐0.63'(8칸)으로 바뀐다. 배열 태그를
+    빼는 규칙은 두 변형에 똑같이 걸린다.
+    """
+    import unicodedata
+
+    def width(s):
+        return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in s)
+
+    def rendered(e):
+        e.detail.update({"ret_4h": -0.003, "ret_7d": -0.067, "align": "역배열",
+                         "last_price": 0.02067})
+        return [ln for ln in format_events([], [], {}, ongoing_crypto=[e]).splitlines()
+                if ln.startswith("↳ ")][0]
+
+    abc = _wave("AIGENSYNUSDT", "ABC", 0.023)
+    abc.detail["touched"] = "장기선"
+    line = rendered(_retrace("AIGENSYNUSDT", 0.023, 0.63))
+    assert width(line) <= width(rendered(abc)), line
+    assert "역배열" not in line
+
+
+def test_wave_retrace_line_marks_a_broken_low():
+    """📐이 1.0을 넘으면 '저점이탈'로 읽힌다 — ⚡와 같은 눈금."""
+    out = format_events([_retrace("XUSDT", 0.02, 1.04)], [], {})
+    assert "📐1.04 저점이탈" in out

@@ -533,3 +533,248 @@ def test_abc_slow_touch_is_labelled():
     p = Params(impulse_enabled=False)
     e = detect(_abc_frame(params=p), "XUSDT", p)[0]
     assert e.detail["touched"] == wave_setup.SLOW_LINE
+
+
+# ── ⓒ 되돌림 ────────────────────────────────────────────────────────────
+
+def _bars(closes, start="2026-01-01", rng=0.02):
+    """폭이 있는 4h봉 — ATR이 살아 있어야 장기선이 되돌림 아래로 내려간다.
+
+    _frame의 기본 폭(±0.2%)으로는 6×ATR이 너무 좁아 장기 수퍼트렌드의
+    트레일링 스톱이 0.5 되돌림 **위**에 걸린다. 그러면 값이 레벨에 닿기
+    전에 장기가 먼저 하락으로 꺾여 되돌림 자체가 만들어지지 않는다.
+    """
+    idx = pd.date_range(start, periods=len(closes), freq="4h", tz="UTC")
+    c = np.asarray(closes, dtype=float)
+    return pd.DataFrame({"Open": c, "High": c * (1 + rng), "Low": c * (1 - rng),
+                         "Close": c, "Volume": np.full(len(c), 1000.0)}, index=idx)
+
+
+def _add(df, closes, rng=0.02):
+    return pd.concat([df, _bars(closes, df.index[-1] + pd.Timedelta(hours=4), rng)])
+
+
+RETRACE_P = Params(impulse_enabled=False, abc_enabled=False, vwap_condition=False)
+
+
+def _broken(params=RETRACE_P, n=180, rally=3, step=0.06, top=0.04):
+    """장기가 상승 전환(=돌파)하고 고점까지 만든 프레임.
+
+    길게 흘러내리다 step씩 튀어 장기 수퍼트렌드를 뒤집고, 거기서 rally봉을
+    더 올려 고점을 세운다. 돌파봉·고점봉 위치를 같이 돌려준다.
+    """
+    df = _bars(list(np.linspace(100.0, 40.0, n)))
+    while not supertrend_full(df, params.slow_period, params.slow_mult)["dir"].iloc[-1] > 0:
+        df = _add(df, [float(df["Close"].iloc[-1]) * (1 + step)])
+        assert len(df) < n + 60, "장기 상승 전환을 못 만들었다"
+    break_i = len(df) - 1
+    for _ in range(rally):
+        df = _add(df, [float(df["Close"].iloc[-1]) * (1 + top)])
+    return df, break_i, len(df) - 1
+
+
+def _slide(df, bars, step=0.03):
+    """고점에서 step씩 흘러내리는 봉을 bars개 붙인다."""
+    top = float(df["Close"].iloc[-1])
+    for k in range(1, bars + 1):
+        df = _add(df, [top * (1 - step * k)])
+    return df
+
+
+def test_retrace_fires_when_price_first_reaches_the_level():
+    """ⓒ 저가가 저점~고점의 0.5까지 처음 내려간 봉에서 발화한다."""
+    p = RETRACE_P
+    df, break_i, high_i = _broken(p)
+    df = _slide(df, 4)
+    while True:
+        evs = [e for e in detect(df, "XUSDT", p) if e.detail["stage"] == wave_setup.RETRACE]
+        if evs:
+            break
+        assert len(df) < 220, "되돌림을 못 만들었다"
+        df = _add(df, [float(df["Close"].iloc[-1]) * 0.97])
+    assert len(evs) == 1
+    e = evs[0]
+    t = int(df.index.searchsorted(e.bar_time))
+    w = wave_setup.wave_at(df, t, p)
+    assert (w.break_i, w.high_i) == (break_i, high_i)
+    d = e.detail
+    assert (d["wave_low"], d["wave_high"], d["wave_level"]) == (w.low, w.high, w.level)
+    assert d["wave_level"] == w.high - 0.5 * (w.high - w.low)
+    assert float(df["Low"].iloc[t]) <= d["wave_level"]      # 저가가 레벨을 찍었다
+    assert d["interval"] == "4h" and d["stage"] == wave_setup.RETRACE
+    assert d["break_time"] == df.index[break_i].isoformat()
+    # 📐는 leader_break와 같은 규약 — (고점−종가)÷(고점−저점)
+    assert d["fib"] == (w.high - e.price) / (w.high - w.low)
+    assert "touched" not in d                # 선을 건드린 게 아니다
+
+
+def test_retrace_coordinates_come_from_the_rolling_window():
+    """저점·고점은 수퍼트렌드가 아니라 롤링 창에서 나온다.
+
+    고점은 돌파봉 이후에서만 찾고, 저점은 그 고점 앞 W봉에서만 찾는다 —
+    창 밖에 더 낮은 저가를 심어도 안 뽑힌다.
+    """
+    p = RETRACE_P
+    df, break_i, high_i = _broken(p)
+    df = _slide(df, 4)
+    t = len(df) - 1
+    w = wave_setup.wave_at(df, t, p)
+    win = p.retrace_window_days * wave_setup.BARS_PER_DAY
+    assert break_i <= w.high_i < t                    # 돌파 이후, 판정 봉 이전
+    assert w.high == float(df["High"].iloc[max(break_i, t - win):t].max())
+    assert w.high_i - win + 1 <= w.low_i <= w.high_i  # 저점은 고점보다 앞
+    assert w.low == float(df["Low"].iloc[max(0, w.high_i - win + 1):w.high_i + 1].min())
+    # 창보다 앞에 훨씬 낮은 저가를 심어도 저점은 그대로다
+    deep = df.copy()
+    deep.iloc[10, deep.columns.get_loc("Low")] = 0.01
+    assert wave_setup.wave_at(deep, t, p).low == w.low
+
+
+def test_retrace_high_excludes_the_judging_bar():
+    """판정 봉의 고가는 고점에서 뺀다 — 봉이 자라며 레벨이 따라 내려오면 안 된다."""
+    p = RETRACE_P
+    df, _, _ = _broken(p)
+    df = _slide(df, 4)
+    t = len(df) - 1
+    base = wave_setup.wave_at(df, t, p)
+    spiked = df.copy()
+    spiked.iloc[t, spiked.columns.get_loc("High")] = base.high * 10
+    after = wave_setup.wave_at(spiked, t, p)
+    assert (after.high, after.high_i, after.level) == (base.high, base.high_i, base.level)
+
+
+def test_retrace_needs_the_high_to_be_confirmed():
+    """고점 확정 — 고점이 retrace_hold_bars만큼 안 갱신돼야 무장한다."""
+    p = RETRACE_P
+    df, _, high_i = _broken(p)
+    # 고점 바로 다음 봉이 레벨을 찍게 만든다
+    w = wave_setup.wave_at(_add(df, [float(df["Close"].iloc[-1]) * 0.99]), len(df), p)
+    df = _add(df, [w.level * 0.98])
+    t = len(df) - 1
+    assert t - high_i == 1
+    wide = dataclasses_replace(p, grace_bars=30)
+    assert not [e for e in detect(df, "X", wide) if e.detail["stage"] == wave_setup.RETRACE]
+    loose = dataclasses_replace(wide, retrace_hold_bars=0)
+    hits = [e for e in detect(df, "X", loose) if e.detail["stage"] == wave_setup.RETRACE]
+    assert [int(df.index.searchsorted(e.bar_time)) for e in hits] == [t]
+
+
+def test_retrace_fires_once_per_break():
+    """존을 나갔다 다시 들어와도 같은 돌파에서 두 번째 알림은 없다."""
+    p = dataclasses_replace(RETRACE_P, grace_bars=30)   # 스캐너의 소급 창
+    df, _, _ = _broken(RETRACE_P)
+    df = _slide(df, 4)
+    while not [e for e in detect(df, "X", p) if e.detail["stage"] == wave_setup.RETRACE]:
+        assert len(df) < 220
+        df = _add(df, [float(df["Close"].iloc[-1]) * 0.97])
+    first = [e for e in detect(df, "X", p) if e.detail["stage"] == wave_setup.RETRACE]
+    assert len(first) == 1
+    lvl = first[0].detail["wave_level"]
+    # 레벨 위로 올라갔다가 다시 내려온다
+    out = _add(df, [lvl * 1.05, lvl * 1.06, lvl * 0.97])
+    again = [e for e in detect(out, "X", p) if e.detail["stage"] == wave_setup.RETRACE]
+    assert [e.bar_time for e in again] == [first[0].bar_time]
+
+
+def test_retrace_expires_after_the_window():
+    """돌파 후 retrace_expire_bars가 지난 터치는 안 잡는다."""
+    p = dataclasses_replace(RETRACE_P, grace_bars=30)
+    df, _, _ = _broken(RETRACE_P)
+    df = _slide(df, 4)
+    while not [e for e in detect(df, "X", p) if e.detail["stage"] == wave_setup.RETRACE]:
+        assert len(df) < 220
+        df = _add(df, [float(df["Close"].iloc[-1]) * 0.97])
+    tight = dataclasses_replace(p, retrace_expire_bars=2)
+    assert not [e for e in detect(df, "X", tight) if e.detail["stage"] == wave_setup.RETRACE]
+
+
+def _fired(p=None):
+    """되돌림이 한 건 잡힌 (프레임, 이벤트)."""
+    p = p or dataclasses_replace(RETRACE_P, grace_bars=30)
+    df, _, _ = _broken(RETRACE_P)
+    df = _slide(df, 4)
+    while True:
+        evs = [e for e in detect(df, "X", p) if e.detail["stage"] == wave_setup.RETRACE]
+        if evs:
+            return df, evs[0]
+        assert len(df) < 220
+        df = _add(df, [float(df["Close"].iloc[-1]) * 0.97])
+
+
+def test_retrace_survives_while_the_long_term_holds_up():
+    """장기가 상승인 동안은 남는다 — ⓐ와 장기 방향 요구가 정반대다."""
+    df, e = _fired()
+    assert supertrend_full(df, 30, 6.0)["dir"].iloc[-1] > 0
+    assert still_active(df, e, RETRACE_P)
+    abc = wave_setup._event(df, "X", len(df) - 1, ABC,
+                            supertrend_full(df, 22, 3.0), supertrend_full(df, 30, 6.0),
+                            RETRACE_P, {})
+    assert not still_active(df, abc, RETRACE_P)      # 같은 봉에 ⓐ는 못 산다
+
+
+def test_retrace_dies_when_the_long_term_turns_back_down():
+    """장기가 다시 하락으로 꺾이면 돌파가 실패한 것이라 좌표도 죽는다."""
+    df, e = _fired()
+    dead = _slide(df, 6, step=0.10)
+    assert supertrend_full(dead, 30, 6.0)["dir"].iloc[-1] < 0
+    assert not still_active(dead, e, RETRACE_P)
+
+
+def test_retrace_dies_when_the_low_is_broken():
+    """📐이 1.0을 넘으면 되돌림이 아니라 저점 이탈 — 장기가 살아 있어도 뺀다.
+
+    프레임을 저점 아래로 끌어내리면 장기 수퍼트렌드가 먼저 꺾여 두 조건이
+    섞인다. 그래서 좌표만 옮겨 📐 분기 하나만 본다.
+    """
+    df, e = _fired()
+    hi = e.detail["wave_high"]
+    assert supertrend_full(df, 30, 6.0)["dir"].iloc[-1] > 0
+    assert e.detail["fib"] < 1.0 and still_active(df, e, RETRACE_P)
+    close = float(df["Close"].iloc[-1])
+    e.detail["wave_low"] = close + 0.01 * (hi - close)   # 종가가 저점 아래가 되게
+    assert wave_setup._fib(e.detail["wave_low"], hi, close) > 1.0
+    assert not still_active(df, e, RETRACE_P)
+
+
+def test_retrace_fib_is_recalculated_every_scan():
+    """추적 줄의 📐는 매 스캔 현재가로 다시 잰다 — 좌표는 트리거 시점 그대로."""
+    df, e = _fired()
+    lo, hi = e.detail["wave_low"], e.detail["wave_high"]
+    before = e.detail["fib"]
+    deeper = _add(df, [hi - 0.8 * (hi - lo)])
+    wave_setup.refresh_detail(deeper, e, RETRACE_P)
+    assert e.detail["fib"] == wave_setup._fib(lo, hi, float(deeper["Close"].iloc[-1]))
+    assert e.detail["fib"] > before
+    assert (e.detail["wave_low"], e.detail["wave_high"]) == (lo, hi)
+
+
+def test_break_index_ignores_the_warmup_flip():
+    """ATR 워밍업이 끝나며 dir이 NaN → +1이 되는 자리는 돌파가 아니다.
+
+    'not up'을 하락으로 세면 종목마다 유령 돌파가 한 건씩 생긴다.
+    """
+    dirs = pd.DataFrame({"dir": [np.nan] * 3 + [1.0, 1.0, -1.0, 1.0, 1.0]})
+    assert list(wave_setup._break_index(dirs)) == [-1, -1, -1, -1, -1, -1, 6, 6]
+
+
+def test_retrace_can_be_turned_off():
+    p = dataclasses_replace(RETRACE_P, grace_bars=30, retrace_enabled=False)
+    df, _, _ = _broken(RETRACE_P)
+    df = _slide(df, 8)
+    assert not [e for e in detect(df, "X", p) if e.detail["stage"] == wave_setup.RETRACE]
+
+
+def test_config_yaml_reaches_the_params():
+    """config.yaml의 ⓒ 키가 실제로 Params까지 간다.
+
+    기본값이 코드와 config 두 곳에 있어서 한쪽만 고치면 조용히 갈린다 —
+    abc_track_days가 실제로 그랬다(코드 3 / config 10).
+    """
+    from invest_signal import config
+
+    p = config.wave_params(config.load("config.yaml"))
+    s = config.load("config.yaml")["signal"]["wave_setup"]
+    assert p.abc_track_days == s["abc_track_days"]
+    for key in ("retrace_enabled", "retrace_level", "retrace_window_days",
+                "retrace_hold_bars", "retrace_expire_bars", "retrace_track_days"):
+        assert getattr(p, key) == s[key], key

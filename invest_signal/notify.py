@@ -80,7 +80,8 @@ def _daily_gain(d: dict) -> float | None:
     return d.get("ret_24h") if g is None else g
 
 
-WAVE_VARIANTS = ("ABC", "임펄스")   # 파동 칸 안에서 이 순서로 묶는다
+WAVE_VARIANTS = ("ABC", "되돌림", "임펄스")   # 파동 칸 안에서 이 순서로 묶는다
+WAVE_RETRACE = "되돌림"            # wave_setup.RETRACE — 시간 순서가 곧 읽는 순서다
 
 
 def _variant(e) -> int:
@@ -156,6 +157,7 @@ def _returns_tag(d: dict) -> str | None:
 # 폭을 줄인다. 파동 줄은 라벨을 반복하면 62칸이 되어 폰에서 두 줄로 접힌다
 # (다른 칸은 41칸이라 한 줄에 들어간다).
 WAVE_HEADERS = {"ABC": "  ⓐ <b>ABC</b> · 4h 돌파·터치 · 4h/24h/7d",
+                WAVE_RETRACE: "  ⓒ <b>되돌림</b> · 4h 돌파 후 · 4h/24h/7d",
                 "임펄스": "  ⓑ <b>임펄스</b> · 일봉 터치 · 4h/24h/7d"}
 
 
@@ -181,6 +183,11 @@ def _wave_tag(d: dict) -> str:
     글자가 겹쳐 서로 다른 뜻으로 두 번 나온다.
     """
     stage = d.get("stage", "")
+    if stage == WAVE_RETRACE:
+        # ⓒ는 선을 건드린 게 아니라 되돌림 레벨까지 밀린 자리다 —
+        # 지금 어디인지는 앞의 📐가 말하고, 여기엔 그 레벨 값을 적는다.
+        lv = d.get("wave_level")
+        return f"되돌림 {_fmt_price(lv)}" if lv is not None else stage
     line = d.get("touched") or ("장기선" if stage == "ABC" else "단기선")
     return f"{stage} {line} {d.get('kind', '터치')}"
 
@@ -383,6 +390,12 @@ def format_events(events_crypto: list, events_etf: list,
                 # ⓐ는 세 자리를 다 잡으므로 소제목만으론 구분이 안 된다.
                 # 돌파는 선이 하나뿐이라 '돌파'만 적으면 짧고 명확하다.
                 tags.append("돌파" if d.get("kind") == "돌파" else d["touched"])
+            elif d.get("stage") == WAVE_RETRACE:
+                # ⓒ는 되돌림이 깊어지는 게 유일한 라이브 정보다 —
+                # refresh_detail이 매 스캔 다시 잰 값이 여기 실린다.
+                ft = _fib_tag(d)
+                if ft:
+                    tags.append(ft)
         else:
             day = _daily_gain(d)
             if day is not None:
