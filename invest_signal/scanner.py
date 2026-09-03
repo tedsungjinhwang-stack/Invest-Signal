@@ -38,6 +38,16 @@ RANK_FILTER_LABEL = {"pullback": "눌림목·MSS", "uptrend_onset": "상승초�
                      "pump_early": "펌핑초기", "wave_setup": "파동"}
 
 
+def _has_resist(detail: dict) -> bool:
+    """↗️(1h·15m 단기선 터치·돌파)가 하나라도 붙었는지 — require_resist의 판정.
+
+    두 키는 leader_break.resist_test / resist_test_15m이 채운다. 값이
+    "터치"·"돌파" 문자열이거나, 해당 없으면 False, 판정 불가면 None이라
+    셋을 한 번에 거르려면 진리값으로 보면 된다.
+    """
+    return bool(detail.get("resist_1h") or detail.get("resist_15m"))
+
+
 def _with_fields(params, **kw):
     """dataclass에 실제로 있는 필드만 갈아 끼운다.
 
@@ -174,6 +184,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         require_aligned=bool(s.get("require_aligned", True)),
         allow_bearish=bool(s.get("allow_bearish", False)),
         allow_mixed=bool(s.get("allow_mixed", False)),
+        require_resist=bool(s.get("require_resist", False)),
         allow_short_history=bool(s.get("allow_short_history", False)),
         exhausted_mas=tuple(s.get("exhausted_mas", (120, 240, 480))),
         quiet_turnover_usd=float(s.get("quiet_turnover_usd", 6_000_000)),
@@ -290,6 +301,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     now = pd.Timestamp.now(tz="UTC")
     rank = {sym: i + 1 for i, (sym, _) in enumerate(top)}
     events, ongoing, spent = [], [], []
+    muted = 0                   # require_resist로 걸러낸 신규·추적 줄 수
     for sym, since in watch:
         if is_blocked(sym):
             spent.append(sym)
@@ -344,15 +356,25 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
 
         for ev in leader_break.detect(df, sym, params):
             annotate(ev.detail)
+            if params.require_resist and not _has_resist(ev.detail):
+                muted += 1
+                continue        # 상태에 안 남긴다 — 다음 스캔에서 ↗️가 붙으면 나간다
             events.append(ev)
         # 유지 중 — 감시 창 안에서 **아직 ma선 아래인** 종목만 (track_break_only).
         # bar_time은 마지막 상위권 등재 시각이라 최신 등재 순으로 정렬된다.
         snap = leader_break.tracking(df, params)
         if snap is not None:
-            ongoing.append(SignalEvent(
-                symbol=sym, signal=leader_break.NAME,
-                bar_time=pd.Timestamp(since) if since is not None else now,
-                price=snap["last_price"], detail=annotate(snap)))
+            detail = annotate(snap)
+            if params.require_resist and not _has_resist(detail):
+                muted += 1
+            else:
+                ongoing.append(SignalEvent(
+                    symbol=sym, signal=leader_break.NAME,
+                    bar_time=pd.Timestamp(since) if since is not None else now,
+                    price=snap["last_price"], detail=detail))
+    if muted:
+        log(f"[binance] 크립토 모멘텀 눌림목/이탈 ↗️ 없어 제외 {muted}줄 "
+            f"(require_resist — 1h·15m 단기선을 건드린 줄만 남긴다)")
     if spent:
         why = []
         if params.require_aligned:

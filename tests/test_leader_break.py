@@ -622,5 +622,31 @@ def test_config_yaml_reaches_the_alignment_switches():
     finally:
         leader_break.Params = real
     for key in ("require_aligned", "allow_mixed", "allow_bearish",
-                "exhausted_filter"):
+                "exhausted_filter", "require_resist"):
         assert captured.get(key) == s[key], (key, captured.get(key), s[key])
+
+
+def test_has_resist_reads_both_marks():
+    """↗️ 판정 — 1h·15m 둘 중 하나만 있어도 남긴다.
+
+    resist_test는 "터치"/"돌파" 문자열, 해당 없으면 False, 판정 불가면
+    None을 준다. 셋을 진리값 하나로 거른다.
+    """
+    from invest_signal.scanner import _has_resist
+
+    assert _has_resist({"resist_1h": "돌파"}) is True
+    assert _has_resist({"resist_15m": "터치"}) is True
+    assert _has_resist({"resist_1h": "터치", "resist_15m": "돌파"}) is True
+    assert _has_resist({}) is False
+    assert _has_resist({"resist_1h": False, "resist_15m": None}) is False
+    # 다른 키가 있어도 이 둘만 본다
+    assert _has_resist({"turn_up": "전환", "fib": 0.7}) is False
+
+
+def test_require_resist_is_off_by_default_in_code():
+    """코드 기본값은 꺼짐 — 켜는 건 config.yaml의 몫이다.
+
+    이 시그널의 알림을 절반으로 줄이는 필터라, 설정을 지웠을 때 조용히
+    켜져 있으면 안 된다.
+    """
+    assert Params().require_resist is False

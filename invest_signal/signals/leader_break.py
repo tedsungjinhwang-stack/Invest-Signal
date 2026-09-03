@@ -47,6 +47,11 @@ class Params:
     allow_bearish: bool = False          # 켜면 역배열도 통과
     allow_mixed: bool = False            # 켜면 혼조도 통과 (②는 안 건다)
     allow_short_history: bool = False    # 이력이 짧아 배열 판정 불가면 통과시킬지
+    # ↗️(1h·15m 단기선 터치·돌파)가 붙은 줄만 남긴다. 20선 이탈만으로는
+    # '눌렸다'까지고, 반등이 실제로 선을 다시 건드리는지가 타점에 가깝다.
+    # 신규·추적 양쪽에 걸리고, 걸러진 신규는 **상태에 기록하지 않는다** —
+    # 같은 봉이 다음 스캔에서 ↗️를 얻으면 그때 나가야 하기 때문이다.
+    require_resist: bool = False
     exhausted_mas: tuple = (120, 240, 480)   # 1h봉 정배열 판정선
     # ② 4h 장기 수퍼트렌드가 상승이어야 한다 — 선은 turn_slow_* 를 같이 쓴다
     # '조용한' 종목 표시 기준 — 거르지 않고 태그만 붙인다(quiet() 참고)
