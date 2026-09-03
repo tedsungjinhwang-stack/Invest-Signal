@@ -82,6 +82,26 @@ def _daily_gain(d: dict) -> float | None:
 
 WAVE_VARIANTS = ("ABC", "되돌림", "임펄스")   # 파동 칸 안에서 이 순서로 묶는다
 WAVE_RETRACE = "되돌림"            # wave_setup.RETRACE — 시간 순서가 곧 읽는 순서다
+# ⓐ가 잡는 세 자리 중 **장기선 터치**만 앞쪽 마크로 뽑는다. 반등이 아직
+# 하락인 장기선(위쪽 저항)까지 되돌린 자리라 셋 중 제일 큰 사건인데
+# (wave_setup._detect_abc의 우선순위도 같다), 열 줄 중 한 줄꼴로 드물어서
+# 줄 끝에 '장기선' 세 글자로만 붙여 두면 '돌파'와 구분이 안 됐다.
+SLOW_TOUCH_TAG = "🧱장기선터치"
+
+
+def _slow_touch(e) -> bool:
+    """ⓐ 장기선 터치 줄인지 — 앞쪽 마크와 정렬을 둘 다 이 판정으로 건다."""
+    d = e.detail
+    return (e.signal == "wave_setup" and d.get("stage") == "ABC"
+            and d.get("touched") == "장기선" and d.get("kind") != "돌파")
+
+
+def _slow_touch_first(e):
+    """ⓐ 블록 안에서 장기선 터치를 맨 위로 올리는 정렬 조각.
+
+    파동 외 시그널은 전부 1이라 순서가 그대로다(🍃 조각과 같은 규약).
+    """
+    return 0 if _slow_touch(e) else 1
 
 
 def _variant(e) -> int:
@@ -123,12 +143,14 @@ def _quiet_first(e):
 
 def _new_order(e):
     """신규 줄 — 변형·🍃로 묶고, 그 안에서 24h 수익률 순, 없으면 심볼 순."""
-    return (_variant(e), _quiet_first(e), *_by_gain_desc(e), e.symbol)
+    return (_variant(e), _slow_touch_first(e), _quiet_first(e),
+            *_by_gain_desc(e), e.symbol)
 
 
 def _hold_order(e):
     """추적 줄 — 변형·🍃로 묶고, 24h 수익률 순, 동률이면 최신 발생 순."""
-    return (_variant(e), _quiet_first(e), *_by_gain_desc(e), -e.bar_time.timestamp())
+    return (_variant(e), _slow_touch_first(e), _quiet_first(e),
+            *_by_gain_desc(e), -e.bar_time.timestamp())
 
 
 def _returns_tag(d: dict) -> str | None:
@@ -201,6 +223,8 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tags.append("⏳진행봉")     # 봉 미마감 잠정 판정 — 마감 때 되돌릴 수 있음
     if d.get("quiet"):
         tags.append(QUIET_TAG)      # 거래대금·변동성이 작은 종목 (leader_break.quiet)
+    if _slow_touch(e):
+        tags.append(SLOW_TOUCH_TAG)
     if _early(e):
         tags.append(EARLY_TAG)
     tt = _turn_tag(d)
@@ -223,7 +247,8 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
             # 눌림목 — 타점(밴드 터치)과 대기(밴드 위)를 한눈에 구분
             tags.append("🎯타점" if d["stage"] == "타점" else "대기")
         if e.signal == "wave_setup":
-            tags.append(_wave_tag(d))
+            # 장기선 터치는 앞의 🧱 마크가 선·방식을 다 말하므로 변형만
+            tags.append("ABC" if _slow_touch(e) else _wave_tag(d))
         if e.signal == "pump_early" and d.get("rise") is not None:
             hours = int(d.get("rise_bars", 1)) * 4
             tags.append(f"{hours}h +{d['rise'] * 100:.1f}%"
@@ -376,6 +401,8 @@ def format_events(events_crypto: list, events_etf: list,
                     + (f"  {_fmt_price(d['last_price'])}" if d.get("last_price") else "")
                     + " · " + " · ".join(tags))
         tags = [f"{_age_days(e.bar_time)}d"]
+        if _slow_touch(e):
+            tags.append(SLOW_TOUCH_TAG)
         if d.get("quiet"):
             tags.append(QUIET_TAG)      # ⚡·파동 공통 — 조용한 종목 표시
         tags += _resist_tags(d)         # ⚡·파동 공통 — 1h·15m 단기선 터치·돌파
@@ -386,7 +413,9 @@ def format_events(events_crypto: list, events_etf: list,
             rt = _returns_compact(d)
             if rt:
                 tags.append(rt)
-            if d.get("touched"):
+            if _slow_touch(e):
+                pass                # 앞의 🧱 마크가 이미 말한다 — 두 번 안 적는다
+            elif d.get("touched"):
                 # ⓐ는 세 자리를 다 잡으므로 소제목만으론 구분이 안 된다.
                 # 돌파는 선이 하나뿐이라 '돌파'만 적으면 짧고 명확하다.
                 tags.append("돌파" if d.get("kind") == "돌파" else d["touched"])

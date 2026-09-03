@@ -737,3 +737,72 @@ def test_wave_retrace_line_marks_a_broken_low():
     """📐이 1.0을 넘으면 '저점이탈'로 읽힌다 — ⚡와 같은 눈금."""
     out = format_events([_retrace("XUSDT", 0.02, 1.04)], [], {})
     assert "📐1.04 저점이탈" in out
+
+
+def _abc(symbol, touched, kind, gain, days_ago=0, quiet=False):
+    e = _wave(symbol, "ABC", gain, days_ago)
+    e.detail.update({"touched": touched, "kind": kind, "quiet": quiet,
+                     "ret_4h": -0.003, "ret_7d": 0.056})
+    return e
+
+
+def test_slow_line_touch_is_marked_at_the_front():
+    """ⓐ 장기선 터치는 앞쪽 🧱 마크로 뽑는다 — 줄 끝 '장기선'은 안 보였다.
+
+    셋 중 제일 큰 사건인데(반등이 위쪽 저항까지 되돌린 자리) 열 줄 중
+    한 줄꼴로 드물어서, 줄 끝에 세 글자로만 붙으면 '돌파'와 안 갈렸다.
+    """
+    slow = _abc("ENSOUSDT", "장기선", "터치", 0.02, 2)
+    line = [ln for ln in format_events([], [], {}, ongoing_crypto=[slow]).splitlines()
+            if ln.startswith("↳ ")][0]
+    assert "🧱장기선터치" in line
+    # 앞쪽이다 — 수익률 덩어리보다 먼저 나온다
+    assert line.index("🧱") < line.index("%")
+    # 꼬리표로 두 번 적지 않는다
+    assert line.count("장기선") == 1
+
+
+def test_other_abc_kinds_keep_the_trailing_tag():
+    """돌파·단기선 터치는 그대로 줄 끝에 — 마크는 장기선 터치만."""
+    for touched, kind, want in (("단기선", "돌파", "돌파"),
+                                ("단기선", "터치", "단기선")):
+        e = _abc("XUSDT", touched, kind, 0.02, 1)
+        line = [ln for ln in format_events([], [], {}, ongoing_crypto=[e]).splitlines()
+                if ln.startswith("↳ ")][0]
+        assert "🧱" not in line
+        assert line.rstrip().endswith(want), line
+
+
+def test_slow_line_touch_sorts_to_the_top_of_the_abc_block():
+    """정렬도 같이 바꾼다 — 마크만 달면 여전히 스크롤해서 찾아야 한다.
+
+    🍃조용 그룹핑보다 앞에 온다: 장기선 터치가 더 드물고 더 큰 사건이다.
+    """
+    evs = [_abc("AUSDT", "단기선", "돌파", 0.50, 1, quiet=True),
+           _abc("BUSDT", "단기선", "터치", 0.30, 1),
+           _abc("CUSDT", "장기선", "터치", -0.20, 1),
+           _wave("DUSDT", "임펄스", 0.90, 1)]
+    out = format_events([], [], {}, ongoing_crypto=evs)
+    order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳ ")]
+    # C가 수익률 꼴찌인데도 ⓐ 블록 맨 위, 임펄스(D)는 여전히 뒤 블록
+    assert order == ["C", "A", "B", "D"]
+
+
+def test_slow_line_touch_marks_new_lines_too():
+    """신규 줄에도 같은 마크 — 변형 이름만 남기고 선·방식은 안 겹쳐 적는다."""
+    out = format_events([_abc("ENSOUSDT", "장기선", "터치", 0.02)], [], {})
+    line = [ln for ln in out.splitlines() if ln.startswith("• ")][0]
+    assert "🧱장기선터치" in line
+    assert "ABC 장기선 터치" not in line      # 마크가 이미 말한다
+    assert line.count("장기선") == 1
+
+
+def test_slow_touch_mark_does_not_leak_to_other_signals():
+    """파동 ⓐ 밖에서는 안 붙는다 — 정렬 조각도 다른 칸을 안 흔든다."""
+    e = _hold("XUSDT", gain=0.13)
+    e.detail["touched"] = "장기선"           # 다른 시그널이 같은 키를 써도
+    out = format_events([], [], {}, ongoing_crypto=[e])
+    assert "🧱" not in out
+    ret = _wave("YUSDT", "되돌림", 0.02, 1)
+    ret.detail["touched"] = "장기선"          # ⓒ도 아니다 — stage가 ABC여야 한다
+    assert "🧱" not in format_events([], [], {}, ongoing_crypto=[ret])
