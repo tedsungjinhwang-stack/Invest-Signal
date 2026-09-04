@@ -80,7 +80,8 @@ def _daily_gain(d: dict) -> float | None:
     return d.get("ret_24h") if g is None else g
 
 
-WAVE_VARIANTS = ("ABC", "되돌림", "임펄스")   # 파동 칸 안에서 이 순서로 묶는다
+WAVE_VARIANTS = ("ABC", "장기선돌파", "되돌림", "임펄스")   # 파동 칸 안에서 이 순서로 묶는다
+WAVE_SLOW_BREAK = "장기선돌파"      # wave_setup.SLOW_BREAK
 WAVE_RETRACE = "되돌림"            # wave_setup.RETRACE — 시간 순서가 곧 읽는 순서다
 # ⓐ가 잡는 세 자리 중 **장기선 터치**만 앞쪽 마크로 뽑는다. 반등이 아직
 # 하락인 장기선(위쪽 저항)까지 되돌린 자리라 셋 중 제일 큰 사건인데
@@ -205,6 +206,7 @@ def _returns_tag(d: dict) -> str | None:
 # 폭을 줄인다. 파동 줄은 라벨을 반복하면 62칸이 되어 폰에서 두 줄로 접힌다
 # (다른 칸은 41칸이라 한 줄에 들어간다).
 WAVE_HEADERS = {"ABC": "  ⓐ <b>ABC</b> · 4h 돌파·터치 · 4h/24h/7d",
+                WAVE_SLOW_BREAK: "  ⓓ <b>장기선 돌파</b> · 4h 장기 상승 전환 · 4h/24h/7d",
                 WAVE_RETRACE: "  ⓒ <b>되돌림</b> · 4h 돌파 후 · 4h/24h/7d",
                 "임펄스": "  ⓑ <b>임펄스</b> · 일봉 터치 · 4h/24h/7d"}
 
@@ -231,6 +233,9 @@ def _wave_tag(d: dict) -> str:
     글자가 겹쳐 서로 다른 뜻으로 두 번 나온다.
     """
     stage = d.get("stage", "")
+    if stage == WAVE_SLOW_BREAK:
+        # 선을 건드린 게 아니라 넘겨 마감한 봉이다 — 소제목이 다 말한다
+        return "장기선 돌파"
     if stage == WAVE_RETRACE:
         # ⓒ는 선을 건드린 게 아니라 되돌림 레벨까지 밀린 자리다 —
         # 지금 어디인지는 앞의 📐가 말하고, 여기엔 그 레벨 값을 적는다.

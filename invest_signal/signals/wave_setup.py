@@ -83,6 +83,7 @@ FAST_LINE = "단기선"
 TOUCH = "터치"                # 어떻게 건드렸는지 (detail["kind"])
 BREAK = "돌파"
 IMPULSE = "임펄스"           # 일봉 터치
+SLOW_BREAK = "장기선돌파"     # 4h — 장기 수퍼트렌드가 상승으로 뒤집힌 봉 자체
 RETRACE = "되돌림"           # 4h — 장기 돌파 뒤 저점~고점 되돌림 진입
 # 📐이 이 값을 넘으면 저점을 깬 것이라 되돌림이 아니라 이탈이다 — 추적 종료.
 # notify._fib_tag이 '저점이탈'로 바꿔 다는 눈금과 같은 값이다.
@@ -143,6 +144,12 @@ class Params:
     # 주석에 있다. 요약: 이건 승률 장치가 아니라 **화면 장치**다 —
     # abc_track_days를 3으로 줄이면서 사라지는 줄을 되살리는 쪽이지,
     # 되돌림을 기다려서 더 좋은 자리를 잡는 게 아니다.
+    # ⓓ 장기선 돌파 — 4h 장기 수퍼트렌드가 하락→상승으로 뒤집힌 봉.
+    # ⓐ가 구조상 못 잡는 자리다: 종가가 장기선을 넘기면 ⓐ의 전제(장기는
+    # 아직 하락)가 깨져 조건에서 빠진다. ⓒ가 이 봉을 기준점으로 쓰지만
+    # 0.5까지 되돌린 뒤에야(중앙 8봉 ≈ 32시간) 울려서 그 사이가 비어 있었다.
+    slow_break_enabled: bool = True
+    slow_break_track_days: int = 1
     retrace_enabled: bool = True
     retrace_level: float = 0.5      # (고점−현재가)÷(고점−저점). leader_break.retrace와 같은 규약
     retrace_window_days: int = 3    # 저점을 훑는 창(일). 3일 = 18봉. 고점에는 창이 없다
@@ -284,7 +291,7 @@ def _event(df, symbol, i, kind, fast, slow, params, rets) -> SignalEvent:
             # stage에 넣으면 dedup 키가 갈린다 — 같은 종목의 4h 터치와
             # 일봉 터치가 우연히 같은 시각에 떨어져도 서로를 막지 않는다
             "stage": kind,
-            "interval": "4h" if kind in (ABC, RETRACE) else "1d",
+            "interval": "4h" if kind in (ABC, SLOW_BREAK, RETRACE) else "1d",
             "fast_line": float(fast["line"].iloc[i]),
             "slow_line": float(slow["line"].iloc[i]),
             "fast_st": f"{params.fast_period}×{params.fast_mult:g}",
@@ -304,10 +311,13 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     # 4h 수퍼트렌드는 ⓐ·ⓒ가 같은 걸 본다 — 370종×매 스캔이라 한 번만 돌린다
     need = max(params.fast_period, params.slow_period) + 2
     fast = slow = None
-    if len(df) >= need + 1 and (params.abc_enabled or params.retrace_enabled):
+    if len(df) >= need + 1 and (params.abc_enabled or params.retrace_enabled
+                                or params.slow_break_enabled):
         fast, slow = _trends(df, params)
     if params.abc_enabled and fast is not None:
         events += _detect_abc(df, symbol, params, rets, vwap_ok, fast, slow)
+    if params.slow_break_enabled and fast is not None:
+        events += _detect_slow_break(df, symbol, params, rets, vwap_ok, fast, slow)
     if params.retrace_enabled and fast is not None:
         events += _detect_retrace(df, symbol, params, rets, vwap_ok, fast, slow)
     if params.impulse_enabled:
@@ -515,6 +525,38 @@ def wave_at(df: pd.DataFrame, i: int, params: Params = Params(),
                 high - params.retrace_level * (high - low))
 
 
+def _detect_slow_break(df: pd.DataFrame, symbol: str, params: Params, rets: dict,
+                       vwap_ok, fast: pd.DataFrame, slow: pd.DataFrame) -> list[SignalEvent]:
+    """ⓓ 4h — 장기 수퍼트렌드가 하락에서 상승으로 뒤집힌 봉 자체.
+
+    ⓐ가 **구조상** 못 잡는 자리다. ⓐ의 전제가 '장기는 아직 하락'이라,
+    종가가 장기선을 넘겨 장기까지 뒤집히는 순간 조건에서 빠진다 — 그래서
+    ⓐ에는 '장기선 터치'는 있어도 '장기선 돌파'가 없다.
+
+    ⓒ 되돌림이 이 봉을 기준점(돌파봉)으로 쓰지만, 저점~고점의 0.5까지
+    되돌린 뒤에야 울린다(중앙 8봉 ≈ 32시간). 그 사이가 비어 있었고,
+    실측상 **0.5까지 안 밀린 돌파가 제일 잘 갔다**(경로 승률 92%·종료 수익
+    중앙 +9.0% vs 발화군 64%·−3.7%) — ⓒ만 두면 그쪽을 통째로 놓친다.
+
+    _break_index와 같은 판정을 쓴다: 하락에서 뒤집힌 것만 센다
+    (`dir[t] > 0` 이고 `dir[t-1] < 0`). ATR 워밍업 구간의 dir은 NaN이라
+    'not up'으로 세면 워밍업이 끝나는 봉마다 유령 돌파가 생긴다.
+    """
+    n = len(df)
+    d = slow["dir"].to_numpy(float)
+    look = params.grace_bars
+    if params.slow_break_track_days > 0:
+        look = min(look, params.slow_break_track_days * BARS_PER_DAY)
+    out = []
+    for t in range(max(1, n - 1 - look), n):
+        if not (d[t] > 0 and d[t - 1] < 0):
+            continue
+        if not vwap_ok(t):
+            continue
+        out.append(_event(df, symbol, t, SLOW_BREAK, fast, slow, params, rets))
+    return out
+
+
 def _detect_retrace(df: pd.DataFrame, symbol: str, params: Params, rets: dict,
                     vwap_ok, fast: pd.DataFrame, slow: pd.DataFrame) -> list[SignalEvent]:
     """ⓒ 4h — 장기 돌파 뒤 저점~고점의 retrace_level까지 **처음** 밀린 봉.
@@ -658,12 +700,15 @@ def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()
     스캐너가 심볼당 최신 1건만 남기므로 돌파 순간 ⓐ 줄이 ⓒ 줄로 교대된다.
     """
     stage = event.detail.get("stage")
-    frame = (df if stage in (ABC, RETRACE)
+    frame = (df if stage in (ABC, SLOW_BREAK, RETRACE)
              else _daily(df, params.include_live_day))
     if not len(frame):
         return False
     fast, slow = _trends(frame, params)
     last = len(frame) - 1
+    if stage == SLOW_BREAK:
+        # 장기가 상승인 동안만 — 다시 꺾이면 돌파가 실패한 것이다.
+        return _up(slow, last)
     if stage == RETRACE:
         # 장기가 다시 하락으로 꺾이면 돌파가 실패한 것이라 좌표도 같이
         # 죽는다. 저점을 깨면(📐 1.0 초과) 되돌림이 아니라 이탈이라 거기서도

@@ -120,6 +120,8 @@ def wave_params(cfg: dict) -> wave_setup.Params:
         abc_touch_fast=bool(s.get("abc_touch_fast", True)),
         abc_flip=bool(s.get("abc_flip", True)),
         abc_track_days=int(s.get("abc_track_days", 3)),
+        slow_break_enabled=bool(s.get("slow_break_enabled", True)),
+        slow_break_track_days=int(s.get("slow_break_track_days", 1)),
         retrace_enabled=bool(s.get("retrace_enabled", True)),
         retrace_level=float(s.get("retrace_level", 0.5)),
         retrace_window_days=int(s.get("retrace_window_days", 3)),

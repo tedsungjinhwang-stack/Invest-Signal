@@ -119,13 +119,19 @@ def test_abc_silent_while_both_still_down():
     assert detect(df, "XUSDT", Params(impulse_enabled=False)) == []
 
 
-def test_abc_silent_when_long_term_also_flipped_up():
-    """장기까지 상승으로 돌아섰으면 ⓐ의 전제(장기는 아직 하락)가 깨진다."""
+def test_abc_silent_when_long_term_also_flipped_up_but_slow_break_fires():
+    """장기까지 상승으로 돌아섰으면 ⓐ의 전제(장기는 아직 하락)가 깨진다.
+
+    **그 자리를 ⓓ가 받는다.** ⓐ에 '장기선 돌파'가 없는 이유가 이거다 —
+    종가가 장기선을 넘기면 장기가 뒤집혀 ⓐ 조건에서 통째로 빠진다.
+    """
     df = _frame(_falling_then_pop(pop=0.30))    # 너무 크게 튀어 장기도 뒤집힌다
     p = Params(impulse_enabled=False)
     slow = supertrend_full(df, p.slow_period, p.slow_mult)["dir"]
     assert slow.iloc[-1] > 0                    # 전제 확인
-    assert detect(df, "XUSDT", p) == []
+    stages = [e.detail["stage"] for e in detect(df, "XUSDT", p)]
+    assert ABC not in stages
+    assert stages == [wave_setup.SLOW_BREAK]
 
 
 def test_abc_does_not_repeat_while_fast_stays_up():
@@ -135,7 +141,8 @@ def test_abc_does_not_repeat_while_fast_stays_up():
     df = _frame(closes + [closes[-1] * 1.01, closes[-1] * 1.02])
     fast = supertrend_full(df, p.fast_period, p.fast_mult)["dir"]
     assert fast.iloc[-1] > 0 and fast.iloc[-2] > 0   # 계속 상승 중
-    assert detect(df, "XUSDT", p) == []              # 전환 봉은 grace 밖
+    abc = [e for e in detect(df, "XUSDT", p) if e.detail["stage"] == ABC]
+    assert abc == []                                 # 전환 봉은 grace 밖
 
 
 def test_impulse_fires_on_daily_touch():
@@ -841,3 +848,64 @@ def test_config_yaml_reaches_the_params():
     for key in ("retrace_enabled", "retrace_level", "retrace_window_days",
                 "retrace_hold_bars", "retrace_expire_bars", "retrace_track_days"):
         assert getattr(p, key) == s[key], key
+
+
+# ── ⓓ 장기선 돌파 ────────────────────────────────────────────────────────
+
+def test_slow_break_fires_on_the_flip_bar():
+    """ⓓ 장기 수퍼트렌드가 하락→상승으로 뒤집힌 봉에서 발화한다."""
+    p = Params(impulse_enabled=False, abc_enabled=False, retrace_enabled=False,
+               vwap_condition=False)
+    df = _frame(_falling_then_pop(pop=0.30))
+    slow = supertrend_full(df, p.slow_period, p.slow_mult)["dir"]
+    assert slow.iloc[-1] > 0 and slow.iloc[-2] < 0    # 마지막 봉이 전환 봉
+    evs = detect(df, "XUSDT", p)
+    assert [e.bar_time for e in evs] == [df.index[-1]]
+    d = evs[0].detail
+    assert d["stage"] == wave_setup.SLOW_BREAK and d["interval"] == "4h"
+
+
+def test_slow_break_ignores_the_warmup_flip():
+    """ATR 워밍업이 끝나며 dir이 NaN → +1이 되는 자리는 돌파가 아니다.
+
+    _break_index와 같은 규약이다 — 'not down'이 아니라 dir[t-1] < 0을 본다.
+    """
+    p = Params(impulse_enabled=False, abc_enabled=False, retrace_enabled=False,
+               vwap_condition=False, grace_bars=400)
+    df = _frame(list(np.linspace(100.0, 400.0, 200)))     # 처음부터 끝까지 상승
+    slow = supertrend_full(df, p.slow_period, p.slow_mult)["dir"]
+    assert slow.iloc[-1] > 0 and slow.isna().any()        # 워밍업 NaN이 있다
+    assert detect(df, "XUSDT", p) == []                   # 유령 돌파가 없다
+
+
+def test_slow_break_dies_when_the_long_term_turns_back_down():
+    """장기가 다시 하락으로 꺾이면 돌파가 실패한 것이라 줄이 빠진다."""
+    p = Params(impulse_enabled=False, abc_enabled=False, retrace_enabled=False,
+               vwap_condition=False)
+    df = _frame(_falling_then_pop(pop=0.30))
+    ev = detect(df, "XUSDT", p)[0]
+    assert still_active(df, ev, p)
+    dead = _extend(df, [float(df["Close"].iloc[-1]) * 0.5])
+    assert supertrend_full(dead, p.slow_period, p.slow_mult)["dir"].iloc[-1] < 0
+    assert not still_active(dead, ev, p)
+
+
+def test_slow_break_can_be_turned_off():
+    p = Params(impulse_enabled=False, abc_enabled=False, retrace_enabled=False,
+               vwap_condition=False, slow_break_enabled=False)
+    df = _frame(_falling_then_pop(pop=0.30))
+    assert detect(df, "XUSDT", p) == []
+
+
+def test_slow_break_track_days_caps_the_lookback():
+    """추적 창은 min(grace_bars, slow_break_track_days × 6)로 좁혀진다."""
+    p = Params(impulse_enabled=False, abc_enabled=False, retrace_enabled=False,
+               vwap_condition=False, grace_bars=30, slow_break_track_days=1)
+    df = _frame(_falling_then_pop(pop=0.30))
+    base = detect(df, "XUSDT", p)
+    assert len(base) == 1
+    # 전환 봉을 창 밖으로 밀어내면(7봉 초과) 안 잡힌다
+    far = _extend(df, [float(df["Close"].iloc[-1]) * (1 + 0.001 * k)
+                       for k in range(1, 9)])
+    assert supertrend_full(far, p.slow_period, p.slow_mult)["dir"].iloc[-1] > 0
+    assert detect(far, "XUSDT", p) == []
