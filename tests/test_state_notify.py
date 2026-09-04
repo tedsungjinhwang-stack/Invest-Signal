@@ -762,21 +762,32 @@ def test_slow_line_touch_is_marked_at_the_front():
     assert line.count("장기선") == 1
 
 
-def test_other_abc_kinds_keep_the_trailing_tag():
-    """돌파·단기선 터치는 그대로 줄 끝에 — 마크는 장기선 터치만."""
-    for touched, kind, want in (("단기선", "돌파", "돌파"),
-                                ("단기선", "터치", "단기선")):
-        e = _abc("XUSDT", touched, kind, 0.02, 1)
-        line = [ln for ln in format_events([], [], {}, ongoing_crypto=[e]).splitlines()
-                if ln.startswith("↳ ")][0]
-        assert "🧱" not in line
-        assert line.rstrip().endswith(want), line
+def test_break_keeps_the_trailing_tag():
+    """줄 끝 꼬리표는 `돌파`만 남는다 — 터치 둘은 앞쪽 마크로 옮겼다."""
+    e = _abc("XUSDT", "단기선", "돌파", 0.02, 1)
+    line = [ln for ln in format_events([], [], {}, ongoing_crypto=[e]).splitlines()
+            if ln.startswith("↳ ")][0]
+    assert "🧱" not in line and "🔁" not in line
+    assert line.rstrip().endswith("돌파"), line
 
 
-def test_slow_line_touch_sorts_to_the_top_of_the_abc_block():
-    """정렬도 같이 바꾼다 — 마크만 달면 여전히 스크롤해서 찾아야 한다.
+def test_fast_line_touch_is_marked_at_the_front():
+    """ⓐ 단기선 터치도 앞쪽 🔁 마크로 — 셋 중 제일 드물다(30일 발화의 6%)."""
+    e = _abc("GPSUSDT", "단기선", "터치", 0.02, 1)
+    line = [ln for ln in format_events([], [], {}, ongoing_crypto=[e]).splitlines()
+            if ln.startswith("↳ ")][0]
+    assert "🔁단기선터치" in line
+    assert line.index("🔁") < line.index("%")     # 앞쪽이다
+    assert line.count("단기선") == 1               # 꼬리표로 두 번 안 적는다
+    assert "🧱" not in line                        # 장기선 마크와 안 섞인다
 
-    🍃조용 그룹핑보다 앞에 온다: 장기선 터치가 더 드물고 더 큰 사건이다.
+
+def test_abc_block_is_grouped_by_kind():
+    """ⓐ 블록은 자리별로 묶인다 — 장기선 터치 → 단기선 터치 → 돌파.
+
+    위에서 아래로 사건이 작아진다. `돌파`는 시장이 한꺼번에 튀면 무더기로
+    잡혀 블록을 덮으므로(09-03에 하루 35건) 맨 아래다. 🍃조용 그룹핑보다
+    앞에 온다 — 어느 자리인지가 조용한지보다 먼저 읽혀야 한다.
     """
     evs = [_abc("AUSDT", "단기선", "돌파", 0.50, 1, quiet=True),
            _abc("BUSDT", "단기선", "터치", 0.30, 1),
@@ -784,8 +795,19 @@ def test_slow_line_touch_sorts_to_the_top_of_the_abc_block():
            _wave("DUSDT", "임펄스", 0.90, 1)]
     out = format_events([], [], {}, ongoing_crypto=evs)
     order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳ ")]
-    # C가 수익률 꼴찌인데도 ⓐ 블록 맨 위, 임펄스(D)는 여전히 뒤 블록
-    assert order == ["C", "A", "B", "D"]
+    # 수익률은 C(-20%) < B(30%) < A(50%)인데도 자리 순서가 이긴다.
+    # 임펄스(D)는 여전히 뒤 블록이다.
+    assert order == ["C", "B", "A", "D"]
+
+
+def test_abc_grouping_beats_the_quiet_grouping():
+    """🍃조용이 자리 순서를 못 이긴다 — 같은 자리 안에서만 앞으로 온다."""
+    evs = [_abc("AUSDT", "단기선", "돌파", 0.10, 1, quiet=True),
+           _abc("BUSDT", "장기선", "터치", 0.10, 1),
+           _abc("CUSDT", "단기선", "돌파", 0.20, 1)]
+    out = format_events([], [], {}, ongoing_crypto=evs)
+    order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳ ")]
+    assert order == ["B", "A", "C"]     # 🍃인 A가 수익률 높은 C보다 앞
 
 
 def test_slow_line_touch_marks_new_lines_too():

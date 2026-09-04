@@ -87,21 +87,47 @@ WAVE_RETRACE = "되돌림"            # wave_setup.RETRACE — 시간 순서가 
 # (wave_setup._detect_abc의 우선순위도 같다), 열 줄 중 한 줄꼴로 드물어서
 # 줄 끝에 '장기선' 세 글자로만 붙여 두면 '돌파'와 구분이 안 됐다.
 SLOW_TOUCH_TAG = "🧱장기선터치"
+# ⓐ 단기선 터치 — 방금 넘긴 선을 다시 눌러 보는 자리(아래쪽 지지 재확인).
+# 셋 중 제일 드물다(30일 발화의 6%). 줄 끝 '단기선' 세 글자로는 안 보였다.
+FAST_TOUCH_TAG = "🔁단기선터치"
+
+# ⓐ 블록 안의 읽는 순서 — 위에서 아래로 사건이 작아진다.
+#   장기선 터치 : 반등이 아직 하락인 장기선(위쪽 저항)까지 되돌린 자리
+#   단기선 터치 : 방금 넘긴 선을 다시 눌러 보는 자리
+#   단기선 돌파 : 전환 봉 자체 — 시장이 한꺼번에 튀면 무더기로 잡혀 제일 많다
+ABC_ORDER = ("장기선 터치", "단기선 터치", "단기선 돌파")
+
+
+def _abc_kind(e) -> str | None:
+    """ⓐ 줄이 셋 중 어느 자리인지. ⓐ가 아니면 None."""
+    d = e.detail
+    if e.signal != "wave_setup" or d.get("stage") != "ABC":
+        return None
+    touched = d.get("touched")
+    if not touched:
+        return None
+    return f"{touched} {'돌파' if d.get('kind') == '돌파' else '터치'}"
 
 
 def _slow_touch(e) -> bool:
-    """ⓐ 장기선 터치 줄인지 — 앞쪽 마크와 정렬을 둘 다 이 판정으로 건다."""
-    d = e.detail
-    return (e.signal == "wave_setup" and d.get("stage") == "ABC"
-            and d.get("touched") == "장기선" and d.get("kind") != "돌파")
+    """ⓐ 장기선 터치 줄인지 — 앞쪽 🧱 마크를 이 판정으로 건다."""
+    return _abc_kind(e) == "장기선 터치"
 
 
-def _slow_touch_first(e):
-    """ⓐ 블록 안에서 장기선 터치를 맨 위로 올리는 정렬 조각.
+def _fast_touch(e) -> bool:
+    """ⓐ 단기선 터치 줄인지 — 앞쪽 🔁 마크를 이 판정으로 건다."""
+    return _abc_kind(e) == "단기선 터치"
 
-    파동 외 시그널은 전부 1이라 순서가 그대로다(🍃 조각과 같은 규약).
+
+def _abc_first(e):
+    """ⓐ 블록 안에서 자리별로 묶는 정렬 조각 — ABC_ORDER 순서.
+
+    파동 ⓐ 밖은 전부 같은 값이라 다른 칸의 순서가 안 흔들린다
+    (🍃 조각과 같은 규약). 🍃 그룹핑보다 **앞**에 온다: 어느 자리인지가
+    조용한지보다 먼저 읽혀야 한다.
     """
-    return 0 if _slow_touch(e) else 1
+    k = _abc_kind(e)
+    return ABC_ORDER.index(k) if k in ABC_ORDER else len(ABC_ORDER)
 
 
 def _variant(e) -> int:
@@ -143,13 +169,13 @@ def _quiet_first(e):
 
 def _new_order(e):
     """신규 줄 — 변형·🍃로 묶고, 그 안에서 24h 수익률 순, 없으면 심볼 순."""
-    return (_variant(e), _slow_touch_first(e), _quiet_first(e),
+    return (_variant(e), _abc_first(e), _quiet_first(e),
             *_by_gain_desc(e), e.symbol)
 
 
 def _hold_order(e):
     """추적 줄 — 변형·🍃로 묶고, 24h 수익률 순, 동률이면 최신 발생 순."""
-    return (_variant(e), _slow_touch_first(e), _quiet_first(e),
+    return (_variant(e), _abc_first(e), _quiet_first(e),
             *_by_gain_desc(e), -e.bar_time.timestamp())
 
 
@@ -225,6 +251,8 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tags.append(QUIET_TAG)      # 거래대금·변동성이 작은 종목 (leader_break.quiet)
     if _slow_touch(e):
         tags.append(SLOW_TOUCH_TAG)
+    elif _fast_touch(e):
+        tags.append(FAST_TOUCH_TAG)
     if _early(e):
         tags.append(EARLY_TAG)
     tt = _turn_tag(d)
@@ -247,8 +275,9 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
             # 눌림목 — 타점(밴드 터치)과 대기(밴드 위)를 한눈에 구분
             tags.append("🎯타점" if d["stage"] == "타점" else "대기")
         if e.signal == "wave_setup":
-            # 장기선 터치는 앞의 🧱 마크가 선·방식을 다 말하므로 변형만
-            tags.append("ABC" if _slow_touch(e) else _wave_tag(d))
+            # 두 터치는 앞의 마크가 선·방식을 다 말하므로 변형만 남긴다
+            tags.append("ABC" if (_slow_touch(e) or _fast_touch(e))
+                        else _wave_tag(d))
         if e.signal == "pump_early" and d.get("rise") is not None:
             hours = int(d.get("rise_bars", 1)) * 4
             tags.append(f"{hours}h +{d['rise'] * 100:.1f}%"
@@ -403,6 +432,8 @@ def format_events(events_crypto: list, events_etf: list,
         tags = [f"{_age_days(e.bar_time)}d"]
         if _slow_touch(e):
             tags.append(SLOW_TOUCH_TAG)
+        elif _fast_touch(e):
+            tags.append(FAST_TOUCH_TAG)
         if d.get("quiet"):
             tags.append(QUIET_TAG)      # ⚡·파동 공통 — 조용한 종목 표시
         tags += _resist_tags(d)         # ⚡·파동 공통 — 1h·15m 단기선 터치·돌파
@@ -413,8 +444,8 @@ def format_events(events_crypto: list, events_etf: list,
             rt = _returns_compact(d)
             if rt:
                 tags.append(rt)
-            if _slow_touch(e):
-                pass                # 앞의 🧱 마크가 이미 말한다 — 두 번 안 적는다
+            if _slow_touch(e) or _fast_touch(e):
+                pass                # 앞의 마크가 이미 말한다 — 두 번 안 적는다
             elif d.get("touched"):
                 # ⓐ는 세 자리를 다 잡으므로 소제목만으론 구분이 안 된다.
                 # 돌파는 선이 하나뿐이라 '돌파'만 적으면 짧고 명확하다.
