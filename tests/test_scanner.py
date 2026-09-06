@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 
+from invest_signal import scanner
 from invest_signal.scanner import _collapse
 from invest_signal.signals import SignalEvent
 
@@ -412,3 +413,51 @@ def test_wave_rows_get_the_resist_marks(monkeypatch):
     # 파동 종목만, 프레임은 1h·15m 둘
     assert {s for s, _ in seen} == {"WAVEUSDT", "HOLDUSDT"}
     assert {i for _, i in seen} == {"1h", "15m"}
+
+
+def _band_frame(short_ma, long_ma):
+    """4h 240선 < 480선인데 종가가 그 사이인 프레임 (🪜회복구간)."""
+    closes = [long_ma * 2 - short_ma] * 240 + [short_ma] * 240
+    idx = pd.date_range("2026-01-01", periods=len(closes), freq="4h", tz="UTC")
+    c = np.asarray(closes, dtype=float)
+    df = pd.DataFrame({"Open": c, "High": c * 1.001, "Low": c * 0.999,
+                       "Close": c, "Volume": np.full(len(c), 1000.0)}, index=idx)
+    df.iloc[-1, df.columns.get_loc("Close")] = (short_ma + long_ma) / 2
+    return df
+
+
+def _wave_ev(symbol, stage="ABC"):
+    return SignalEvent(symbol=symbol, signal="wave_setup",
+                       bar_time=pd.Timestamp("2026-09-01T00:00:00Z"), price=1.0,
+                       detail={"label": "파동", "stage": stage})
+
+
+def test_mark_band_stamps_only_wave_rows():
+    """🪜회복구간을 파동 줄에만 붙인다 — ⚡ 쪽은 annotate가 따로 붙인다."""
+    frames = {"AUSDT": _band_frame(100.0, 120.0),      # 🪜 맞음
+              "BUSDT": _band_frame(120.0, 100.0)}      # 240선이 위 — 아님
+    wave = [_wave_ev("AUSDT"), _wave_ev("BUSDT")]
+    other = SignalEvent(symbol="AUSDT", signal="uptrend_onset",
+                        bar_time=pd.Timestamp("2026-09-01T00:00:00Z"),
+                        price=1.0, detail={"label": "상승초입"})
+    scanner._mark_band(wave, [other], frames, {})
+    assert wave[0].detail.get("band") is True
+    assert "band" not in wave[1].detail          # 240선이 480선 위
+    assert "band" not in other.detail            # 파동이 아니면 안 붙는다
+
+
+def test_mark_band_covers_every_wave_variant_and_can_be_turned_off():
+    """ⓐ·ⓒ·ⓓ 어느 변형이든 같이 붙고, 설정으로 끌 수 있다."""
+    frames = {"AUSDT": _band_frame(100.0, 120.0)}
+    rows = [_wave_ev("AUSDT", s) for s in ("ABC", "되돌림", "장기선돌파")]
+    scanner._mark_band(rows, [], frames, {})
+    assert all(e.detail.get("band") for e in rows)
+
+    off = [_wave_ev("AUSDT")]
+    scanner._mark_band(off, [], frames,
+                       {"signal": {"leader_break": {"band_enabled": False}}})
+    assert "band" not in off[0].detail
+    # 프레임이 없으면 조용히 넘어간다
+    missing = [_wave_ev("ZUSDT")]
+    scanner._mark_band(missing, [], frames, {})
+    assert "band" not in missing[0].detail

@@ -450,6 +450,8 @@ def format_events(events_crypto: list, events_etf: list,
             tags.append(FAST_TOUCH_TAG)
         if d.get("quiet"):
             tags.append(QUIET_TAG)      # ⚡·파동 공통 — 조용한 종목 표시
+        if d.get("band"):
+            tags.append(BAND_TAG)       # ⚡·파동 공통 — 4h 240·480선 사이
         tags += _resist_tags(d)         # ⚡·파동 공통 — 1h·15m 단기선 터치·돌파
         if e.signal == "wave_setup":
             # 파동만 구간 세트를 싣는다 — refresh_detail이 매 스캔 갱신하므로

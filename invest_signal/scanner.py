@@ -537,6 +537,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         with requests.Session() as s2:
             _fill_hourly_return(events, _crypto_hourly(s2, source, need_1h, log))
 
+    _mark_band(events, ongoing, frames, cfg)
     _mark_wave_lines(events, ongoing, cfg, source, log, intrabar)
 
     # 크립토 모멘텀 눌림목/이탈은 자체 선정(24h 상승률 상위)이라 위 랭크 필터를 타지 않는다
@@ -544,6 +545,35 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
     ongoing.extend(leader_ongoing)
     log(f"[binance] 시그널 {len(events)}건 · 유지 중 {len(ongoing)}건")
     return events, ongoing, board
+
+
+def _mark_band(events: list, ongoing: list, frames: dict, cfg: dict) -> None:
+    """🪜회복구간을 파동 줄에도 붙인다 — ⚡와 **같은 판정·같은 마크**다.
+
+    4h 240·480선만 보므로 스캔이 이미 받아 둔 프레임으로 끝난다(추가 요청
+    없음). ⚡ 쪽은 _scan_leader_break의 annotate가 따로 붙인다.
+
+    **성적 갈림은 ⚡에서만 쟀다.** 거기선 1h 배열과 짝지어 72%/53%로
+    갈렸는데(leader_break.recovery_band), 파동 줄은 배열 태그를 싣지 않고
+    국면 자체가 달라서 그 수치가 그대로 옮겨 간다고 볼 근거가 없다.
+    파동에서는 '4h 구조상 지금 어디쯤인지'를 알려 주는 표시로만 둔다.
+    """
+    p = (cfg.get("signal") or {}).get("leader_break") or {}
+    params = leader_break.Params(
+        band_enabled=bool(p.get("band_enabled", True)),
+        band_mas=tuple(p.get("band_mas", (240, 480))),
+    )
+    if not params.band_enabled:
+        return
+    cache: dict[str, bool] = {}
+    for e in events + ongoing:
+        if e.signal != "wave_setup":
+            continue
+        if e.symbol not in cache:
+            cache[e.symbol] = bool(
+                leader_break.recovery_band(frames.get(e.symbol), params))
+        if cache[e.symbol]:
+            e.detail["band"] = True
 
 
 def _mark_wave_lines(events: list, ongoing: list, cfg: dict, source: str,
