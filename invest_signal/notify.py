@@ -95,7 +95,10 @@ FAST_TOUCH_TAG = "🔁단기선터치"
 # ⓐ 블록 안의 읽는 순서 — 위에서 아래로 사건이 작아진다.
 #   장기선 터치 : 반등이 아직 하락인 장기선(위쪽 저항)까지 되돌린 자리
 #   단기선 터치 : 방금 넘긴 선을 다시 눌러 보는 자리
+#   🪜회복구간  : 자리 자체는 돌파지만 4h 구조상 마지막 저항대를 오르는 중
 #   단기선 돌파 : 전환 봉 자체 — 시장이 한꺼번에 튀면 무더기로 잡혀 제일 많다
+# 🪜는 자리(kind)가 아니라 덧붙는 상태라 **터치 둘에는 안 끼어든다** —
+# 이미 그쪽 무리에 있는 줄은 그대로 두고, 돌파 무리에서만 앞으로 뽑는다.
 ABC_ORDER = ("장기선 터치", "단기선 터치", "단기선 돌파")
 
 
@@ -123,12 +126,35 @@ def _fast_touch(e) -> bool:
 def _abc_first(e):
     """ⓐ 블록 안에서 자리별로 묶는 정렬 조각 — ABC_ORDER 순서.
 
+    돌파 무리는 🪜회복구간이 붙은 줄을 먼저 뽑아 터치 둘 바로 아래에
+    모은다. 터치 줄은 이미 위에 있으므로 🪜가 순서를 바꾸지 않는다.
+
     파동 ⓐ 밖은 전부 같은 값이라 다른 칸의 순서가 안 흔들린다
     (🍃 조각과 같은 규약). 🍃 그룹핑보다 **앞**에 온다: 어느 자리인지가
     조용한지보다 먼저 읽혀야 한다.
     """
     k = _abc_kind(e)
-    return ABC_ORDER.index(k) if k in ABC_ORDER else len(ABC_ORDER)
+    if k not in ABC_ORDER:
+        return (len(ABC_ORDER) + 1, 1)
+    i = ABC_ORDER.index(k)
+    # 돌파 무리 안에서만 🪜를 앞으로 — 터치 둘은 이미 위라 건드리지 않는다
+    return (i, 0) if (k == "단기선 돌파" and e.detail.get("band")) else (i, 1)
+
+
+def _leader_first(e):
+    """⚡ 칸 안에서 묶는 정렬 조각 — ↗️1h 돌파 → 🪜회복구간 → 나머지.
+
+    require_resist를 켠 뒤로는 모든 ⚡ 줄에 ↗️가 붙어 있어서, 그 안에서
+    **돌파인지 터치인지**가 다음 눈금이 된다(실측 1h 돌파 64.5% / 터치
+    62.7%). 그 아래에 🪜를 모아 4h 구조가 아직 하락인 줄을 한 덩어리로
+    본다. ⚡ 밖은 전부 0이라 다른 칸의 순서가 안 흔들린다.
+    """
+    if e.signal != "leader_break":
+        return 0
+    d = e.detail
+    if d.get("resist_1h") == "돌파":
+        return 0
+    return 1 if d.get("band") else 2
 
 
 def _variant(e) -> int:
@@ -170,13 +196,13 @@ def _quiet_first(e):
 
 def _new_order(e):
     """신규 줄 — 변형·🍃로 묶고, 그 안에서 24h 수익률 순, 없으면 심볼 순."""
-    return (_variant(e), _abc_first(e), _quiet_first(e),
+    return (_variant(e), *_abc_first(e), _leader_first(e), _quiet_first(e),
             *_by_gain_desc(e), e.symbol)
 
 
 def _hold_order(e):
     """추적 줄 — 변형·🍃로 묶고, 24h 수익률 순, 동률이면 최신 발생 순."""
-    return (_variant(e), _abc_first(e), _quiet_first(e),
+    return (_variant(e), *_abc_first(e), _leader_first(e), _quiet_first(e),
             *_by_gain_desc(e), -e.bar_time.timestamp())
 
 

@@ -855,3 +855,52 @@ def test_recovery_band_tag_is_on_new_lines_too():
     line = [ln for ln in format_events([e], [], {}).splitlines()
             if ln.startswith("• ")][0]
     assert "🪜회복구간" in line
+
+
+def test_recovery_band_rows_gather_under_the_two_touches():
+    """ⓐ 돌파 무리 안에서 🪜가 앞으로 — 터치 둘 바로 아래에 모인다.
+
+    터치 줄은 이미 위에 있으므로 🪜가 그쪽 순서는 안 바꾼다.
+    """
+    def abc(sym, touched, kind, gain, band=False):
+        e = _abc(sym, touched, kind, gain, 1)
+        if band:
+            e.detail["band"] = True
+        return e
+
+    evs = [abc("AUSDT", "단기선", "돌파", 0.50),
+           abc("BUSDT", "단기선", "돌파", 0.10, band=True),
+           abc("CUSDT", "단기선", "터치", 0.30),
+           abc("DUSDT", "장기선", "터치", 0.20, band=True)]
+    out = format_events([], [], {}, ongoing_crypto=evs)
+    order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳ ")]
+    # 장기선터치(D) → 단기선터치(C) → 🪜돌파(B) → 돌파(A).
+    # B는 수익률 꼴찌(10%)인데도 🪜라서 A(50%)보다 앞이다.
+    assert order == ["D", "C", "B", "A"]
+
+
+def test_leader_rows_group_by_break_then_band():
+    """⚡ 칸은 ↗️1h돌파 → 🪜회복구간 → 나머지 순으로 묶인다."""
+    def lead(sym, resist, band=False, gain=0.10):
+        e = _leader(sym, hold=True)
+        e.detail["resist_1h"] = resist
+        e.detail["gain_24h"] = gain
+        if band:
+            e.detail["band"] = True
+        return e
+
+    evs = [lead("AUSDT", "터치", gain=0.50),
+           lead("BUSDT", "터치", band=True, gain=0.10),
+           lead("CUSDT", "돌파", gain=0.20)]
+    out = format_events([], [], {}, ongoing_crypto=evs)
+    order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳ ")]
+    # 돌파(C) → 🪜(B) → 나머지(A). 수익률은 A > C > B인데 무리가 이긴다.
+    assert order == ["C", "B", "A"]
+
+
+def test_leader_grouping_does_not_move_other_sections():
+    """⚡ 정렬 조각은 다른 칸을 안 흔든다 — 전부 같은 값이다."""
+    evs = [_wave("AUSDT", "임펄스", 0.10, 1), _wave("BUSDT", "임펄스", 0.50, 1)]
+    out = format_events([], [], {}, ongoing_crypto=evs)
+    order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳ ")]
+    assert order == ["B", "A"]          # 24h 수익률 순 그대로
