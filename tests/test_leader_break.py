@@ -650,3 +650,46 @@ def test_require_resist_is_off_by_default_in_code():
     켜져 있으면 안 된다.
     """
     assert Params().require_resist is False
+
+
+def _band_frame(short_ma, long_ma, price):
+    """4h 240·480선을 원하는 값으로 만들고 마지막 종가를 price로 두는 프레임.
+
+    앞 240봉을 long_ma 근처, 뒤 240봉을 short_ma 근처로 깔면 240선은 뒤쪽
+    평균, 480선은 둘의 평균이 된다 — 두 선의 상하 관계를 직접 고를 수 있다.
+    """
+    closes = [long_ma * 2 - short_ma] * 240 + [short_ma] * 240
+    df = _df4h(closes)
+    df.iloc[-1, df.columns.get_loc("Close")] = price
+    return df
+
+
+def test_recovery_band_needs_a_bearish_pair_and_price_inside():
+    """🪜 4h 240선 < 480선이고 종가가 그 사이일 때만 True."""
+    p = Params()
+    df = _band_frame(100.0, 120.0, 110.0)       # 240선 100 < 480선 120
+    c = df["Close"]
+    a, b = c.rolling(240).mean().iloc[-1], c.rolling(480).mean().iloc[-1]
+    assert a < b                                 # 전제 — 역배열
+    assert leader_break.recovery_band(df, p) is True
+    # 사이 밖이면 아니다
+    assert leader_break.recovery_band(_band_frame(100.0, 120.0, b * 1.02), p) is False
+    assert leader_break.recovery_band(_band_frame(100.0, 120.0, a * 0.98), p) is False
+
+
+def test_recovery_band_is_false_when_the_pair_is_bullish():
+    """240선이 480선 **위**면 하락 구조가 아니라 붙지 않는다."""
+    p = Params()
+    df = _band_frame(120.0, 100.0, 110.0)       # 240선 120 > 480선 100
+    c = df["Close"]
+    assert c.rolling(240).mean().iloc[-1] > c.rolling(480).mean().iloc[-1]
+    assert leader_break.recovery_band(df, p) is False
+
+
+def test_recovery_band_is_none_when_undecidable():
+    """이력이 480봉에 못 미치거나 프레임이 없으면 None — 붙이지도 않는다."""
+    p = Params()
+    assert leader_break.recovery_band(None, p) is None
+    assert leader_break.recovery_band(_df4h([100.0] * 300), p) is None
+    off = dataclasses_replace(p, band_enabled=False)
+    assert leader_break.recovery_band(_band_frame(100.0, 120.0, 110.0), off) is None

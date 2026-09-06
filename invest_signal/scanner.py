@@ -185,6 +185,8 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         allow_bearish=bool(s.get("allow_bearish", False)),
         allow_mixed=bool(s.get("allow_mixed", False)),
         require_resist=bool(s.get("require_resist", False)),
+        band_enabled=bool(s.get("band_enabled", True)),
+        band_mas=tuple(s.get("band_mas", (240, 480))),
         allow_short_history=bool(s.get("allow_short_history", False)),
         exhausted_mas=tuple(s.get("exhausted_mas", (120, 240, 480))),
         quiet_turnover_usd=float(s.get("quiet_turnover_usd", 6_000_000)),
@@ -335,6 +337,9 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                 detail["resist_1h"] = resist
             if resist15:
                 detail["resist_15m"] = resist15
+            # 🪜회복구간 — 4h 240선<480선인데 캔들이 그 사이. 표시만 한다.
+            if leader_break.recovery_band(df4, params):
+                detail["band"] = True
             # 거르지는 않고 '조용한 종목'만 표시 — 판단 불가면 키를 안 만든다
             q = leader_break.quiet(stat, df4, params)
             if q is not None:

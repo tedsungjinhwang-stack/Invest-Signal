@@ -828,3 +828,30 @@ def test_slow_touch_mark_does_not_leak_to_other_signals():
     ret = _wave("YUSDT", "되돌림", 0.02, 1)
     ret.detail["touched"] = "장기선"          # ⓒ도 아니다 — stage가 ABC여야 한다
     assert "🧱" not in format_events([], [], {}, ongoing_crypto=[ret])
+
+
+def test_recovery_band_tag_sits_in_the_front_group():
+    """🪜회복구간은 앞쪽 마크 무리에 — 🍃와 나란히, 순위·선 표기보다 앞.
+
+    같은 🪜인데 1h 혼조면 경로승률 72%, 정배열이면 53%로 갈려서 배열 태그와
+    한눈에 같이 읽혀야 뜻이 산다(leader_break.recovery_band 참고).
+    """
+    e = _leader("XUSDT", quiet=True, hold=True)
+    e.detail["band"] = True
+    line = [ln for ln in format_events([], [], {}, ongoing_crypto=[e]).splitlines()
+            if ln.startswith("↳ ")][0]
+    assert "🪜회복구간" in line
+    assert line.index("🪜") < line.index("3위")     # 앞쪽 마크 무리다
+    assert line.index("🍃") < line.index("🪜")      # 🍃 다음 자리
+    # 키가 없으면 안 붙는다
+    assert "🪜" not in format_events(
+        [], [], {}, ongoing_crypto=[_leader("YUSDT", hold=True)])
+
+
+def test_recovery_band_tag_is_on_new_lines_too():
+    """신규 줄에도 같은 마크."""
+    e = _leader("XUSDT")
+    e.detail["band"] = True
+    line = [ln for ln in format_events([e], [], {}).splitlines()
+            if ln.startswith("• ")][0]
+    assert "🪜회복구간" in line

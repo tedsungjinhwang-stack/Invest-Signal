@@ -52,6 +52,11 @@ class Params:
     # 신규·추적 양쪽에 걸리고, 걸러진 신규는 **상태에 기록하지 않는다** —
     # 같은 봉이 다음 스캔에서 ↗️를 얻으면 그때 나가야 하기 때문이다.
     require_resist: bool = False
+    # 🪜회복구간 — 4h 240선 < 480선(아직 하락 구조)인데 캔들이 **그 사이**에
+    # 있는 상태. 바닥에서 올라와 240선은 되찾았고 480선이 남은 자리다.
+    # **거르지 않고 표시만 한다**(quiet과 같은 성격).
+    band_enabled: bool = True
+    band_mas: tuple = (240, 480)     # 4h 프레임 기준
     exhausted_mas: tuple = (120, 240, 480)   # 1h봉 정배열 판정선
     # ② 4h 장기 수퍼트렌드가 상승이어야 한다 — 선은 turn_slow_* 를 같이 쓴다
     # '조용한' 종목 표시 기준 — 거르지 않고 태그만 붙인다(quiet() 참고)
@@ -206,6 +211,40 @@ def blocked(df1h: pd.DataFrame, params: Params = Params(),
     d = supertrend_full(df4h, params.turn_slow_period,
                         params.turn_slow_mult)["dir"].iloc[-1]
     return bool(not pd.isna(d) and d <= 0)
+
+
+def recovery_band(df4h: pd.DataFrame | None,
+                  params: Params = Params()) -> bool | None:
+    """🪜회복구간인지 — 4h 240선 < 480선인데 종가가 그 사이.
+
+    **거르지 않고 표시만 한다.** 240선(40일)이 480선(80일) 아래면 큰 눈금은
+    아직 하락 구조인데, 그 안에서 종가가 240선 위로 올라와 480선을 향하는
+    자리다 — 바닥에서 올라와 마지막 저항대를 오르는 중이라는 뜻이다.
+
+    **1h 배열과 같이 읽어야 한다.** 31일 리플레이(top_n 10 · 게이트 ·
+    ↗️1h 요구, 2,821건)에서 같은 🪜인데 1h 배열로 정반대로 갈렸다:
+
+        🪜 · 1h 혼조   225건  경로승률 72.1%  MFE 16.4%  대박 47%  쪽박  8%
+        🪜 · 1h 정배열 221건  경로승률 52.7%  MFE  9.9%  대박 29%  쪽박 18%
+        (전체)       2,821건  경로승률 64.1%  MFE 13.5%  대박 36%  쪽박 20%
+
+    혼조 쪽은 여러 눈금이 함께 전환을 시도하는 자리이고, 정배열 쪽은 1h만
+    반짝 올라 이미 소진된 자리로 읽힌다. 그래서 마크 하나로 거르지 않고
+    배열 태그와 나란히 두어 사용자가 같이 읽게 한다.
+
+    선을 못 구할 만큼 이력이 짧으면 None — 붙이지도, 아니라고도 하지 않는다.
+    """
+    if not params.band_enabled or df4h is None:
+        return None
+    short, long_ = sorted(params.band_mas)
+    if len(df4h) < long_:
+        return None
+    close = df4h["Close"]
+    a, b = sma(close, short).iloc[-1], sma(close, long_).iloc[-1]
+    if pd.isna(a) or pd.isna(b):
+        return None
+    price = float(close.iloc[-1])
+    return bool(a < b and a <= price <= b)
 
 
 def quiet(stat: dict | None, df4h: pd.DataFrame | None,

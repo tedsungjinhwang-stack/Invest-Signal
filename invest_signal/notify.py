@@ -254,6 +254,8 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tags.append("⏳진행봉")     # 봉 미마감 잠정 판정 — 마감 때 되돌릴 수 있음
     if d.get("quiet"):
         tags.append(QUIET_TAG)      # 거래대금·변동성이 작은 종목 (leader_break.quiet)
+    if d.get("band"):
+        tags.append(BAND_TAG)
     if _slow_touch(e):
         tags.append(SLOW_TOUCH_TAG)
     elif _fast_touch(e):
@@ -347,6 +349,11 @@ def _resist_tags(d: dict) -> list[str]:
 # (🌱는 꺼져 있는 🌱펌핑초기 칸의 이모지이기도 하다 — 그 시그널을 되살리면
 #  둘 중 하나를 바꿔야 한다.)
 EARLY_TAG = "🌱상승초기"
+# 🪜회복구간 — 4h 240선 < 480선(아직 하락 구조)인데 캔들이 그 사이. 바닥에서
+# 올라와 240선은 되찾았고 480선이 남은 자리다(leader_break.recovery_band).
+# **배열 태그와 같이 읽어야 한다** — 같은 🪜인데 1h 혼조면 경로승률 72%,
+# 정배열이면 53%로 갈린다. 그래서 거르지 않고 나란히 둔다.
+BAND_TAG = "🪜회복구간"
 
 
 def _fib_tag(d: dict) -> str | None:
@@ -426,6 +433,8 @@ def format_events(events_crypto: list, events_etf: list,
                 tags.insert(0, tt)
             if _early(e):
                 tags.insert(0, EARLY_TAG)
+            if d.get("band"):
+                tags.insert(0, BAND_TAG)
             if d.get("quiet"):
                 tags.insert(0, QUIET_TAG)
             day = _daily_gain(d)
