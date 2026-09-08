@@ -7,13 +7,14 @@ GitHub Actions에서 런이 빨갛게 떠서 문제를 바로 알 수 있게 한
 """
 
 import dataclasses
+import functools
 import os
 
 import pandas as pd
 import requests
 
 from . import config as cfg_mod
-from . import data_binance, data_etf, data_qp, indicators, notify
+from . import data_binance, data_community, data_etf, data_qp, indicators, notify
 from .signals import SignalEvent, leader_break
 from . import sent_log
 from .state import AlertState
@@ -547,6 +548,91 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
     return events, ongoing, board
 
 
+def _scan_community(cfg: dict, log=print) -> dict:
+    """📣 커뮤니티 언급 — 해외(ApeWisdom)·국내(디시) 요약 한 덩어리.
+
+    **거르지 않고 표시만 한다.** 실패해도 빈 dict를 돌려줘 스캔을 안 세운다 —
+    부가 정보라 이것 때문에 시그널 알림이 통째로 막히면 안 된다.
+
+    해외는 **24시간 전 대비 언급 증가** 순으로 뽑는다. 절대 언급 수로 세우면
+    BTC·SPY처럼 늘 1·2위인 상수가 자리를 다 먹어서 새로 뜨는 게 안 보인다.
+    """
+    c = (cfg.get("signal") or {}).get("community") or {}
+    if not c.get("enabled", False):
+        return {}
+    top_n = int(c.get("top_n", 6))
+    floor = int(c.get("min_mentions", 3))
+    out: dict = {}
+
+    def rising(rows: list[dict]) -> list[dict]:
+        """증가 폭 순 — 신규 등장(직전 0)은 언급 수를 그대로 증가로 본다."""
+        rows = [r for r in rows if r["mentions"] >= floor]
+        rows.sort(key=lambda r: (r["mentions"] - r["prev"], r["mentions"]), reverse=True)
+        return rows[:top_n]
+
+    with requests.Session() as s:
+        ov = c.get("overseas") or {}
+        if ov.get("enabled", True):
+            # 크립토는 유니버스로 거른다 — ApeWisdom의 티커 추출이 느슨해서
+            # NEW·SHA·CGT처럼 글에 쓰인 보통 단어가 티커로 잡혀 올라온다.
+            # 주식·ETF는 안 거른다: 우리가 안 보는 종목이라도 커뮤니티가
+            # 부르고 있다는 것 자체가 이 칸의 정보다.
+            perps = (_community_universe(cfg, log)
+                     if ov.get("universe_only", True) else None)
+            for key, name in (("crypto", ov.get("crypto_filter", "all-crypto")),
+                              ("equity", ov.get("equity_filter", "all-stocks"))):
+                rows = data_community.apewisdom(s, name, log=log)
+                if key == "crypto" and perps:
+                    rows = [r for r in rows if r["ticker"] in perps]
+                if rows:
+                    out[f"overseas_{key}"] = rising(rows)
+                    out[f"overseas_{key}_src"] = name
+        kr = c.get("korea") or {}
+        if kr.get("enabled", True):
+            titles = data_community.dc_titles(
+                s, kr.get("gallery", "chartanalysis"),
+                pages=int(kr.get("pages", 6)),
+                minor=bool(kr.get("minor", True)), log=log)
+            if titles:
+                universe = _community_universe(cfg, log)
+                hits, unmatched = data_community.count_mentions(
+                    titles, universe, c.get("aliases") or {})
+                out["korea"] = hits.most_common(top_n)
+                out["korea_unmatched"] = [
+                    (w, n) for w, n in unmatched.most_common(int(kr.get("show_unmatched", 8)))
+                    if n >= max(2, floor - 1)]
+                out["korea_posts"] = len(titles)
+                out["korea_src"] = kr.get("gallery", "chartanalysis")
+    if out:
+        log(f"[community] 해외 {len(out.get('overseas_crypto', ())) + len(out.get('overseas_equity', ()))}종 · "
+            f"국내 글 {out.get('korea_posts', 0)}개 → 티커 {len(out.get('korea', ()))}종 · "
+            f"미매칭 후보 {len(out.get('korea_unmatched', ()))}개")
+    return out
+
+
+@functools.lru_cache(maxsize=1)
+def _perp_bases(source: str, exclude: tuple, log_off: bool) -> frozenset:
+    """USDT 퍼프 심볼에서 USDT를 뗀 집합 — 한 스캔에 한 번만 받는다."""
+    with requests.Session() as s:
+        _, syms = data_binance.resolve_source(
+            s, source, set(exclude), lambda *a, **k: None)
+    return frozenset(x[:-4] for x in syms if x.endswith("USDT"))
+
+
+def _community_universe(cfg: dict, log=print) -> set[str]:
+    """국내 제목에서 찾아볼 티커 집합 — 퍼프 심볼에서 USDT를 뗀 것.
+
+    조회에 실패하면 빈 집합이라 별명 사전만으로 매칭한다(조용한 열화).
+    """
+    c = cfg.get("crypto") or {}
+    try:
+        return set(_perp_bases(c.get("source", "auto"),
+                               tuple(sorted(c.get("exclude") or [])), True))
+    except Exception as e:                      # noqa: BLE001
+        log(f"[community] 심볼 목록 조회 실패({data_binance._safe(e)}) — 별명 사전만 쓴다")
+        return set()
+
+
 def _mark_band(events: list, ongoing: list, frames: dict, cfg: dict) -> None:
     """🪜회복구간을 파동 줄에도 붙인다 — ⚡와 **같은 판정·같은 마크**다.
 
@@ -741,6 +827,12 @@ def run(config_path: str, state_path: str, only: str | None = None,
             errors.append(f"etf: {e}")
             log(f"[etf] ETF·주식 스캔 실패: {e}")
 
+    community = {}
+    try:
+        community = _scan_community(cfg, log)
+    except Exception as e:                          # noqa: BLE001 — 부가 정보다
+        log(f"[community] 수집 실패: {e}")
+
     # 주도주 상위권 등재 이력은 알림 유무와 무관하게 매 스캔 남긴다 —
     # 알림이 나갈 때만 저장하면 조용한 스캔에서 추적 창이 끊긴다.
     if not dry_run:
@@ -773,7 +865,7 @@ def run(config_path: str, state_path: str, only: str | None = None,
 
     msg = notify.format_events(show_crypto, show_etf, yf_names, hold_crypto, hold_etf,
                                events_stocks=show_stock, ongoing_stocks=hold_stock,
-                               crypto_board=crypto_board)
+                               crypto_board=crypto_board, community=community)
     if dry_run:
         log("[dry-run] 발송 생략 — 메시지 미리보기:")
         log(msg)

@@ -416,12 +416,15 @@ def format_events(events_crypto: list, events_etf: list,
                   etf_names: dict[str, str],
                   ongoing_crypto: list = (), ongoing_etf: list = (),
                   events_stocks: list = (), ongoing_stocks: list = (),
-                  crypto_board: list = ()) -> str:
+                  crypto_board: list = (), community: dict | None = None) -> str:
     """텔레그램 메시지 — 시그널별 → 시장별. 신규는 상세 줄, 추적 중 종목은
     같은 칸 아래 ↳ 한 줄로 붙는다.
 
     crypto_board가 있으면 ⚡칸 맨 위에 24h 상승률 순위표를 먼저 싣는다 —
     이탈·제외 조건과 무관한 '지금 뭐가 오르고 있나' 목록이다.
+
+    community가 있으면 맨 아래 📣칸에 커뮤니티 언급 요약을 붙인다. 시그널이
+    아니라 참고용 요약이라, 칸 순서에서도 맨 뒤다.
     """
     now_kst = pd.Timestamp.now(tz=KST).strftime("%m-%d %H:%M")
     lines = [f"🚨 <b>4h 시그널</b> · {now_kst} KST"]
@@ -554,7 +557,44 @@ def format_events(events_crypto: list, events_etf: list,
                     variant = stage
                 lines.append(hold_line(e, kind))
 
+    lines.extend(_community_lines(community or {}))
     return "\n".join(lines)
+
+
+def _community_lines(c: dict) -> list[str]:
+    """📣 커뮤니티 언급 칸 — 해외는 24h 증가 순, 국내는 언급 수 순.
+
+    시그널 칸이 아니라 **참고용 요약**이다. 종목마다 한 줄을 쓰지 않고
+    한 줄에 몰아 적어 폭을 아낀다 — 여기서 줄을 쓰면 정작 시그널이 밀린다.
+
+    국내는 '매칭 안 된 단어'를 같이 싣는다. 제목이 별명 투성이라 사전이
+    자라야 쓸모가 생기고, 그 사전을 채울 후보를 알림이 직접 건네주는 것이다
+    (data_community 모듈 설명 참고).
+    """
+    if not c:
+        return []
+    out = ["", DIVIDER, "📣 <b>커뮤니티 언급</b>"]
+
+    def delta(row) -> str:
+        d = row["mentions"] - row["prev"]
+        if not row["prev"]:
+            return f"{row['ticker']} {row['mentions']}회 신규"
+        return f"{row['ticker']} {row['mentions']}회 {d:+d}"
+
+    for key, emoji, title in (("overseas_crypto", "🪙", "크립토"),
+                              ("overseas_equity", "📊", "주식·ETF")):
+        rows = c.get(key) or ()
+        if rows:
+            out.append(f"{emoji} <b>{title}</b> · {c.get(key + '_src', '')}")
+            out.append("  " + " · ".join(delta(r) for r in rows))
+    if c.get("korea"):
+        out.append(f"🇰🇷 <b>국내</b> · {c.get('korea_src', '')} "
+                   f"{c.get('korea_posts', 0)}글")
+        out.append("  " + " · ".join(f"{t} {n}회" for t, n in c["korea"]))
+        if c.get("korea_unmatched"):
+            # 사전에 넣을 후보 — 여기 자주 뜨는 말이 곧 못 잡고 있는 종목이다
+            out.append("  ❓ " + " · ".join(f"{w} {n}" for w, n in c["korea_unmatched"]))
+    return out if len(out) > 3 else []
 
 
 def split_chunks(text: str, size: int = CHUNK) -> list[str]:
