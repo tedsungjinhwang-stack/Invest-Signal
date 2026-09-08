@@ -579,18 +579,26 @@ signal:
         gallery: chartanalysis
         minor: true
         pages: 4              # 1페이지 ≈ 50글
+      # 아래 둘은 붙여서 돌려 보고 껐다. 갤러리 id는 살아 있으니 켜기만 하면
+      # 다시 나온다.
+      #   주식 갤러리 — 국내 주식은 유니버스가 없어서(우리 유니버스는 퍼프뿐)
+      #     티커 줄이 통째로 비고 인용문만 남았다. 별명 사전이 자란 뒤에 켜라.
+      #   코인 갤러리 — 홍보·잡담이 대부분이라 티커 줄이 USDT·BTC로만 채워지고
+      #     인용문도 종목 얘기가 아니었다. 차트 마이너와 겹치기도 한다.
       - kind: dc
         emoji: "🇰🇷"
         label: 주식 갤러리
         gallery: stock
         minor: false
         pages: 3
+        enabled: false
       - kind: dc
         emoji: "🪙"
         label: 코인 갤러리
         gallery: coin
         minor: true
         pages: 3
+        enabled: false
 
     # 국내 제목은 별명 투성이라 사전이 있어야 잡힌다. 6페이지 296글로 재보니
     # **티커가 잡히는 글이 20%뿐**이었고 그마저 BTC·ETH가 절반이었다
