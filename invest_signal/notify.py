@@ -1,5 +1,6 @@
 """텔레그램 알림 발송 및 메시지 포맷."""
 
+import html
 import os
 import time
 from zoneinfo import ZoneInfo
@@ -561,40 +562,45 @@ def format_events(events_crypto: list, events_etf: list,
     return "\n".join(lines)
 
 
+def _esc(text) -> str:
+    """텔레그램 HTML 이스케이프 — `&`·`<`·`>`만. 따옴표는 건드리지 않는다."""
+    return html.escape(str(text), quote=False)
+
+
 def _community_lines(c: dict) -> list[str]:
-    """📣 커뮤니티 언급 칸 — 해외는 24h 증가 순, 국내는 언급 수 순.
+    """📣 커뮤니티 언급 칸 — **커뮤니티마다 한 덩어리**로 싣는다.
 
-    시그널 칸이 아니라 **참고용 요약**이다. 종목마다 한 줄을 쓰지 않고
-    한 줄에 몰아 적어 폭을 아낀다 — 여기서 줄을 쓰면 정작 시그널이 밀린다.
+    시그널 칸이 아니라 참고용 요약이다. 덩어리 하나는 머리줄 + 티커 한 줄 +
+    인용 몇 줄이고, 티커 줄은 스캐너가 이미 문자열로 만들어 준다 — 소스마다
+    숫자의 뜻이 달라서(24h 증가폭 / 글 수 / 강세·약세) 한 모양으로 억지로
+    맞추면 오히려 헷갈린다.
 
-    국내는 '매칭 안 된 단어'를 같이 싣는다. 제목이 별명 투성이라 사전이
-    자라야 쓸모가 생기고, 그 사전을 채울 후보를 알림이 직접 건네주는 것이다
-    (data_community 모듈 설명 참고).
+    💬 인용문이 붙는 이유: 숫자만 보면 **왜 그 종목이 불리는지**를 알 수 없다.
+    사람 글은 그대로 실으므로 반드시 이스케이프한다(`<`가 들어오면 텔레그램이
+    파싱을 실패해 메시지 자체가 안 간다). 단 `quote=False`다 — 기본값으로
+    escape 하면 따옴표까지 `&#x27;`로 바뀌어 화면에 그대로 찍힌다.
+
+    ❓ 줄은 국내 갤러리를 통틀어 하나다 — 사전이 전역이라 갤러리마다 쪼개면
+    자리만 먹고 후보는 흩어진다(data_community 모듈 설명 참고).
     """
-    if not c:
+    blocks = c.get("sources") or ()
+    if not blocks:
         return []
     out = ["", DIVIDER, "📣 <b>커뮤니티 언급</b>"]
-
-    def delta(row) -> str:
-        d = row["mentions"] - row["prev"]
-        if not row["prev"]:
-            return f"{row['ticker']} {row['mentions']}회 신규"
-        return f"{row['ticker']} {row['mentions']}회 {d:+d}"
-
-    for key, emoji, title in (("overseas_crypto", "🪙", "크립토"),
-                              ("overseas_equity", "📊", "주식·ETF")):
-        rows = c.get(key) or ()
-        if rows:
-            out.append(f"{emoji} <b>{title}</b> · {c.get(key + '_src', '')}")
-            out.append("  " + " · ".join(delta(r) for r in rows))
-    if c.get("korea"):
-        out.append(f"🇰🇷 <b>국내</b> · {c.get('korea_src', '')} "
-                   f"{c.get('korea_posts', 0)}글")
-        out.append("  " + " · ".join(f"{t} {n}회" for t, n in c["korea"]))
-        if c.get("korea_unmatched"):
-            # 사전에 넣을 후보 — 여기 자주 뜨는 말이 곧 못 잡고 있는 종목이다
-            out.append("  ❓ " + " · ".join(f"{w} {n}" for w, n in c["korea_unmatched"]))
-    return out if len(out) > 3 else []
+    for b in blocks:
+        head = f"{b.get('emoji', '•')} <b>{_esc(b.get('label', ''))}</b>"
+        if b.get("note"):
+            head += f" · {_esc(b['note'])}"
+        out.append(head)
+        if b.get("rows"):
+            out.append("  " + " · ".join(_esc(r) for r in b["rows"]))
+        for q in b.get("quotes") or ():
+            out.append("  💬 " + _esc(q))
+    if c.get("unmatched"):
+        # 사전에 넣을 후보 — 여기 자주 뜨는 말이 곧 못 잡고 있는 종목이다
+        out.append("❓ <b>미매칭</b> · " + " · ".join(
+            f"{_esc(w)} {n}" for w, n in c["unmatched"]))
+    return out
 
 
 def split_chunks(text: str, size: int = CHUNK) -> list[str]:

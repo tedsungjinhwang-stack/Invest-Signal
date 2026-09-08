@@ -6,6 +6,7 @@ GitHub Actions에서 런이 빨갛게 떠서 문제를 바로 알 수 있게 한
 (grace_bars 이내면) 다시 시도된다.
 """
 
+import collections
 import dataclasses
 import functools
 import os
@@ -549,65 +550,150 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
 
 
 def _scan_community(cfg: dict, log=print) -> dict:
-    """📣 커뮤니티 언급 — 해외(ApeWisdom)·국내(디시) 요약 한 덩어리.
+    """📣 커뮤니티 언급 — **커뮤니티마다 한 덩어리**로 모아 온다.
 
     **거르지 않고 표시만 한다.** 실패해도 빈 dict를 돌려줘 스캔을 안 세운다 —
-    부가 정보라 이것 때문에 시그널 알림이 통째로 막히면 안 된다.
+    부가 정보라 이것 때문에 시그널 알림이 통째로 막히면 안 된다. 한 소스가
+    죽어도 나머지는 그대로 나간다.
 
-    해외는 **24시간 전 대비 언급 증가** 순으로 뽑는다. 절대 언급 수로 세우면
-    BTC·SPY처럼 늘 1·2위인 상수가 자리를 다 먹어서 새로 뜨는 게 안 보인다.
+    커뮤니티를 합치지 않고 나눠 싣는 이유는, **같은 티커라도 어디서 불리느냐가
+    다른 뜻이기 때문이다** — 차트 마이너의 BTC와 r/wallstreetbets의 BTC는 같은
+    말이 아니다. 그래서 숫자도 소스마다 뜻이 다르고(증가폭 / 글 수 / 강세·약세),
+    줄 문자열을 여기서 만들어 넘긴다. notify는 그대로 잇기만 한다.
     """
     c = (cfg.get("signal") or {}).get("community") or {}
     if not c.get("enabled", False):
         return {}
-    top_n = int(c.get("top_n", 6))
+    top_n = int(c.get("top_n", 5))
     floor = int(c.get("min_mentions", 3))
-    out: dict = {}
-
-    def rising(rows: list[dict]) -> list[dict]:
-        """증가 폭 순 — 신규 등장(직전 0)은 언급 수를 그대로 증가로 본다."""
-        rows = [r for r in rows if r["mentions"] >= floor]
-        rows.sort(key=lambda r: (r["mentions"] - r["prev"], r["mentions"]), reverse=True)
-        return rows[:top_n]
+    n_quotes = int(c.get("quotes", 3))
+    width = int(c.get("quote_width", 70))
+    aliases = c.get("aliases") or {}
+    blocks, unmatched = [], collections.Counter()
 
     with requests.Session() as s:
-        ov = c.get("overseas") or {}
-        if ov.get("enabled", True):
-            # 크립토는 유니버스로 거른다 — ApeWisdom의 티커 추출이 느슨해서
-            # NEW·SHA·CGT처럼 글에 쓰인 보통 단어가 티커로 잡혀 올라온다.
-            # 주식·ETF는 안 거른다: 우리가 안 보는 종목이라도 커뮤니티가
-            # 부르고 있다는 것 자체가 이 칸의 정보다.
-            perps = (_community_universe(cfg, log)
-                     if ov.get("universe_only", True) else None)
-            for key, name in (("crypto", ov.get("crypto_filter", "all-crypto")),
-                              ("equity", ov.get("equity_filter", "all-stocks"))):
-                rows = data_community.apewisdom(s, name, log=log)
-                if key == "crypto" and perps:
-                    rows = [r for r in rows if r["ticker"] in perps]
-                if rows:
-                    out[f"overseas_{key}"] = rising(rows)
-                    out[f"overseas_{key}_src"] = name
-        kr = c.get("korea") or {}
-        if kr.get("enabled", True):
-            titles = data_community.dc_titles(
-                s, kr.get("gallery", "chartanalysis"),
-                pages=int(kr.get("pages", 6)),
-                minor=bool(kr.get("minor", True)), log=log)
-            if titles:
-                universe = _community_universe(cfg, log)
-                hits, unmatched = data_community.count_mentions(
-                    titles, universe, c.get("aliases") or {})
-                out["korea"] = hits.most_common(top_n)
-                out["korea_unmatched"] = [
-                    (w, n) for w, n in unmatched.most_common(int(kr.get("show_unmatched", 8)))
-                    if n >= max(2, floor - 1)]
-                out["korea_posts"] = len(titles)
-                out["korea_src"] = kr.get("gallery", "chartanalysis")
-    if out:
-        log(f"[community] 해외 {len(out.get('overseas_crypto', ())) + len(out.get('overseas_equity', ()))}종 · "
-            f"국내 글 {out.get('korea_posts', 0)}개 → 티커 {len(out.get('korea', ()))}종 · "
-            f"미매칭 후보 {len(out.get('korea_unmatched', ()))}개")
+        perps = _community_universe(cfg, log)
+        for src in c.get("sources") or ():
+            if not src.get("enabled", True):
+                continue
+            label = src.get("label") or src.get("sub") or src.get("gallery") or "?"
+            try:
+                block, un = _community_block(
+                    s, src, perps, aliases, top_n, floor, n_quotes, width, log)
+            except Exception as e:               # noqa: BLE001 — 소스 하나가 전체를 막지 않는다
+                log(f"[community] {label} 수집 실패: {type(e).__name__} {e}")
+                continue
+            if block:
+                blocks.append(block)
+            unmatched.update(un)
+
+    out: dict = {}
+    if blocks:
+        out["sources"] = blocks
+        # ❓는 소스별로 쪼개지 않고 **하나로 합친다** — 사전은 어차피 전역이고,
+        # 갤러리마다 따로 실으면 자리만 먹고 후보는 흩어진다.
+        show = int(c.get("show_unmatched", 8))
+        out["unmatched"] = [(w, n) for w, n in unmatched.most_common(show)
+                            if n >= max(2, floor - 1)]
+        log(f"[community] {len(blocks)}개 커뮤니티 · "
+            f"인용 {sum(len(b['quotes']) for b in blocks)}줄 · "
+            f"미매칭 후보 {len(out['unmatched'])}개")
     return out
+
+
+def _community_block(s, src: dict, perps: set, aliases: dict, top_n: int,
+                     floor: int, n_quotes: int, width: int, log):
+    """커뮤니티 한 곳 → (표시 덩어리, 미매칭 후보 Counter).
+
+    덩어리는 `{emoji, label, note, rows, quotes}`이고 rows는 **이미 포맷된
+    문자열**이다. 소스마다 숫자의 뜻이 달라서(24h 증가폭 / 글 수 / 강세·약세)
+    한 모양으로 억지로 맞추면 오히려 읽는 사람이 헷갈린다.
+    """
+    kind = src.get("kind")
+    emoji = src.get("emoji", "•")
+    label = src.get("label") or src.get("sub") or src.get("gallery") or "?"
+    unmatched = collections.Counter()
+
+    if kind == "reddit":
+        # 숫자는 ApeWisdom(레딧 티커 집계), 인용문은 서브레딧 RSS에서 온다.
+        # **24시간 전 대비 증가** 순이다 — 절대 언급 수로 세우면 BTC·SPY처럼
+        # 늘 1·2위인 상수가 자리를 다 먹어서 새로 뜨는 게 안 보인다.
+        rows = data_community.apewisdom(s, src.get("filter") or src["sub"], log=log)
+        if src.get("universe_only") and perps:
+            # ApeWisdom의 티커 추출이 느슨해 NEW·SHA·FTX처럼 글에 쓰인 보통
+            # 단어가 올라온다. 크립토는 못 사는 티커면 버려도 손해가 없다.
+            rows = [r for r in rows if r["ticker"] in perps]
+        rows = [r for r in rows if r["mentions"] >= floor]
+        rows.sort(key=lambda r: (r["mentions"] - r["prev"], r["mentions"]), reverse=True)
+        rows = rows[:top_n]
+        if not rows:
+            return None, unmatched
+        titles = data_community.reddit_titles(
+            s, src["sub"], sort=src.get("sort", "top"), log=log)
+        return {
+            "emoji": emoji, "label": label, "note": "24h 증가순",
+            "rows": [_mention_delta(r) for r in rows],
+            "quotes": data_community.pick_quotes(
+                titles, [r["ticker"] for r in rows], perps, aliases, n_quotes, width),
+        }, unmatched
+
+    if kind == "stocktwits":
+        # 여기만 **글쓴이가 직접 단 강세·약세 꼬리표**가 있다. 우리가 문장을
+        # 해석해 추측하는 게 아니라 본인이 붙인 것이라, 이 칸에서 '어떤
+        # 의견인가'를 숫자로 말할 수 있는 유일한 자리다.
+        syms = data_community.stocktwits_trending(s, log=log)
+        if src.get("universe_only") and perps:
+            syms = [t for t in syms if t in perps]
+        syms = syms[:min(top_n, int(src.get("streams", 3)))]
+        rows, quotes, used = [], [], set()
+        for sym in syms:
+            msgs = data_community.stocktwits_stream(s, sym, log=log)
+            if not msgs:
+                continue
+            up = sum(1 for k, _ in msgs if k == "Bullish")
+            down = sum(1 for k, _ in msgs if k == "Bearish")
+            rows.append(f"{sym} 🟢{up}·🔴{down}" if up or down else f"{sym} 의견없음")
+            for kind_, body in msgs:
+                # 같은 글이 종목 여러 개에 동시에 걸린다(한 사람이 티커를
+                # 줄줄이 달아 뿌리는 글). 그대로 두면 인용 세 줄이 같은 말이다.
+                key = body.lower()
+                if kind_ and len(body) >= 12 and key not in used:
+                    used.add(key)
+                    quotes.append(f"{sym} {'🟢' if kind_ == 'Bullish' else '🔴'} "
+                                  + data_community.clip(body, width))
+                    break
+        if not rows:
+            return None, unmatched
+        return {"emoji": emoji, "label": label, "note": "트렌딩",
+                "rows": rows, "quotes": quotes[:n_quotes]}, unmatched
+
+    if kind == "dc":
+        titles = data_community.dc_titles(
+            s, src["gallery"], pages=int(src.get("pages", 3)),
+            minor=bool(src.get("minor", True)), log=log)
+        if not titles:
+            return None, unmatched
+        hits, unmatched = data_community.count_mentions(titles, perps, aliases)
+        # 1회짜리는 싣지 않는다 — 국내는 오탐이 섞이는 자리라, 한 번 나온
+        # 티커는 근거가 너무 얇다(레딧 쪽 min_mentions와 같은 취지).
+        cut = max(2, floor - 1)
+        top = [(t, n) for t, n in hits.most_common(top_n) if n >= cut]
+        return {
+            "emoji": emoji, "label": label, "note": f"{len(titles)}글",
+            "rows": [f"{t} {n}회" for t, n in top],
+            "quotes": data_community.pick_quotes(
+                titles, [t for t, _ in top], perps, aliases, n_quotes, width),
+        }, unmatched
+
+    log(f"[community] 모르는 소스 종류: {kind!r}")
+    return None, unmatched
+
+
+def _mention_delta(r: dict) -> str:
+    """`MU 59회 +37` — 직전 24h가 0이면 `신규`."""
+    if not r.get("prev"):
+        return f"{r['ticker']} {r['mentions']}회 신규"
+    return f"{r['ticker']} {r['mentions']}회 {r['mentions'] - r['prev']:+d}"
 
 
 @functools.lru_cache(maxsize=1)

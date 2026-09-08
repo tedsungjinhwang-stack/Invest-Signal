@@ -34,10 +34,13 @@ BTC·ETH는 늘 1·2위라 신호 가치도 없다.
 import collections
 import html
 import re
+import time
 
 import requests
 
 APEWISDOM = "https://apewisdom.io/api/v1.0/filter/{name}/page/{page}"
+REDDIT_RSS = "https://www.reddit.com/r/{sub}/{sort}/.rss"
+STOCKTWITS = "https://api.stocktwits.com/api/2/{path}.json"
 DC_LIST = "https://gall.dcinside.com/{seg}/lists/"
 # 디시는 봇 UA를 막는다 — 평범한 브라우저로 보여야 목록이 온다.
 DC_HEADERS = {
@@ -45,6 +48,16 @@ DC_HEADERS = {
                    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
     "Accept-Language": "ko-KR,ko;q=0.9",
 }
+
+# 레딧도 기본 python UA를 막는다 — 디시와 같은 헤더를 쓴다.
+REDDIT_HEADERS = {"User-Agent": DC_HEADERS["User-Agent"]}
+
+_ENTRY = re.compile(r"<entry>(.*?)</entry>", re.S)
+_ENTRY_TITLE = re.compile(r"<title>(.*?)</title>", re.S)
+# 고정된 메가스레드는 매번 맨 위라 '지금 무슨 얘기 중인가'에 아무 정보가 없다.
+_MEGA = re.compile(r"daily (discussion|thread)|rate my portfolio|weekend discussion"
+                   r"|what are your moves|megathread|weekly (thread|discussion)"
+                   r"|monthly (thread|discussion)|discussion thread", re.I)
 
 _ROW = re.compile(r'<tr class="ub-content us-post"(.*?)</tr>', re.S)
 # `<a  href=` — 일반 글은 공백이 **두 칸**이고 공지는 한 칸이다. \s+로 안 받으면
@@ -75,7 +88,8 @@ STOPWORDS = frozenset("""
 포지션 레버리지 선물 현물 지갑 거래소 수수료 물량 세력 개미 고래 큰손
 코인 알트 코인턴 환율 뭐냐 미장 국장 증시 시황 장중 종가 시가 나스닥 지수
 결국 뭔가 이렇게 그래서 그러면 사실 요즘 방금 잠깐 얼마 이번 다음 지듣노
-차갤 세상 생각 이야기 사진 영상 오늘밤 새벽
+차갤 세상 생각 이야기 사진 영상 오늘밤 새벽 주식 상장 운지 사람들 찐반 잡코장
+한국 이전 주갤 시장 풀숏 풀롱 계좌 수익 손실 오늘자 실화 근황
 너무 내가 나는 저는 이건 저건 그건 뭐지 같은 정말 아주 매우 하고 하는 해서
 인데 라고 되면 하면 인가 인지 있다 없다 한다 된다 언제 어디 여기 거기
 """.split())
@@ -139,6 +153,54 @@ def apewisdom(session: requests.Session, name: str, pages: int = 1,
     return out
 
 
+def _rss(session, url, params, tries: int = 4, pause: float = 5.0):
+    """레딧 RSS는 **429를 자주 뱉는다** — 데이터센터 IP를 짜게 준다.
+
+    막힌 게 아니라 잠깐 밀리는 것이다. 실측하니 **10~15초면 풀린다** — 그래서
+    5·10·15초로 쉬며 네 번까지 물어본다. 그래도 안 되면 예외를 그대로 올려
+    호출부가 빈 목록으로 넘긴다(숫자 줄은 ApeWisdom에서 오니 인용문만 빠진다).
+    """
+    for i in range(tries):
+        try:
+            return _get(session, url, params, REDDIT_HEADERS)
+        except requests.HTTPError as e:
+            if i == tries - 1 or getattr(e.response, "status_code", 0) != 429:
+                raise
+            time.sleep(pause * (i + 1))
+
+
+def reddit_titles(session: requests.Session, sub: str, sort: str = "top",
+                  limit: int = 25, log=print) -> list[str]:
+    """서브레딧에서 **글 제목**을 긁는다 — 무인증으로 되는 유일한 길이 RSS다.
+
+    `/hot.json`은 403, old.reddit은 로그인으로 튕긴다. `.rss`만 200으로 열린다
+    (드물게 429가 나므로 실패는 빈 목록으로 넘긴다 — 숫자 줄은 ApeWisdom에서
+    따로 오니 인용문만 빠진다).
+
+    기본 정렬은 `top`(하루치)이다 — `hot`은 고정 공지가 섞이고, `new`는 아직
+    아무도 안 본 글이 온다. 하루치 상위가 '오늘 실제로 반응이 온 글'이다.
+
+    고정 메가스레드(`Daily Discussion`, `Rate My Portfolio`…)는 뺀다. 매번
+    맨 위에 있어서, '지금 무슨 얘기 중인가'를 보려는 목적에 아무 정보가 없다.
+    """
+    out = []
+    try:
+        params = {"limit": limit}
+        if sort == "top":
+            params["t"] = "day"          # 하루치 상위 = 오늘 실제로 반응이 온 글
+        r = _rss(session, REDDIT_RSS.format(sub=sub, sort=sort), params)
+        for entry in _ENTRY.findall(r.text):
+            m = _ENTRY_TITLE.search(entry)
+            if not m:
+                continue
+            title = html.unescape(_TAG.sub("", m.group(1))).strip()
+            if title and not _MEGA.search(title):
+                out.append(title)
+    except Exception as e:                       # noqa: BLE001
+        log(f"[community] 레딧 r/{sub} 실패: {type(e).__name__} {e}")
+    return out
+
+
 def dc_titles(session: requests.Session, gallery: str, pages: int = 6,
               minor: bool = True, log=print) -> list[str]:
     """디시 갤러리 목록에서 **글 제목만** 긁는다. 공지는 뺀다.
@@ -170,6 +232,130 @@ def dc_titles(session: requests.Session, gallery: str, pages: int = 6,
     return out
 
 
+def stocktwits_trending(session: requests.Session, log=print) -> list[str]:
+    """스톡트윗에서 지금 뜨는 심볼 목록. 크립토는 `BTC.X` 꼴로 온다."""
+    try:
+        data = _get(session, STOCKTWITS.format(path="trending/symbols"),
+                    headers=REDDIT_HEADERS).json()
+    except Exception as e:                       # noqa: BLE001
+        log(f"[community] 스톡트윗 트렌딩 실패: {type(e).__name__} {e}")
+        return []
+    out = []
+    for x in data.get("symbols") or []:
+        t = str(x.get("symbol") or "").upper()
+        if t.endswith(".X"):
+            t = t[:-2]
+        if t:
+            out.append(t)
+    return out
+
+
+def stocktwits_stream(session: requests.Session, symbol: str, limit: int = 30,
+                      log=print) -> list[tuple[str, str]]:
+    """한 종목 글타래 — (강세/약세/빈칸, 본문) 목록.
+
+    스톡트윗은 글쓴이가 **강세·약세를 직접 달아** 준다. 우리가 문장을
+    해석해서 추측하는 게 아니라 본인이 붙인 꼬리표라, 이 칸에서 '어떤
+    의견인가'를 말할 수 있는 유일하게 정직한 숫자다(안 단 글이 더 많다).
+    """
+    try:
+        data = _get(session, STOCKTWITS.format(path=f"streams/symbol/{symbol}"),
+                    {"limit": limit}, REDDIT_HEADERS).json()
+    except Exception as e:                       # noqa: BLE001
+        log(f"[community] 스톡트윗 {symbol} 실패: {type(e).__name__} {e}")
+        return []
+    out = []
+    for m in data.get("messages") or []:
+        sent = (((m.get("entities") or {}).get("sentiment")) or {}).get("basic") or ""
+        out.append((sent, clean_body(str(m.get("body") or ""))))
+    return out
+
+
+_CASHTAG = re.compile(r"\$[A-Za-z][A-Za-z0-9.]{0,9}")
+_URL = re.compile(r"https?://\S+")
+_WS = re.compile(r"\s+")
+# `[14:30] BTC $78791 …` 같은 시세 봇 글 — 매시간 올라오고 의견이 아니다.
+_BOTPOST = re.compile(r"^\[\d{1,2}:\d{2}\]")
+
+
+def clean_body(body: str) -> str:
+    """글머리 티커 나열·링크를 걷어낸 본문 — 한 줄에 실을 수 있게."""
+    body = _URL.sub("", body)
+    body = _CASHTAG.sub("", body)
+    return _WS.sub(" ", body).strip(" -–—:·,")
+
+
+def clip(text: str, n: int = 70) -> str:
+    text = _WS.sub(" ", text).strip()
+    return text if len(text) <= n else text[:n - 1].rstrip() + "…"
+
+
+def pick_quotes(titles: list[str], tickers, universe: set[str],
+                aliases: dict, n: int = 3, width: int = 70) -> list[str]:
+    """'무슨 얘기 중인가'로 실을 제목 몇 개 — 위 숫자 줄의 티커부터.
+
+    숫자만 있으면 **왜 그 종목이 불리는지**를 알 수 없다. 그렇다고 제목을 다
+    실을 수는 없으니, 집계 줄에 오른 티커를 실제로 말하는 제목을 먼저 뽑고
+    모자라면 커뮤니티가 올린 순서대로 채운다.
+    """
+    alias_map = normalize_aliases(aliases)
+    want = {str(t).upper() for t in tickers}
+    # 숫자 줄에 오른 티커 자체를 유니버스에 넣는다 — 안 넣으면 레딧 주식
+    # 커뮤니티에서 MU·SPY가 우리 퍼프 유니버스에 없다는 이유로 안 잡혀,
+    # 정작 그 종목을 말하는 글을 골라내지 못한다.
+    universe = set(universe) | want
+    hot, rest, seen = [], [], set()
+    for title in titles:
+        t = _WS.sub(" ", title).strip()
+        if len(t) < 8:                           # 한두 단어짜리는 의견이 아니다
+            continue
+        if _BOTPOST.match(t):                    # 시세 봇 글은 의견이 아니다
+            continue
+        # **첫 낱말이 같으면 한 줄만 쓴다.** 같은 화제가 한꺼번에 올라오면
+        # ('테더 2000 가는거…', '테더 근데 일정액은…', '테더 기본 몇십억은…')
+        # 인용 세 줄을 통째로 먹어서 다른 얘기가 안 보인다. 글은 남아도니
+        # 하나만 보여 주고 나머지 자리는 다른 화제로 채우는 게 낫다.
+        key = t.lower().split()[0].strip(".,!?…\"'")
+        if key in seen:
+            continue
+        seen.add(key)
+        found, _ = _match_title(t, universe, alias_map)
+        (hot if found & want else rest).append(clip(t, width))
+    return (hot + rest)[:max(0, n)]
+
+
+def normalize_aliases(aliases) -> dict[str, str]:
+    """`별명 → 티커` 사전을 소문자 키로 정규화한다.
+
+    str()로 감싸는 이유: YAML이 따옴표 없는 국내 종목코드(000660)를 8진수
+    정수로 읽어 버린다. 값이 틀리는 건 설정에서 고쳐야 하지만, 여기서
+    터져서 커뮤니티 칸이 통째로 사라지는 건 막는다.
+    """
+    return {str(k).lower(): str(v).upper() for k, v in (aliases or {}).items()}
+
+
+def _match_title(title: str, universe: set[str], alias_map: dict[str, str]):
+    """제목 하나에서 찾은 티커 집합과, 매칭에 쓰인 별명 목록."""
+    found, used = set(), []
+    for word in _LATIN.findall(title):
+        upper = word.upper()
+        # 두 글자 티커는 **대문자로 썼을 때만** 인정한다. 안 그러면 디시 글의
+        # `주소창에 id=stock`이 ID(Space ID) 언급으로 잡힌다. 세 글자부터는
+        # 소문자도 받는다 — 'btc 존버'처럼 실제로 그렇게 쓴다.
+        if len(word) <= 2 and not word.isupper():
+            continue
+        if upper in universe:
+            found.add(upper)
+        elif word.lower() in alias_map:
+            found.add(alias_map[word.lower()])
+    low = title.lower()
+    for alias, ticker in alias_map.items():
+        if alias in low:
+            found.add(ticker)
+            used.append(alias)
+    return found, used
+
+
 def count_mentions(titles: list[str], universe: set[str],
                    aliases: dict[str, str]) -> tuple[collections.Counter,
                                                      collections.Counter]:
@@ -186,23 +372,9 @@ def count_mentions(titles: list[str], universe: set[str],
     """
     hits = collections.Counter()
     unmatched = collections.Counter()
-    # str()로 감싸는 이유: YAML이 따옴표 없는 국내 종목코드(000660)를
-    # 8진수 정수로 읽어 버린다. 값이 틀리는 건 설정에서 고쳐야 하지만
-    # 여기서 터져서 커뮤니티 칸이 통째로 사라지는 건 막는다.
-    alias_map = {str(k).lower(): str(v).upper() for k, v in (aliases or {}).items()}
+    alias_map = normalize_aliases(aliases)
     for title in titles:
-        found = set()
-        for word in _LATIN.findall(title):
-            upper = word.upper()
-            if upper in universe:
-                found.add(upper)
-            elif word.lower() in alias_map:
-                found.add(alias_map[word.lower()])
-        used = []
-        for alias, ticker in alias_map.items():
-            if alias in title.lower():
-                found.add(ticker)
-                used.append(alias)
+        found, used = _match_title(title, universe, alias_map)
         hits.update(found)
         rest = title
         for alias in used:                       # 이미 매칭된 별명은 후보에서 뺀다
