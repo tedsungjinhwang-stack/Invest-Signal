@@ -153,9 +153,9 @@ def test_count_mentions_ignores_case():
 
 def test_unmatched_drops_matched_alias_text():
     """이미 잡힌 별명은 후보에서 뺀다 — 안 그러면 상위를 자기가 먹는다."""
-    _, un = dc.count_mentions(["하닉 반도체 살까"] * 3, UNIV, ALIAS)
+    _, un = dc.count_mentions(["하닉 동양철관 살까"] * 3, UNIV, ALIAS)
     assert "하닉" not in un
-    assert un["반도체"] == 3
+    assert un["동양철관"] == 3
 
 
 def test_unmatched_strips_particles_and_fragments():
@@ -176,8 +176,14 @@ def test_unmatched_drops_standalone_particles():
 
 def test_unmatched_keeps_long_names_intact():
     """조사처럼 끝난다고 이름을 자르면 안 된다."""
-    _, un = dc.count_mentions(["다큰낙타 왔다", "코스피 마감"], UNIV, {})
-    assert un["다큰낙타"] == 1 and un["코스피"] == 1
+    _, un = dc.count_mentions(["메가스터디 왔다", "동양철관 마감"], UNIV, {})
+    assert un["메가스터디"] == 1 and un["동양철관"] == 1
+
+
+def test_unmatched_strips_verb_endings():
+    """'찐반이다'가 '찐반'과 다른 말로 세어지면 불용어를 넣어도 계속 올라온다."""
+    _, un = dc.count_mentions(["동양철관이다 진짜", "동양철관 간다"], UNIV, {})
+    assert un["동양철관"] == 2
 
 
 def test_unmatched_skips_stopwords():

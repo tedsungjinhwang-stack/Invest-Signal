@@ -610,6 +610,7 @@ def _community_block(s, src: dict, perps: set, aliases: dict, top_n: int,
     한 모양으로 억지로 맞추면 오히려 읽는 사람이 헷갈린다.
     """
     kind = src.get("kind")
+    top_n = int(src.get("top_n", top_n))         # 소스마다 따로 줄 수 있다
     emoji = src.get("emoji", "•")
     label = src.get("label") or src.get("sub") or src.get("gallery") or "?"
     unmatched = collections.Counter()
