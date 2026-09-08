@@ -8,6 +8,7 @@ GitHub Actions에서 런이 빨갛게 떠서 문제를 바로 알 수 있게 한
 
 import collections
 import dataclasses
+import re
 import functools
 import os
 
@@ -579,7 +580,8 @@ def _scan_community(cfg: dict, log=print) -> dict:
             label = src.get("label") or src.get("sub") or src.get("gallery") or "?"
             try:
                 block, un = _community_block(
-                    s, src, perps, aliases, top_n, floor, n_quotes, width, log)
+                    s, src, perps, aliases, top_n, floor, n_quotes, width,
+                    bool(c.get("translate", True)), log)
             except Exception as e:               # noqa: BLE001 — 소스 하나가 전체를 막지 않는다
                 log(f"[community] {label} 수집 실패: {type(e).__name__} {e}")
                 continue
@@ -602,7 +604,8 @@ def _scan_community(cfg: dict, log=print) -> dict:
 
 
 def _community_block(s, src: dict, perps: set, aliases: dict, top_n: int,
-                     floor: int, n_quotes: int, width: int, log):
+                     floor: int, n_quotes: int, width: int,
+                     translate: bool = False, log=print):
     """커뮤니티 한 곳 → (표시 덩어리, 미매칭 후보 Counter).
 
     덩어리는 `{emoji, label, note, rows, quotes}`이고 rows는 **이미 포맷된
@@ -612,6 +615,8 @@ def _community_block(s, src: dict, perps: set, aliases: dict, top_n: int,
     kind = src.get("kind")
     top_n = int(src.get("top_n", top_n))         # 소스마다 따로 줄 수 있다
     n_quotes = int(src.get("quotes", n_quotes))
+    # 해외 소스만 번역한다. 디시는 이미 한국어고, 켜 봐야 요청만 는다.
+    translate = bool(src.get("translate", translate and kind != "dc"))
     emoji = src.get("emoji", "•")
     label = src.get("label") or src.get("sub") or src.get("gallery") or "?"
     unmatched = collections.Counter()
@@ -632,11 +637,13 @@ def _community_block(s, src: dict, perps: set, aliases: dict, top_n: int,
             return None, unmatched
         titles = data_community.reddit_titles(
             s, src["sub"], sort=src.get("sort", "top"), log=log)
+        quotes = data_community.pick_quotes(
+            titles, [r["ticker"] for r in rows], perps, aliases, n_quotes, width)
         return {
-            "emoji": emoji, "label": label, "note": "24h 증가순",
+            "emoji": emoji, "label": label,
+            "note": "24h 증가순" + (" · 번역" if translate and quotes else ""),
             "rows": [_mention_delta(r) for r in rows],
-            "quotes": data_community.pick_quotes(
-                titles, [r["ticker"] for r in rows], perps, aliases, n_quotes, width),
+            "quotes": _translated(s, quotes, translate, log),
         }, unmatched
 
     if kind == "stocktwits":
@@ -666,8 +673,11 @@ def _community_block(s, src: dict, perps: set, aliases: dict, top_n: int,
                     break
         if not rows:
             return None, unmatched
-        return {"emoji": emoji, "label": label, "note": "트렌딩",
-                "rows": rows, "quotes": quotes[:n_quotes]}, unmatched
+        quotes = quotes[:n_quotes]
+        return {"emoji": emoji, "label": label,
+                "note": "트렌딩" + (" · 번역" if translate and quotes else ""),
+                "rows": rows,
+                "quotes": _translated(s, quotes, translate, log)}, unmatched
 
     if kind == "dc":
         titles = data_community.dc_titles(
@@ -689,6 +699,21 @@ def _community_block(s, src: dict, perps: set, aliases: dict, top_n: int,
 
     log(f"[community] 모르는 소스 종류: {kind!r}")
     return None, unmatched
+
+
+def _translated(s, quotes: list[str], on: bool, log) -> list[str]:
+    """인용문을 한국어로 — **머리의 티커·이모지는 떼고 본문만** 번역한다.
+
+    안 떼면 `ORCL 🟢 raised TP`가 통째로 번역기에 들어가 티커가 뭉개진다.
+    """
+    if not on or not quotes:
+        return quotes
+    heads, bodies = [], []
+    for q in quotes:
+        m = re.match(r"^([A-Z0-9]{1,10}(?: [🟢🔴])? )(.+)$", q)
+        heads.append(m.group(1) if m else "")
+        bodies.append(m.group(2) if m else q)
+    return [h + b for h, b in zip(heads, data_community.translate(s, bodies, log))]
 
 
 def _mention_delta(r: dict) -> str:

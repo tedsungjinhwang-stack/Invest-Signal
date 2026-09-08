@@ -1279,6 +1279,25 @@ ApeWisdom은 레딧 글에서 **대문자 단어를 티커로 긁는다.** 그�
 - **고정 메가스레드**(`Daily Discussion`, `Rate My Portfolio`)와 **시세 봇
   글**(`[14:30] BTC $78791 …`)은 뺀다. 매번 올라오고 의견이 아니다.
 
+### 해외 인용문은 한국어로 옮긴다
+
+[MyMemory](https://mymemory.translated.net) 무료 API — 키가 없고 인증도 없다.
+실패하거나 하루 한도가 차면 **그 줄만 원문으로** 나간다. 번역이 안 되는 것보다
+줄이 안 나오는 게 나쁘다. 디시 소스는 이미 한국어라 자동으로 건너뛴다.
+
+기계번역이라 은어에서 무너진다. 그래서 **영어를 영어로 먼저 풀어서** 보낸다
+(`data_community.GLOSSARY`):
+
+| 원문 | 그냥 번역하면 | 풀어서 보내면 |
+|---|---|---|
+| break out | 밖으로 나가세요 | 저항을 초과합니다 |
+| bulls been warned | 황소 경고 | 구매자에게 경고 |
+| buy the dip | 딥 구매 | 가격 하락 후 매수 |
+
+그래도 기계번역이라, 번역된 칸은 머리줄에 **`번역`**을 붙여 둔다. 티커와
+🟢/🔴는 떼고 본문만 보낸다 — 안 떼면 `ORCL 🟢 raised TP`가 통째로 들어가
+티커가 뭉개진다.
+
 ### 국내는 사전이 자라야 쓸모가 생긴다 — ❓ 목록
 
 국내 제목은 별명 투성이다(`아케` `마스` `코루` `소폰` `바낸` `반도치`).
@@ -1353,6 +1372,7 @@ signal:
     quotes: 3             # 커뮤니티마다 인용문 몇 줄까지 (소스별로 덮어쓸 수 있다)
     quote_width: 70       # 인용문 한 줄 길이(넘으면 …로 자른다)
     show_unmatched: 8     # ❓ 후보 몇 개까지 (국내 통합 한 줄)
+    translate: true       # 해외 인용문을 한국어로 (소스별로 끌 수 있다)
     sources:              # **적은 순서대로 알림에 실린다**
       - {kind: reddit, emoji: "🇺🇸", label: r/wallstreetbets,
          sub: wallstreetbets, filter: wallstreetbets}

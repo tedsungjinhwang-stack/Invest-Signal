@@ -41,6 +41,7 @@ import requests
 APEWISDOM = "https://apewisdom.io/api/v1.0/filter/{name}/page/{page}"
 REDDIT_RSS = "https://www.reddit.com/r/{sub}/{sort}/.rss"
 STOCKTWITS = "https://api.stocktwits.com/api/2/{path}.json"
+MYMEMORY = "https://api.mymemory.translated.net/get"
 DC_LIST = "https://gall.dcinside.com/{seg}/lists/"
 # 디시는 봇 UA를 막는다 — 평범한 브라우저로 보여야 목록이 온다.
 DC_HEADERS = {
@@ -251,6 +252,76 @@ def dc_titles(session: requests.Session, gallery: str, pages: int = 6,
             title = html.unescape(_TAG.sub("", m.group(1))).strip()
             if title:
                 out.append(title)
+    return out
+
+
+# 기계번역이 트레이딩 은어에서 무너진다. 영어를 영어로 먼저 풀어 주면
+# 눈에 띄게 나아진다 — 실측: "break out" → '밖으로 나가세요'가 '저항을
+# 초과합니다'로, "bulls been warned" → '황소 경고'가 '구매자에게 경고'로.
+GLOSSARY = [
+    (r"\bbreak(?:ing)? ?out\b", "breaking above resistance"),
+    (r"\bbreakout\b", "a break above resistance"),
+    (r"\bbreak(?:ing)? down\b", "breaking below support"),
+    (r"\bbulls?\b", "buyers"),
+    (r"\bbears?\b", "sellers"),
+    (r"\bbuy(?:ing)? the dip\b", "buying after the price drop"),
+    (r"\bthe dip\b", "the price drop"),
+    (r"\bcalls\b", "call options"),
+    (r"\bputs\b", "put options"),
+    (r"\bbag ?holders?\b", "investors stuck at a loss"),
+    (r"\bmoon(?:ing)?\b", "rising sharply"),
+    (r"\bsqueeze\b", "a short squeeze"),
+    (r"\bpump(?:ing)?\b", "a sharp rise"),
+    (r"\bdump(?:ing)?\b", "a sharp fall"),
+    (r"\bhodl(?:ing)?\b", "holding"),
+    (r"\byolo\b", "an all-in bet"),
+    (r"\bDD\b", "research"),
+]
+_HAS_HANGUL = re.compile(r"[가-힣]")
+
+
+def _plain_english(text: str) -> str:
+    for pat, rep in GLOSSARY:
+        text = re.sub(pat, rep, text, flags=re.I)
+    return text
+
+
+def translate(session: requests.Session, texts: list[str], log=print) -> list[str]:
+    """영어 인용문을 한국어로. **실패하면 원문 그대로** 돌려준다.
+
+    MyMemory(api.mymemory.translated.net) — 무료·무인증·키 없음. 하루 단어
+    수 제한이 있는데 4시간에 열몇 줄이라 여유가 있고, 한도가 차면(`quotaFinished`)
+    그때부터 원문으로 나간다. 번역이 안 되는 것보다 안 나오는 게 나쁘다.
+
+    한글이 이미 섞인 줄은 건너뛴다 — 국내 갤러리 인용문에 이걸 태울 이유가 없다.
+    """
+    out, cache, stopped = [], {}, False
+    for text in texts:
+        if not text or _HAS_HANGUL.search(text):
+            out.append(text)
+            continue
+        if text in cache:
+            out.append(cache[text])
+            continue
+        got = text
+        if not stopped:
+            try:
+                data = _get(session, MYMEMORY,
+                            {"q": _plain_english(text), "langpair": "en|ko"},
+                            REDDIT_HEADERS, timeout=20).json()
+                if data.get("quotaFinished"):
+                    stopped = True
+                    log("[community] 번역 한도 소진 — 남은 줄은 원문으로 나간다")
+                else:
+                    ko = str((data.get("responseData") or {}).get("translatedText") or "")
+                    if ko.strip():
+                        got = html.unescape(ko).strip()
+            except Exception as e:              # noqa: BLE001 — 원문으로 나가면 된다
+                log(f"[community] 번역 실패: {type(e).__name__} {e}")
+                stopped = True
+            time.sleep(0.2)                     # 무료 API에 예의는 지킨다
+        cache[text] = got
+        out.append(got)
     return out
 
 

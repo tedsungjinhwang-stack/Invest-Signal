@@ -412,3 +412,61 @@ def test_reddit_titles_gives_up_quietly():
     logged = []
     assert dc.reddit_titles(_Dead(), "stocks", log=logged.append) == []
     assert logged and "레딧" in logged[0]
+
+
+# ── 번역 ─────────────────────────────────────────────────────────────────
+def _ko(text):
+    return _Resp(payload={"responseData": {"translatedText": text},
+                          "quotaFinished": False})
+
+
+def test_translate_skips_korean_lines():
+    """국내 갤러리 인용문에 번역기를 태울 이유가 없다."""
+    s = _Session()                               # 요청이 하나라도 가면 실패한다
+    assert dc.translate(s, ["비트 개쏜다 ㅋㅋ", ""]) == ["비트 개쏜다 ㅋㅋ", ""]
+    assert s.calls == []
+
+
+def test_translate_normalizes_trading_slang_first():
+    """기계번역은 은어에서 무너진다 — 영어를 영어로 먼저 풀어 보낸다."""
+    s = _Session(_ko("저항을 초과합니다"))
+    assert dc.translate(s, ["break out now"]) == ["저항을 초과합니다"]
+    assert "breaking above resistance" in s.calls[0][1]["q"]
+
+
+def test_translate_reuses_the_same_line():
+    s = _Session(_ko("같은 말"))
+    assert dc.translate(s, ["same line", "same line"]) == ["같은 말", "같은 말"]
+    assert len(s.calls) == 1
+
+
+def test_translate_falls_back_to_the_original():
+    """번역이 안 되는 것보다 줄이 안 나오는 게 나쁘다."""
+    class _Dead:
+        def get(self, *a, **k):
+            raise RuntimeError("503")
+    logged = []
+    assert dc.translate(_Dead(), ["hello there"], log=logged.append) == ["hello there"]
+    assert logged and "번역" in logged[0]
+
+
+def test_translate_stops_when_the_daily_quota_is_gone():
+    s = _Session(_Resp(payload={"quotaFinished": True, "responseData": {}}))
+    logged = []
+    assert dc.translate(s, ["first line", "second line"], log=logged.append) == \
+        ["first line", "second line"]
+    assert len(s.calls) == 1                     # 한도가 찼으면 더 묻지 않는다
+    assert logged and "한도" in logged[0]
+
+
+def test_translated_keeps_the_ticker_head():
+    """`ORCL 🟢 raised TP`를 통째로 넣으면 티커가 뭉개진다."""
+    s = _Session(_ko("목표가 올림"))
+    got = scanner._translated(s, ["ORCL 🟢 raised TP"], True, lambda *_: None)
+    assert got == ["ORCL 🟢 목표가 올림"]
+    assert s.calls[0][1]["q"] == "raised TP"
+
+
+def test_translated_is_a_noop_when_off():
+    s = _Session()
+    assert scanner._translated(s, ["raised TP"], False, print) == ["raised TP"]
