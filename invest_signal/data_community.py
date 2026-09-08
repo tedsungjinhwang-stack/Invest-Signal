@@ -300,21 +300,28 @@ def clip(text: str, n: int = 70) -> str:
     return text if len(text) <= n else text[:n - 1].rstrip() + "…"
 
 
+# BTC·ETH는 어느 커뮤니티에서나 늘 1·2위다. 인용 한 줄을 줘도 새로 아는 게
+# 없어서, 자리가 남을 때만 싣는다 — 정작 보고 싶은 건 알트 쪽이다.
+DEMOTE = ("BTC", "ETH")
+
+
 def pick_quotes(titles: list[str], tickers, universe: set[str],
                 aliases: dict, n: int = 3, width: int = 70) -> list[str]:
-    """'무슨 얘기 중인가'로 실을 제목 몇 개 — 위 숫자 줄의 티커부터.
+    """'무슨 얘기 중인가'로 실을 제목 몇 개 — **티커마다 한 줄씩 골고루**.
 
-    숫자만 있으면 **왜 그 종목이 불리는지**를 알 수 없다. 그렇다고 제목을 다
-    실을 수는 없으니, 집계 줄에 오른 티커를 실제로 말하는 제목을 먼저 뽑고
-    모자라면 커뮤니티가 올린 순서대로 채운다.
+    숫자만 있으면 왜 그 종목이 불리는지 알 수 없어서 글을 같이 싣는데,
+    그냥 '티커가 걸린 글 먼저'로 뽑으면 **BTC 얘기가 세 줄을 다 먹는다**.
+    제일 많이 불린 이름이 후보도 제일 많기 때문이다. 그래서 티커마다 한 줄씩
+    주고, BTC·ETH는 뒤로 미룬다(DEMOTE). 자리가 남으면 같은 티커의 둘째 줄,
+    그래도 남으면 티커가 안 걸린 글로 채운다.
+
+    제목에 티커 글자가 없으면(`월드숏 좀 맛있네`) 앞에 티커를 붙여 준다 —
+    어느 종목 얘기인지 알아야 줄이 쓸모가 있다.
     """
     alias_map = normalize_aliases(aliases)
-    want = {str(t).upper() for t in tickers}
-    # 숫자 줄에 오른 티커 자체를 유니버스에 넣는다 — 안 넣으면 레딧 주식
-    # 커뮤니티에서 MU·SPY가 우리 퍼프 유니버스에 없다는 이유로 안 잡혀,
-    # 정작 그 종목을 말하는 글을 골라내지 못한다.
-    universe = set(universe) | want
-    hot, rest, seen = [], [], set()
+    order = [str(t).upper() for t in tickers]
+    universe = set(universe) | set(order)
+    by_ticker, rest, seen = {}, [], set()
     for title in titles:
         t = _WS.sub(" ", title).strip()
         if len(t) < 8:                           # 한두 단어짜리는 의견이 아니다
@@ -329,9 +336,26 @@ def pick_quotes(titles: list[str], tickers, universe: set[str],
         if key in seen:
             continue
         seen.add(key)
-        found, _ = _match_title(t, universe, alias_map)
-        (hot if found & want else rest).append(clip(t, width))
-    return (hot + rest)[:max(0, n)]
+        found = _match_title(t, universe, alias_map)[0]
+        hit = [x for x in order if x in found]
+        if hit:
+            # 여러 종목이 걸리면 **뒤쪽(덜 불린 쪽)**에 준다 — 흔한 티커는
+            # 어차피 자기 줄이 따로 있다.
+            who = hit[-1]
+            body = clip(t, width)
+            by_ticker.setdefault(who, []).append(
+                body if who.lower() in t.lower() else f"{who} {body}")
+        else:
+            rest.append(clip(t, width))
+
+    ranked = ([x for x in order if x not in DEMOTE and x in by_ticker]
+              + [x for x in order if x in DEMOTE and x in by_ticker])
+    out = [by_ticker[x][0] for x in ranked][:n]           # 티커마다 한 줄 먼저
+    if len(out) < n:                                     # 남으면 둘째 줄들로
+        out += [q for x in ranked for q in by_ticker[x][1:]][:n - len(out)]
+    if len(out) < n:
+        out += rest[:n - len(out)]
+    return out
 
 
 def normalize_aliases(aliases) -> dict[str, str]:

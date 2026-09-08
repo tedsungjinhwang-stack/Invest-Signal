@@ -270,6 +270,30 @@ def test_pick_quotes_fills_from_the_rest_and_dedups():
     assert got == ["똑같은 제목이다 이건", "다른 제목이다 이건"]
 
 
+def test_pick_quotes_spreads_one_line_per_ticker():
+    """티커가 걸린 글 순으로만 뽑으면 **BTC가 세 줄을 다 먹는다** — 제일 많이
+    불린 이름이 후보도 제일 많기 때문이다. 티커마다 한 줄씩 준다."""
+    titles = ["비트 8만 간다 진짜", "비트 이제 조정온다", "비트 존버한다 나는",
+              "월드숏 좀 많이 맛있네", "샌디운지 ㅋㅋㅋㅋㅋ"]
+    got = dc.pick_quotes(titles, ["BTC", "WLD", "SAND"], set(),
+                         {"비트": "BTC", "월드": "WLD", "샌디": "SAND"}, n=3)
+    assert got == ["WLD 월드숏 좀 많이 맛있네", "SAND 샌디운지 ㅋㅋㅋㅋㅋ",
+                   "BTC 비트 8만 간다 진짜"]
+
+
+def test_pick_quotes_prefixes_only_when_the_ticker_is_invisible():
+    """`월드숏…`은 어느 종목인지 몰라 붙여 주고, `MU earnings`는 이미 보인다."""
+    got = dc.pick_quotes(["MU earnings play soon"], ["MU"], {"MU"}, {}, n=1)
+    assert got == ["MU earnings play soon"]
+
+
+def test_pick_quotes_credits_the_rarer_ticker():
+    """한 글에 둘이 걸리면 덜 불린 쪽에 준다 — 흔한 쪽은 자기 줄이 따로 있다."""
+    got = dc.pick_quotes(["비트 이더로는 큰 돈 못 번다"], ["BTC", "ETH"], set(),
+                         {"비트": "BTC", "이더": "ETH"}, n=1)
+    assert got == ["ETH 비트 이더로는 큰 돈 못 번다"]
+
+
 def test_pick_quotes_drops_price_bot_posts():
     """`[14:30] BTC $78791 …`은 매시간 올라오는 봇 글이지 의견이 아니다."""
     got = dc.pick_quotes(["[14:30] BTC $78791 ETH $2481", "비트 이더로는 못 번다"],

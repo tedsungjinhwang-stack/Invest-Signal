@@ -611,6 +611,7 @@ def _community_block(s, src: dict, perps: set, aliases: dict, top_n: int,
     """
     kind = src.get("kind")
     top_n = int(src.get("top_n", top_n))         # 소스마다 따로 줄 수 있다
+    n_quotes = int(src.get("quotes", n_quotes))
     emoji = src.get("emoji", "•")
     label = src.get("label") or src.get("sub") or src.get("gallery") or "?"
     unmatched = collections.Counter()
