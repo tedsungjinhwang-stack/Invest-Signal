@@ -296,6 +296,14 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     ft = _fib_tag(d)
     if ft:
         tags.append(ft)
+    if e.signal == "leader_break":
+        # **24h 상승률 몇 위로 뽑힌 종목인지.** ↳추적 줄에는 진작 있었는데
+        # 정작 새로 알리는 줄에는 없어서, 목록만 보고는 1위가 깬 건지 10위가
+        # 깬 건지 알 수가 없었다. 순위 밖이면 감시 며칠째인지를 대신 적는다.
+        if d.get("rank"):
+            tags.append(f"{d['rank']}위")
+        elif d.get("watch_days") is not None:
+            tags.append(f"추적 {d['watch_days']}일차")
     if e.signal in RETURN_SIGNALS:
         rt = _returns_tag(d)
         if rt:
@@ -324,9 +332,6 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
             # (24h 상승률은 위 수익률 태그에 이미 들어간다)
             tags.append(f"{d.get('interval', '15m')} "
                         f"{d.get('ma_period', 60)}SMA {_fmt_price(d['ma'])} 이탈")
-            if d.get("watch_days") is not None:
-                # 지금은 상위권 밖 — 등재 후 며칠째 추적 중인지
-                tags.append(f"추적 {d['watch_days']}일차")
         if d.get("align") and not _early(e):
             tags.append(d["align"])
     return head + (" · " + " · ".join(tags) if tags else "")

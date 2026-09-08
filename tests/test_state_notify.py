@@ -186,6 +186,30 @@ def test_leaders_absent_in_legacy_state_file(tmp_path):
     assert not st.is_new("X|pullback|2026-01-01T00:00:00+00:00")
 
 
+def test_new_leader_line_shows_the_rank():
+    """새로 알리는 줄에도 **몇 위인지**가 있어야 한다.
+
+    ↳추적 줄에는 진작 있었는데 정작 신규 줄에는 없어서, 목록만 보고는 1위가
+    깬 건지 10위가 깬 건지 알 수가 없었다.
+    """
+    ranked = SignalEvent(symbol="SOPHUSDT", signal="leader_break",
+                         bar_time=pd.Timestamp("2026-09-08T06:00:00Z"), price=0.0087,
+                         detail={"label": "크립토 모멘텀 눌림목/이탈", "ma": 0.0090,
+                                 "ma_period": 20, "interval": "15m",
+                                 "rank": 1, "gain_24h": 0.92})
+    lapsed = SignalEvent(symbol="EGLDUSDT", signal="leader_break",
+                         bar_time=pd.Timestamp("2026-09-08T06:00:00Z"), price=4.712,
+                         detail={"label": "크립토 모멘텀 눌림목/이탈", "ma": 4.80,
+                                 "ma_period": 20, "interval": "15m",
+                                 "watch_days": 4, "gain_24h": 0.061})
+    out = format_events([ranked, lapsed], [], {})
+    assert "· 1위 ·" in out                      # 순위 안이면 순위
+    assert "· 추적 4일차 ·" in out               # 순위 밖이면 감시 며칠째
+    # 순위는 수익률·이탈 태그보다 앞이라 한눈에 들어와야 한다
+    line = next(l for l in out.split("\n") if "SOPH" in l)
+    assert line.index("1위") < line.index("20SMA")
+
+
 def test_hold_line_shows_leader_break_rank_and_ma_side():
     """유지 중 줄 — 상위권이면 순위, 밀렸으면 추적일차 + 60선 위/아래."""
     top = SignalEvent(symbol="HFTUSDT", signal="leader_break",
