@@ -428,7 +428,13 @@ def format_events(events_crypto: list, events_etf: list,
     아니라 참고용 요약이라, 칸 순서에서도 맨 뒤다.
     """
     now_kst = pd.Timestamp.now(tz=KST).strftime("%m-%d %H:%M")
-    lines = [f"🚨 <b>4h 시그널</b> · {now_kst} KST"]
+    # 시그널이 하나도 없는데 커뮤니티 칸만 있는 메시지도 나간다(4시간마다).
+    # 그때까지 '🚨 4h 시그널'을 달면 뭔가 잡힌 줄 알고 열어 보게 된다.
+    has_signal = bool(events_crypto or events_etf or events_stocks
+                      or ongoing_crypto or ongoing_etf or ongoing_stocks
+                      or crypto_board)
+    head = "🚨 <b>4h 시그널</b>" if has_signal else "📣 <b>커뮤니티 반응</b>"
+    lines = [f"{head} · {now_kst} KST"]
 
     markets = [("크립토", events_crypto, ongoing_crypto, "crypto"),
                ("ETF", events_etf, ongoing_etf, "etf"),

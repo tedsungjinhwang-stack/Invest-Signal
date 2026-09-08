@@ -240,11 +240,28 @@ def test_community_lines_unmatched_is_one_shared_row():
     assert "소폰 10 · 찐반 5" in body
 
 
+def _ev(signal="wave_setup"):
+    import pandas as pd
+    from invest_signal.signals import SignalEvent
+    return SignalEvent(symbol="BTCUSDT", signal=signal,
+                       bar_time=pd.Timestamp("2026-09-08 12:00", tz="UTC"),
+                       price=1.0, detail={})
+
+
 def test_format_events_appends_community_at_the_end():
+    text = notify.format_events([_ev()], [], {}, community={
+        "sources": [{"label": "차트 마이너", "rows": ["BTC 28회"], "quotes": []}]})
+    assert "🚨" in text.split("\n")[0]
+    assert "📣" in text and text.index("📣") > text.index("🚨")
+    assert "📣" not in notify.format_events([_ev()], [], {})
+
+
+def test_community_only_message_gets_its_own_header():
+    """시그널이 없는데 '🚨 4h 시그널'을 달면 뭔가 잡힌 줄 알고 열어 보게 된다."""
     text = notify.format_events([], [], {}, community={
         "sources": [{"label": "차트 마이너", "rows": ["BTC 28회"], "quotes": []}]})
-    assert "📣" in text and text.index("📣") > 0
-    assert "📣" not in notify.format_events([], [], {})
+    assert text.split("\n")[0].startswith("📣 <b>커뮤니티 반응</b>")
+    assert "🚨" not in text
 
 
 # ── 인용문 고르기 ─────────────────────────────────────────────────────────

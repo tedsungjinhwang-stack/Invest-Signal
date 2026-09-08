@@ -915,11 +915,15 @@ def run(config_path: str, state_path: str, only: str | None = None,
             errors.append(f"etf: {e}")
             log(f"[etf] ETF·주식 스캔 실패: {e}")
 
+    # 커뮤니티 칸은 **마감 스캔(4시간마다)에서만** 모은다. 사람 얘기는 한 시간
+    # 만에 바뀌지 않는데 인트라바까지 긁으면 요청만 네 배가 되고, 알림에도
+    # 같은 줄이 네 번 실린다.
     community = {}
-    try:
-        community = _scan_community(cfg, log)
-    except Exception as e:                          # noqa: BLE001 — 부가 정보다
-        log(f"[community] 수집 실패: {e}")
+    if not intrabar:
+        try:
+            community = _scan_community(cfg, log)
+        except Exception as e:                      # noqa: BLE001 — 부가 정보다
+            log(f"[community] 수집 실패: {e}")
 
     # 주도주 상위권 등재 이력은 알림 유무와 무관하게 매 스캔 남긴다 —
     # 알림이 나갈 때만 저장하면 조용한 스캔에서 추적 창이 끊긴다.
@@ -942,6 +946,17 @@ def run(config_path: str, state_path: str, only: str | None = None,
 
     if not fresh_crypto and not fresh_yf:
         log("새 시그널 없음")
+        # 시그널이 없어도 커뮤니티 칸은 4시간마다 보낸다 — 그게 이 칸을 만든
+        # 이유다. 유지 중 목록까지 딸려 나가면 조용한 스캔이 긴 알림으로
+        # 바뀌므로, 여기서는 **커뮤니티 칸만** 따로 만들어 보낸다.
+        if community:
+            msg = notify.format_events([], [], {}, community=community)
+            if dry_run:
+                log("[dry-run] 발송 생략 — 커뮤니티 칸 미리보기:")
+                log(msg)
+            elif notify.send_telegram(msg, log=log):
+                sent_log.append(sent_log.default_path(state_path), msg,
+                                mode="community", counts={})
         return 1 if errors else 0
 
     # '유지 중' 목록 — 이번에 새로 알리는 (종목, 시그널)은 신규 섹션에 있으므로 제외

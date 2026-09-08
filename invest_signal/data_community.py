@@ -79,6 +79,17 @@ _PARTICLES = ("으로부터", "에서는", "에서", "부터", "까지", "이랑
 _ENDINGS = ("입니다", "이라고", "이다", "이네", "이냐", "이노", "인가", "인데",
             "하다", "한다", "했다", "된다", "되냐", "이야", "임")
 
+# 티커로 안 볼 라틴 낱말. 유니버스에 **영어 단어가 그대로 티커인 것**이
+# 많아서(AI·IP·ID·NOT·NEW…) 글에 쓰인 보통 말이 종목으로 잡힌다. 국내
+# 갤러리에서 실제로 본 것들만 넣는다 — 해외주식 갤러리를 붙이자마자 'AI'가
+# 10회로 올라왔고, 그건 C3.ai가 아니라 인공지능 얘기였다.
+LATIN_STOP = frozenset("""
+AI IT PC TV CEO CFO ETF USD KRW JPY EUR FOMC CPI PPI GDP PCE IPO EPS PBR PER ROE
+HTS MTS RSI MACD EMA SMA VWAP ATH DCA NFT DAO DEX CEX SEC OTC APR APY AMA
+THE AND FOR YOU ALL BUY SELL LONG SHORT OPEN NEWS LOL OMG FYI IMO FUD FOMO
+DYOR LFG YOLO GPT LLM API URL
+""".split())
+
 # 매칭 안 된 단어 목록에서 뺄 말 — 종목 이름이 될 수 없는 것들.
 # 완전할 수 없고 완전할 필요도 없다: 이 목록의 쓰임은 사람이 훑어보고
 # aliases에 넣을 후보를 고르는 것뿐이라, 조금 새어도 눈으로 거르면 된다.
@@ -99,6 +110,7 @@ STOPWORDS = frozenset("""
 불로 클래리티 다큰낙타 반도체 바낸 빗썸 달러 코스피 코스닥 재능 저점 고점
 시간봉 거래량 갑자기 기준 이유 모든 왤케 게이 부럽다 만들기 공유함 숏을 돈을
 무빙 계단식 뜬금없 쳐라 지지선 저항선 추세선 이평선 캔들 봉임 매물대
+소웨 유가 메모리 이새끼 데이장 해주갤 컨퍼런스 실적 배당 공시 리스크
 너무 내가 나는 저는 이건 저건 그건 뭐지 같은 정말 아주 매우 하고 하는 해서
 인데 라고 되면 하면 인가 인지 있다 없다 한다 된다 언제 어디 여기 거기
 """.split())
@@ -377,6 +389,8 @@ def _match_title(title: str, universe: set[str], alias_map: dict[str, str]):
         # `주소창에 id=stock`이 ID(Space ID) 언급으로 잡힌다. 세 글자부터는
         # 소문자도 받는다 — 'btc 존버'처럼 실제로 그렇게 쓴다.
         if len(word) <= 2 and not word.isupper():
+            continue
+        if upper in LATIN_STOP:
             continue
         if upper in universe:
             found.add(upper)
