@@ -365,6 +365,12 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                 detail["rank"] = rank[sym]      # 지금도 상위권
             if since is not None:               # 상위권 밖 — 며칠째 감시 창에 있는지
                 detail["watch_days"] = max(0, (now - pd.Timestamp(since)).days)
+                # 지금 순위는 없지만 **감시 창에서 몇 위까지 갔었는지**는 안다.
+                # 그게 없으면 '추적 2일차'만 보고 이 종목이 1위였는지 10위였는지
+                # 알 수가 없어서, 같은 추적 줄이 다 똑같아 보인다.
+                best = state.best_rank(sym) if state is not None else None
+                if best:
+                    detail["best_rank"] = best
             return detail
 
         for ev in leader_break.detect(df, sym, params):

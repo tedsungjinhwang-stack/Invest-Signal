@@ -331,10 +331,9 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         # **24h 상승률 몇 위로 뽑힌 종목인지.** ↳추적 줄에는 진작 있었는데
         # 정작 새로 알리는 줄에는 없어서, 목록만 보고는 1위가 깬 건지 10위가
         # 깬 건지 알 수가 없었다. 순위 밖이면 감시 며칠째인지를 대신 적는다.
-        if d.get("rank"):
-            tags.append(f"{d['rank']}위")
-        elif d.get("watch_days") is not None:
-            tags.append(f"추적 {d['watch_days']}일차")
+        rk = _rank_tag(d)
+        if rk:
+            tags.append(rk)
     if e.signal in RETURN_SIGNALS:
         rt = _returns_tag(d)
         if rt:
@@ -366,6 +365,21 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         if d.get("align") and not _early(e):
             tags.append(d["align"])
     return head + (" · " + " · ".join(tags) if tags else "")
+
+
+def _rank_tag(d: dict) -> str:
+    """⚡ 줄의 순위 조각 — 지금 순위, 아니면 `추적 N일차 · 최고 M위`.
+
+    **최고 순위를 같이 적는 이유**: '추적 2일차'만 있으면 이 종목이 1위까지
+    갔다가 밀린 건지 원래 10위였는지 알 수가 없어서, 추적 줄이 죄다 똑같아
+    보인다. 최고 순위는 감시 창 안에서 잰 값이다(state.best_rank).
+    """
+    if d.get("rank"):
+        return f"{d['rank']}위"
+    if d.get("watch_days") is None:
+        return ""
+    tag = f"추적 {d['watch_days']}일차"
+    return f"{tag} · 최고 {d['best_rank']}위" if d.get("best_rank") else tag
 
 
 LEADER_LABEL = "크립토 모멘텀 눌림목/이탈"
@@ -492,8 +506,7 @@ def format_events(events_crypto: list, events_etf: list,
         if e.signal == "leader_break":
             # 감시 창 안이면 선 위로 복귀해도 남는다 — 순위·선 위아래를 같이 보여준다
             ma = d.get("ma_period", 60)
-            tags = [f"{d['rank']}위" if d.get("rank")
-                    else f"추적 {d.get('watch_days', 0)}일차",
+            tags = [_rank_tag(d) or f"추적 {d.get('watch_days', 0)}일차",
                     f"{ma}선 위" if d.get("above_ma") else f"🔻{ma}선 아래"]
             ft = _fib_tag(d)
             if ft:

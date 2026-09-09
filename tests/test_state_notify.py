@@ -949,3 +949,57 @@ def test_leader_grouping_does_not_move_other_sections():
     out = format_events([], [], {}, ongoing_crypto=evs)
     order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳ ")]
     assert order == ["B", "A"]          # 24h 수익률 순 그대로
+
+
+def test_best_rank_survives_falling_out_of_the_top():
+    """감시 창 안에서 **몇 위까지 갔었는지**를 기억한다.
+
+    어제 1위였다가 오늘 9위로 밀렸으면 1위를 남긴다 — 창을 벗어나면
+    prune이 항목째 지우므로 다음에 다시 들 때 새로 센다.
+    """
+    import tempfile, os
+    from datetime import datetime, timedelta, timezone
+    from invest_signal.state import AlertState
+
+    with tempfile.TemporaryDirectory() as tmp:
+        st = AlertState(os.path.join(tmp, "s.json"))
+        now = datetime.now(timezone.utc)
+        st.touch_leaders(["AUSDT", "BUSDT", "CUSDT"], when=now - timedelta(days=1))
+        assert st.best_rank("AUSDT") == 1 and st.best_rank("CUSDT") == 3
+        # 오늘은 A가 3위로 밀렸다 — 최고는 1위 그대로
+        st.touch_leaders(["XUSDT", "YUSDT", "AUSDT"], when=now)
+        assert st.best_rank("AUSDT") == 1
+        assert st.best_rank("XUSDT") == 1
+        st.save()
+        assert AlertState(os.path.join(tmp, "s.json")).best_rank("AUSDT") == 1
+
+
+def test_old_state_file_without_ranks_still_loads():
+    """상태 파일은 레포에 커밋돼 있어서 배포 순간에 옛 모양이 그대로 들어온다."""
+    import json, os, tempfile
+    from datetime import datetime, timezone
+    from invest_signal.state import AlertState
+
+    now = datetime.now(timezone.utc)
+    with tempfile.TemporaryDirectory() as tmp:
+        p = os.path.join(tmp, "s.json")
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump({"alerts": {}, "leaders": {"AUSDT": now.isoformat()}}, f)
+        st = AlertState(p)
+        assert set(st.recent_leaders(days=5, now=now)) == {"AUSDT"}
+        assert st.best_rank("AUSDT") is None      # 옛 기록엔 순위가 없다
+
+
+def test_watch_line_shows_the_best_rank_reached():
+    """'추적 2일차'만 있으면 1위였다 밀린 건지 원래 10위였는지 알 수가 없다."""
+    e = SignalEvent(symbol="KAVAUSDT", signal="leader_break",
+                    bar_time=pd.Timestamp("2026-09-09T06:00:00Z"), price=0.0597,
+                    detail={"label": "크립토 모멘텀 눌림목/이탈", "ma": 0.0599,
+                            "ma_period": 20, "interval": "15m",
+                            "watch_days": 1, "best_rank": 3, "gain_24h": 0.02})
+    out = format_events([e], [], {})
+    assert "추적 1일차 · 최고 3위" in out
+    # 최고 순위를 모르면(옛 상태 파일) 예전처럼 추적일차만 나간다
+    e.detail.pop("best_rank")
+    again = format_events([e], [], {})
+    assert "추적 1일차" in again and "최고" not in again
