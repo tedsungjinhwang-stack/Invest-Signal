@@ -786,13 +786,34 @@ def test_slow_line_touch_is_marked_at_the_front():
     assert line.count("장기선") == 1
 
 
-def test_break_keeps_the_trailing_tag():
-    """줄 끝 꼬리표는 `돌파`만 남는다 — 터치 둘은 앞쪽 마크로 옮겼다."""
+def test_break_is_marked_at_the_front_too():
+    """돌파도 앞쪽 마크다 — 네 자리를 같은 자리에서 같은 방식으로 읽는다.
+
+    터치만 마크였을 땐 돌파가 줄 **끝**에 글자로 붙어서, 한 칸 안의 같은
+    종류 사건인데 눈에 걸리는 위치가 달랐다.
+    """
     e = _abc("XUSDT", "단기선", "돌파", 0.02, 1)
     line = [ln for ln in format_events([], [], {}, ongoing_crypto=[e]).splitlines()
             if ln.startswith("↳ ")][0]
+    assert "🔓단기선돌파" in line
     assert "🧱" not in line and "🔁" not in line
-    assert line.rstrip().endswith("돌파"), line
+    assert line.index("🔓") < line.index("%")      # 수익률보다 앞
+    assert not line.rstrip().endswith("돌파"), line  # 꼬리표로 두 번 안 적는다
+
+
+def test_slow_break_variant_gets_its_own_mark():
+    """ⓓ 장기선 돌파 — 넷 중 제일 큰 사건이라 마크가 있어야 한다."""
+    import pandas as pd
+    from invest_signal.signals import SignalEvent
+    e = SignalEvent(symbol="XTZUSDT", signal="wave_setup",
+                    bar_time=pd.Timestamp("2026-09-08T06:00:00Z"), price=0.25,
+                    detail={"label": "파동", "stage": "장기선돌파",
+                            "last_price": 0.25, "ret_4h": 0.009,
+                            "gain_24h": 0.074, "ret_7d": 0.17})
+    line = [ln for ln in format_events([], [], {}, ongoing_crypto=[e]).splitlines()
+            if ln.startswith("↳ ")][0]
+    assert "💥장기선돌파" in line
+    assert line.count("장기선") == 1                # 꼬리표로 두 번 안 적는다
 
 
 def test_fast_line_touch_is_marked_at_the_front():

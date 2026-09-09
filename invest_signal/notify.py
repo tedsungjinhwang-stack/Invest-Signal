@@ -92,6 +92,11 @@ SLOW_TOUCH_TAG = "🧱장기선터치"
 # ⓐ 단기선 터치 — 방금 넘긴 선을 다시 눌러 보는 자리(아래쪽 지지 재확인).
 # 셋 중 제일 드물다(30일 발화의 6%). 줄 끝 '단기선' 세 글자로는 안 보였다.
 FAST_TOUCH_TAG = "🔁단기선터치"
+# 돌파 둘도 같은 자리에 마크로 뽑는다. 터치만 마크였을 땐 돌파가 줄 **끝**에
+# 글자로만 붙어서, 한 칸 안에서 같은 종류의 사건인데 눈에 걸리는 위치가
+# 달랐다. 네 자리를 같은 자리에서 같은 방식으로 읽게 맞춘다.
+FAST_BREAK_TAG = "🔓단기선돌파"     # ⓐ 전환 봉 — 단기 저항을 열었다
+SLOW_BREAK_TAG = "💥장기선돌파"     # ⓓ 4h 장기 수퍼트렌드가 뒤집힌 봉 — 넷 중 제일 큰 사건
 
 # ⓐ 블록 안의 읽는 순서 — 위에서 아래로 사건이 작아진다.
 #   장기선 터치 : 반등이 아직 하락인 장기선(위쪽 저항)까지 되돌린 자리
@@ -122,6 +127,33 @@ def _slow_touch(e) -> bool:
 def _fast_touch(e) -> bool:
     """ⓐ 단기선 터치 줄인지 — 앞쪽 🔁 마크를 이 판정으로 건다."""
     return _abc_kind(e) == "단기선 터치"
+
+
+def _fast_break(e) -> bool:
+    """ⓐ 단기선 돌파 줄인지 — 전환 봉 자체."""
+    return _abc_kind(e) == "단기선 돌파"
+
+
+def _slow_break(e) -> bool:
+    """ⓓ 장기선 돌파 줄인지 — ⓐ와 달리 변형 자체가 그 사건이다."""
+    return (e.signal == "wave_setup"
+            and e.detail.get("stage") == WAVE_SLOW_BREAK)
+
+
+def _wave_mark(e) -> str | None:
+    """파동 줄 앞에 붙일 마크 — 네 자리 중 하나. 아니면 None.
+
+    마크가 붙으면 줄 끝에 변형 이름을 다시 적지 않는다(두 번 말하게 된다).
+    """
+    if _slow_touch(e):
+        return SLOW_TOUCH_TAG
+    if _fast_touch(e):
+        return FAST_TOUCH_TAG
+    if _fast_break(e):
+        return FAST_BREAK_TAG
+    if _slow_break(e):
+        return SLOW_BREAK_TAG
+    return None
 
 
 def _abc_first(e):
@@ -283,10 +315,9 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tags.append(QUIET_TAG)      # 거래대금·변동성이 작은 종목 (leader_break.quiet)
     if d.get("band"):
         tags.append(BAND_TAG)
-    if _slow_touch(e):
-        tags.append(SLOW_TOUCH_TAG)
-    elif _fast_touch(e):
-        tags.append(FAST_TOUCH_TAG)
+    wm = _wave_mark(e)
+    if wm:
+        tags.append(wm)
     if _early(e):
         tags.append(EARLY_TAG)
     tt = _turn_tag(d)
@@ -316,10 +347,10 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         if d.get("stage") in PULLBACK_STAGES:
             # 눌림목 — 타점(밴드 터치)과 대기(밴드 위)를 한눈에 구분
             tags.append("🎯타점" if d["stage"] == "타점" else "대기")
-        if e.signal == "wave_setup":
-            # 두 터치는 앞의 마크가 선·방식을 다 말하므로 변형만 남긴다
-            tags.append("ABC" if (_slow_touch(e) or _fast_touch(e))
-                        else _wave_tag(d))
+        if e.signal == "wave_setup" and wm is None:
+            # 마크가 붙은 줄은 선·방식을 이미 다 말했다 — 두 번 안 적는다.
+            # 마크 없는 변형(ⓒ 되돌림 등)만 여기서 이름을 붙인다.
+            tags.append(_wave_tag(d))
         if e.signal == "pump_early" and d.get("rise") is not None:
             hours = int(d.get("rise_bars", 1)) * 4
             tags.append(f"{hours}h +{d['rise'] * 100:.1f}%"
@@ -485,10 +516,9 @@ def format_events(events_crypto: list, events_etf: list,
                     + (f"  {_fmt_price(d['last_price'])}" if d.get("last_price") else "")
                     + " · " + " · ".join(tags))
         tags = [f"{_age_days(e.bar_time)}d"]
-        if _slow_touch(e):
-            tags.append(SLOW_TOUCH_TAG)
-        elif _fast_touch(e):
-            tags.append(FAST_TOUCH_TAG)
+        wm = _wave_mark(e)
+        if wm:
+            tags.append(wm)
         if d.get("quiet"):
             tags.append(QUIET_TAG)      # ⚡·파동 공통 — 조용한 종목 표시
         if d.get("band"):
@@ -501,7 +531,7 @@ def format_events(events_crypto: list, events_etf: list,
             rt = _returns_compact(d)
             if rt:
                 tags.append(rt)
-            if _slow_touch(e) or _fast_touch(e):
+            if wm is not None:
                 pass                # 앞의 마크가 이미 말한다 — 두 번 안 적는다
             elif d.get("touched"):
                 # ⓐ는 세 자리를 다 잡으므로 소제목만으론 구분이 안 된다.
