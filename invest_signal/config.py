@@ -115,6 +115,7 @@ def wave_params(cfg: dict) -> wave_setup.Params:
         impulse_enabled=bool(s.get("impulse_enabled", True)),
         grace_bars=int(s.get("grace_bars", 1)),
         daily_grace_bars=int(s.get("daily_grace_bars", 1)),
+        track=bool(s.get("track", True)),
         flip_window_bars=int(s.get("flip_window_bars", 12)),
         abc_touch_slow=bool(s.get("abc_touch_slow", True)),
         abc_touch_fast=bool(s.get("abc_touch_fast", True)),

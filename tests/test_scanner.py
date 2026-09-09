@@ -461,3 +461,31 @@ def test_mark_band_covers_every_wave_variant_and_can_be_turned_off():
     missing = [_wave_ev("ZUSDT")]
     scanner._mark_band(missing, [], frames, {})
     assert "band" not in missing[0].detail
+
+
+def test_track_false_drops_the_tracking_rows(monkeypatch):
+    """track=False면 추적(↳) 줄을 아예 안 만든다 — 발생 봉만 알리고 끝낸다.
+
+    조건이 살아 있어도(still_active True) 줄이 남지 않아야 한다.
+    """
+    import dataclasses
+    from types import SimpleNamespace
+
+    idx = pd.date_range("2026-09-01", periods=40, freq="4h", tz="UTC")
+    df = pd.DataFrame({"Open": 1.0, "High": 1.0, "Low": 1.0, "Close": 1.0,
+                       "Volume": 1.0}, index=idx)
+
+    @dataclasses.dataclass(frozen=True)
+    class P:
+        grace_bars: int = 1
+        track: bool = True
+
+    fired = _ev("XUSDT", "wave_setup", 8)
+    mod = SimpleNamespace(NAME="wave_setup",
+                          detect=lambda d, s, p: [fired],
+                          still_active=lambda d, e, p: True)
+
+    on = scanner._detect_all({"XUSDT": df}, [(mod, P(track=True))])
+    off = scanner._detect_all({"XUSDT": df}, [(mod, P(track=False))])
+    assert len(on[0]) == 1 and len(on[1]) == 1        # 신규 1 · 추적 1
+    assert len(off[0]) == 1 and off[1] == []          # 신규 1 · 추적 없음

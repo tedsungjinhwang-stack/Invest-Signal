@@ -85,6 +85,11 @@ def _detect_all(frames: dict, detectors, log=print, show_choch=False) -> tuple[l
                 if not show_choch:
                     continue
             sym_events.extend(mod.detect(df, sym, params))
+            # track=False면 추적(↳) 줄을 아예 안 만든다 — 터치·돌파가 난
+            # 그 봉만 알리고 끝낸다. 위 wide 검출은 그대로 둔다: 하락전환
+            # 청소(choch_time)가 그 결과를 쓰기 때문이다.
+            if not getattr(params, "track", True):
+                continue
             if latest is not None and mod.still_active(df, latest, params):
                 # 추적 줄에 실릴 값 중 트리거 시점에 얼어붙으면 안 되는 것은
                 # 시그널이 직접 다시 계산한다(선택 훅) — 파동의 추세선이 그렇다
