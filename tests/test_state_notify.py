@@ -1003,3 +1003,20 @@ def test_watch_line_shows_the_best_rank_reached():
     e.detail.pop("best_rank")
     again = format_events([e], [], {})
     assert "추적 1일차" in again and "최고" not in again
+
+
+def test_watch_line_shows_the_1h_alignment():
+    """추적(↳) 줄에도 1h 배열을 적는다.
+
+    게이트가 통과시키는 두 배열의 성적이 실측에서 크게 갈려서
+    (정배열 57.6% vs 혼조 67.2%), 어느 쪽인지 모르면 줄을 못 읽는다.
+    신규(•) 줄엔 진작 있었는데 추적 줄에만 빠져 있었다.
+    """
+    e = SignalEvent(symbol="BUSDT", signal="leader_break",
+                    bar_time=pd.Timestamp("2026-09-09T06:00:00Z"), price=0.199,
+                    detail={"label": "크립토 모멘텀 눌림목/이탈", "last_price": 0.199,
+                            "ma": 0.20, "above_ma": True, "ma_period": 20,
+                            "watch_days": 1, "gain_24h": 0.091, "align": "혼조"})
+    line = [ln for ln in format_events([], [], {}, ongoing_crypto=[e]).splitlines()
+            if ln.startswith("↳ ")][0]
+    assert line.rstrip().endswith("혼조"), line

@@ -525,6 +525,12 @@ def format_events(events_crypto: list, events_etf: list,
             day = _daily_gain(d)
             if day is not None:
                 tags.append(f"24h {_pct(day)}")
+            # 1h 배열 — 신규(•) 줄엔 진작 있었는데 추적(↳) 줄에만 없었다.
+            # 게이트가 통과시킨 두 배열(정배열·혼조)의 성적이 실측에서 크게
+            # 갈려서(57.6% vs 67.2%), 어느 쪽인지 모르면 줄을 못 읽는다.
+            # 🌱상승초기가 붙은 줄은 그 마크가 이미 역배열을 말한다.
+            if d.get("align") and not _early(e):
+                tags.append(d["align"])
             return (f"↳ {_short_symbol(e.symbol, kind, name)}"
                     + (f"  {_fmt_price(d['last_price'])}" if d.get("last_price") else "")
                     + " · " + " · ".join(tags))
