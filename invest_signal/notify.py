@@ -363,7 +363,7 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
             tags.append(f"{d.get('interval', '15m')} "
                         f"{d.get('ma_period', 60)}SMA {_fmt_price(d['ma'])} 이탈")
         if d.get("align") and not _early(e):
-            tags.append(d["align"])
+            tags.append(_align_tag(d))
     return head + (" · " + " · ".join(tags) if tags else "")
 
 
@@ -380,6 +380,19 @@ def _rank_tag(d: dict) -> str:
         return ""
     tag = f"추적 {d['watch_days']}일차"
     return f"{tag} · 최고 {d['best_rank']}위" if d.get("best_rank") else tag
+
+
+# 배열 태그 — 신호등처럼 색으로 먼저 걸리게 한다. 줄이 길어서 끝에 붙은
+# 두 글자는 스크롤하며 훑을 때 그냥 지나쳐진다. 뜻이 위험도 순서라 색이 맞다:
+# 정배열은 이미 오를 만큼 오른 자리(실측 승률 57.6% · 쪽박 22%로 셋 중 최악),
+# 혼조·역배열은 깊은 데서 올라오는 중이라 덜 빠진다(67.2% · 65.8%).
+ALIGN_TAG = {"정배열": "🟩정배열", "혼조": "🟨혼조", "역배열": "🟥역배열"}
+
+
+def _align_tag(d: dict) -> str:
+    """1h(⚡)·4h(나머지) 배열 태그. 모르면 빈 문자열."""
+    a = d.get("align")
+    return ALIGN_TAG.get(a, a or "")
 
 
 LEADER_LABEL = "크립토 모멘텀 눌림목/이탈"
@@ -530,7 +543,7 @@ def format_events(events_crypto: list, events_etf: list,
             # 갈려서(57.6% vs 67.2%), 어느 쪽인지 모르면 줄을 못 읽는다.
             # 🌱상승초기가 붙은 줄은 그 마크가 이미 역배열을 말한다.
             if d.get("align") and not _early(e):
-                tags.append(d["align"])
+                tags.append(_align_tag(d))
             return (f"↳ {_short_symbol(e.symbol, kind, name)}"
                     + (f"  {_fmt_price(d['last_price'])}" if d.get("last_price") else "")
                     + " · " + " · ".join(tags))
@@ -576,7 +589,7 @@ def format_events(events_crypto: list, events_etf: list,
             # 파동은 배열 태그를 뺀다 — 판정이 수퍼트렌드라 이평선 배열은
             # 조건에 안 들어가고, 한글 두 글자가 줄 폭에서 제일 비싸다
             if d.get("align") and e.signal != "wave_setup":
-                tags.append(d["align"])
+                tags.append(_align_tag(d))
         price = d.get("last_price")
         return (f"↳ {_short_symbol(e.symbol, kind, name)}"
                 + (f"  {_fmt_price(price)}" if price else "")
