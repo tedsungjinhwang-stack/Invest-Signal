@@ -144,8 +144,8 @@ def test_align_tag_shown_in_lines_and_ongoing():
     mss = _event("XRPUSDT", {"label": "MSS", "align": "정배열", "last_price": 3.0})
     msg = format_events([new], [], {}, ongoing_crypto=[hold, mixed, mss])
     assert "역배열" in msg
-    assert " · 🟩정배열" in msg
-    assert " · 🟨혼조" in msg                          # 혼조도 배열 태그로 표시
+    assert " · ↑정배열" in msg
+    assert " · ↔혼조" in msg                          # 혼조도 배열 태그로 표시
     assert "↳ XRP  3 · " in msg and "MSS" in msg
     xrp_line = next(l for l in msg.split("\n") if l.startswith("↳ XRP"))
     assert "정배열" not in xrp_line                   # MSS 항목은 MSS만
@@ -459,7 +459,7 @@ def test_hold_lines_use_one_separator_everywhere():
     e.detail["align"] = "역배열"
     line = [ln for ln in format_events([], [], {}, ongoing_crypto=[e]).splitlines()
             if ln.startswith("↳ ")][0]
-    assert line == "↳ X  100 · 0d · 24h +13% · 🟥역배열"
+    assert line == "↳ X  100 · 0d · 24h +13% · ↓역배열"
 
 
 def test_wave_hold_line_fits_one_phone_line():
@@ -1019,4 +1019,4 @@ def test_watch_line_shows_the_1h_alignment():
                             "watch_days": 1, "gain_24h": 0.091, "align": "혼조"})
     line = [ln for ln in format_events([], [], {}, ongoing_crypto=[e]).splitlines()
             if ln.startswith("↳ ")][0]
-    assert line.rstrip().endswith("혼조"), line
+    assert line.rstrip().endswith("↔혼조"), line
