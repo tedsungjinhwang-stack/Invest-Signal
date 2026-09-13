@@ -215,6 +215,41 @@ def _by_gain_desc(e):
     return (1, 0.0) if g is None else (0, -g)
 
 
+def _turnover_tag(d: dict) -> str:
+    """24h 거래대금 — `$8.4M` 꼴. 모르면 빈 문자열.
+
+    ⚡ 줄을 이 값으로 세우므로 **줄에 보여야 한다.** 안 보이면 왜 이 순서인지
+    알 수가 없고, 거래대금은 '실제로 들어가고 나올 수 있는 자리인가'를
+    말해 주는 값이라 그 자체로 읽을 값이기도 하다.
+    """
+    v = d.get("turnover_24h")
+    if not v:
+        return ""
+    v = float(v)
+    if v >= 1e9:
+        return f"${v / 1e9:.1f}B"
+    if v >= 1e6:
+        return f"${v / 1e6:.0f}M" if v >= 1e7 else f"${v / 1e6:.1f}M"
+    return f"${v / 1e3:.0f}K"
+
+
+def _turnover_desc(e):
+    """⚡ 줄을 24h 거래대금 내림차순으로 세우는 조각. ⚡ 밖은 전부 같은 값.
+
+    ⚡는 대상 선정이 이미 24h 상승률 순(=순위표)이라, 줄까지 같은 축으로
+    세우면 순위표를 두 번 읽는 셈이 된다. 거래대금은 **줄에서 처음 드러나는
+    다른 축**이고, 실제로 들어가고 나올 수 있는 자리인지를 말해 준다 —
+    하한(min_turnover_usd)이 100만 달러뿐이라 통과분 안에서도 자릿수가 갈린다.
+
+    다른 칸은 랭크 필터의 하드 하한을 이미 통과한 종목만 남아 거래대금으로
+    다시 줄 세워도 새 정보가 없다. 그래서 ⚡에만 건다.
+    """
+    if e.signal != "leader_break":
+        return (0, 0.0)
+    v = e.detail.get("turnover_24h")
+    return (1, 0.0) if v is None else (0, -float(v))
+
+
 def _quiet_first(e):
     """🍃조용을 칸 맨 위로 올리는 정렬 조각.
 
@@ -228,15 +263,15 @@ def _quiet_first(e):
 
 
 def _new_order(e):
-    """신규 줄 — 변형·🍃로 묶고, 그 안에서 24h 수익률 순, 없으면 심볼 순."""
+    """신규 줄 — 변형·🍃로 묶고, ⚡는 거래대금 순·나머지는 24h 수익률 순."""
     return (_variant(e), *_abc_first(e), _leader_first(e), _quiet_first(e),
-            *_by_gain_desc(e), e.symbol)
+            *_turnover_desc(e), *_by_gain_desc(e), e.symbol)
 
 
 def _hold_order(e):
-    """추적 줄 — 변형·🍃로 묶고, 24h 수익률 순, 동률이면 최신 발생 순."""
+    """추적 줄 — 신규 줄과 같은 축(⚡는 거래대금 순), 동률이면 최신 발생 순."""
     return (_variant(e), *_abc_first(e), _leader_first(e), _quiet_first(e),
-            *_by_gain_desc(e), -e.bar_time.timestamp())
+            *_turnover_desc(e), *_by_gain_desc(e), -e.bar_time.timestamp())
 
 
 def _returns_tag(d: dict) -> str | None:
@@ -360,6 +395,9 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         if e.signal == "leader_break":
             # 24h 상승률 순위로 뽑힌 종목이 15m 추세선을 깬 자리
             # (24h 상승률은 위 수익률 태그에 이미 들어간다)
+            tv = _turnover_tag(d)
+            if tv:
+                tags.append(tv)     # 줄을 이 값으로 세운다 — 보여야 순서가 읽힌다
             tags.append(f"{d.get('interval', '15m')} "
                         f"{d.get('ma_period', 60)}SMA {_fmt_price(d['ma'])} 이탈")
         if d.get("align") and not _early(e):
@@ -545,6 +583,9 @@ def format_events(events_crypto: list, events_etf: list,
             day = _daily_gain(d)
             if day is not None:
                 tags.append(f"24h {_pct(day)}")
+            tv = _turnover_tag(d)
+            if tv:
+                tags.append(tv)
             # 1h 배열 — 신규(•) 줄엔 진작 있었는데 추적(↳) 줄에만 없었다.
             # 게이트가 통과시킨 두 배열(정배열·혼조)의 성적이 실측에서 크게
             # 갈려서(57.6% vs 67.2%), 어느 쪽인지 모르면 줄을 못 읽는다.

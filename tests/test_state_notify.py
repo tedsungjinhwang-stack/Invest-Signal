@@ -1020,3 +1020,46 @@ def test_watch_line_shows_the_1h_alignment():
     line = [ln for ln in format_events([], [], {}, ongoing_crypto=[e]).splitlines()
             if ln.startswith("↳ ")][0]
     assert line.rstrip().endswith("↔혼조"), line
+
+
+def _lb(sym, turnover, gain, **extra):
+    d = {"label": "크립토 모멘텀 눌림목/이탈", "ma": 1.1, "ma_period": 20,
+         "interval": "15m", "gain_24h": gain, "turnover_24h": turnover,
+         "last_price": 1.0}
+    d.update(extra)
+    return SignalEvent(symbol=sym, signal="leader_break",
+                       bar_time=pd.Timestamp("2026-09-13T06:00:00Z"),
+                       price=1.0, detail=d)
+
+
+def test_leader_lines_sort_by_turnover_not_gain():
+    """⚡는 대상 선정이 이미 상승률 순이라, 줄까지 같은 축으로 세우면
+    순위표를 두 번 읽는 셈이다. 거래대금이 줄에서 처음 드러나는 축이다."""
+    small = _lb("SMALLUSDT", 2.4e6, 0.40, rank=2)
+    big = _lb("BIGUSDT", 8.4e8, 0.11, rank=6)
+    out = format_events([small, big], [], {},
+                        ongoing_crypto=[_lb("HUSDT", 1.2e9, 0.05, watch_days=2,
+                                            above_ma=True),
+                                        _lb("KUSDT", 9.5e5, 0.09, watch_days=1,
+                                            above_ma=True)])
+    assert out.index("BIG") < out.index("SMALL")     # 신규 — 상승률은 반대 순서
+    assert out.index("↳ H") < out.index("↳ K")       # 추적도 같은 축
+
+
+def test_turnover_is_printed_so_the_order_is_readable():
+    """정렬 축이 줄에 안 보이면 왜 이 순서인지 알 수가 없다."""
+    out = format_events([_lb("AUSDT", 8.4e8, 0.11, rank=1),
+                         _lb("BUSDT", 2.4e6, 0.40, rank=2),
+                         _lb("CUSDT", 1.2e9, 0.05, rank=3),
+                         _lb("DUSDT", 9.5e5, 0.09, rank=4)], [], {})
+    assert "$840M" in out and "$2.4M" in out and "$1.2B" in out and "$950K" in out
+
+
+def test_turnover_sort_leaves_other_sections_alone():
+    """⚡ 밖은 예전대로 24h 수익률 순 — 거래대금 키가 순서를 흔들면 안 된다."""
+    lo = _event("AUSDT", {"label": "눌림목", "gain_24h": 0.02, "last_price": 1.0,
+                          "turnover_24h": 9e9})
+    hi = _event("BUSDT", {"label": "눌림목", "gain_24h": 0.30, "last_price": 1.0,
+                          "turnover_24h": 1e6})
+    out = format_events([], [], {}, ongoing_crypto=[lo, hi])
+    assert out.index("↳ B") < out.index("↳ A")
