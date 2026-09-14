@@ -526,18 +526,22 @@ def test_quiet_tag_shows_on_tracking_lines_too():
     assert rows["Q"].index("🍃") < rows["Q"].index("3위")   # 줄 앞쪽에 온다
 
 
-def test_quiet_symbols_are_grouped_at_the_top():
-    """🍃가 먼저, 그 안에서 24h 상승률 순 — 흩어져 있으면 폰에서 못 찾는다."""
-    def lead(symbol, gain, quiet):
+def test_quiet_does_not_group_leader_rows():
+    """⚡는 거래대금 한 축으로만 세운다 — 🍃는 표시로만 남는다.
+
+    묶음을 얹으면 정작 거래대금 순서가 묶음 안으로 숨는다. 예전엔 🍃가
+    칸 맨 위로 올라왔는데, 그 기준을 뺐다.
+    """
+    def lead(symbol, turnover, quiet):
         e = _leader(symbol, quiet=quiet)
-        e.detail["gain_24h"] = gain
+        e.detail["turnover_24h"] = turnover
         return e
-    out = format_events([lead("LOUDHIUSDT", 0.50, False), lead("QLOUSDT", 0.01, True),
-                         lead("LOUDLOUSDT", 0.20, False), lead("QHIUSDT", 0.09, True)],
+    out = format_events([lead("QLOUSDT", 2e6, True), lead("LOUDHIUSDT", 9e8, False),
+                         lead("QHIUSDT", 5e6, True), lead("LOUDLOUSDT", 3e7, False)],
                         [], {})
     order = [ln.split(">")[1].split("<")[0] for ln in out.splitlines()
              if ln.startswith("• ")]
-    assert order == ["QHI", "QLO", "LOUDHI", "LOUDLO"]
+    assert order == ["LOUDHI", "LOUDLO", "QHI", "QLO"]      # 거래대금 순 그대로
 
 
 def test_quiet_grouping_does_not_reorder_other_signals():
@@ -924,23 +928,27 @@ def test_recovery_band_rows_gather_under_the_two_touches():
     assert order == ["D", "C", "B", "A"]
 
 
-def test_leader_rows_group_by_break_then_band():
-    """⚡ 칸은 ↗️1h돌파 → 🪜회복구간 → 나머지 순으로 묶인다."""
-    def lead(sym, resist, band=False, gain=0.10):
+def test_leader_rows_are_not_grouped_by_resist_or_band():
+    """↗️1h돌파·🪜회복구간은 **표시만** 한다 — 순서를 정하지 않는다.
+
+    묶음이 셋이나 되니 정작 거래대금 순서가 묶음 안으로 숨었다. 승률 차이는
+    실측으로 남아 있지만(1h 돌파 64.5% / 터치 62.7% / 없음 60.4%), 그건
+    줄을 보고 사람이 고르면 되는 정보지 순서를 정할 축은 아니다.
+    """
+    def lead(sym, resist, turnover, band=False):
         e = _leader(sym, hold=True)
         e.detail["resist_1h"] = resist
-        e.detail["gain_24h"] = gain
+        e.detail["turnover_24h"] = turnover
         if band:
             e.detail["band"] = True
         return e
 
-    evs = [lead("AUSDT", "터치", gain=0.50),
-           lead("BUSDT", "터치", band=True, gain=0.10),
-           lead("CUSDT", "돌파", gain=0.20)]
+    evs = [lead("AUSDT", "터치", 9e8),
+           lead("BUSDT", "터치", 2e6, band=True),
+           lead("CUSDT", "돌파", 3e7)]
     out = format_events([], [], {}, ongoing_crypto=evs)
     order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("↳ ")]
-    # 돌파(C) → 🪜(B) → 나머지(A). 수익률은 A > C > B인데 무리가 이긴다.
-    assert order == ["C", "B", "A"]
+    assert order == ["A", "C", "B"]     # 거래대금 순 — 돌파·🪜가 안 끌어올린다
 
 
 def test_leader_grouping_does_not_move_other_sections():

@@ -174,22 +174,6 @@ def _abc_first(e):
     return (i, 0) if (k == "단기선 돌파" and e.detail.get("band")) else (i, 1)
 
 
-def _leader_first(e):
-    """⚡ 칸 안에서 묶는 정렬 조각 — ↗️1h 돌파 → 🪜회복구간 → 나머지.
-
-    require_resist를 켠 뒤로는 모든 ⚡ 줄에 ↗️가 붙어 있어서, 그 안에서
-    **돌파인지 터치인지**가 다음 눈금이 된다(실측 1h 돌파 64.5% / 터치
-    62.7%). 그 아래에 🪜를 모아 4h 구조가 아직 하락인 줄을 한 덩어리로
-    본다. ⚡ 밖은 전부 0이라 다른 칸의 순서가 안 흔들린다.
-    """
-    if e.signal != "leader_break":
-        return 0
-    d = e.detail
-    if d.get("resist_1h") == "돌파":
-        return 0
-    return 1 if d.get("band") else 2
-
-
 def _variant(e) -> int:
     """같은 칸 안에서 먼저 갈라 놓을 하위 종류. 파동의 ABC/임펄스가 유일하다.
 
@@ -243,6 +227,12 @@ def _turnover_desc(e):
 
     다른 칸은 랭크 필터의 하드 하한을 이미 통과한 종목만 남아 거래대금으로
     다시 줄 세워도 새 정보가 없다. 그래서 ⚡에만 건다.
+
+    **⚡ 칸의 유일한 정렬 축이다.** 예전엔 ↗️1h돌파 → 🪜회복구간 → 🍃조용으로
+    묶고 그 안에서 세웠는데, 묶음이 셋이나 되니 정작 거래대금 순서가 묶음
+    안으로 숨었다. 셋 다 정렬에서 빼고 **표시로만** 남긴다 — 승률 차이는
+    실측으로 남아 있지만(1h 돌파 64.5% / 터치 62.7% / 없음 60.4%), 그건
+    줄을 보고 사람이 고르면 되는 정보지 순서를 정할 축은 아니라는 판단이다.
     """
     if e.signal != "leader_break":
         return (0, 0.0)
@@ -257,21 +247,24 @@ def _quiet_first(e):
     흩어져, 폰에서 스크롤하며 이모지를 찾아야 한다. 이 축의 성과 차이가
     가장 크므로(leader_break.quiet 참고) 먼저 묶어 보여준다.
 
-    quiet 키는 ⚡만 채운다 — 다른 시그널은 전부 같은 값이라 순서가 그대로다.
+    **⚡에는 안 건다.** ⚡는 거래대금 한 축으로만 세운다 — 묶음을 얹으면 정작
+    거래대금 순서가 묶음 안으로 숨는다. 🍃는 거기서 표시로만 남는다.
     """
+    if e.signal == "leader_break":
+        return 0
     return 0 if e.detail.get("quiet") else 1
 
 
 def _new_order(e):
     """신규 줄 — 변형·🍃로 묶고, ⚡는 거래대금 순·나머지는 24h 수익률 순."""
-    return (_variant(e), *_abc_first(e), _leader_first(e), _quiet_first(e),
-            *_turnover_desc(e), *_by_gain_desc(e), e.symbol)
+    return (_variant(e), *_abc_first(e), *_turnover_desc(e),
+            _quiet_first(e), *_by_gain_desc(e), e.symbol)
 
 
 def _hold_order(e):
     """추적 줄 — 신규 줄과 같은 축(⚡는 거래대금 순), 동률이면 최신 발생 순."""
-    return (_variant(e), *_abc_first(e), _leader_first(e), _quiet_first(e),
-            *_turnover_desc(e), *_by_gain_desc(e), -e.bar_time.timestamp())
+    return (_variant(e), *_abc_first(e), *_turnover_desc(e),
+            _quiet_first(e), *_by_gain_desc(e), -e.bar_time.timestamp())
 
 
 def _returns_tag(d: dict) -> str | None:
