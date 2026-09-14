@@ -423,6 +423,21 @@ def _crypto_ticker(session, source: str, log=print) -> dict | None:
         return None
 
 
+def _fill_turnover(items: list, ticker: dict | None) -> None:
+    """줄에 실을 24h 거래대금을 티커에서 붙인다.
+
+    캔들에는 이 값이 없다 — 24hr 티커만 준다. ⚡는 대상 선정 단계에서 이미
+    받아 두지만(annotate), 파동처럼 4h 프레임으로 도는 시그널은 여기서 붙여야
+    한다. 신규·추적 양쪽에 건다.
+    """
+    if not ticker:
+        return
+    for e in items:
+        v = (ticker.get(e.symbol) or {}).get("quote_volume")
+        if v is not None:
+            e.detail.setdefault("turnover_24h", v)
+
+
 def _fill_daily_return(items: list, ticker: dict | None) -> None:
     """추적 줄의 24h 수익률을 티커 값으로 덮어쓴다.
 
@@ -516,6 +531,8 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
             return leader_events, leader_ongoing, board
     events, ongoing = _detect_all(frames, detectors, log)
     _fill_daily_return(ongoing, ticker)     # 추적 줄 정렬·표기용 24h 수익률
+    _fill_turnover(events, ticker)          # 파동 줄의 거래대금 — 캔들엔 없다
+    _fill_turnover(ongoing, ticker)
     if intrabar:
         # 진행 중인 봉에서 잡힌 이벤트는 '미확정' 표시 — 마감 때 되돌릴 수 있음.
         # 봉 주기가 시그널마다 다르므로(파동의 일봉 변형) 각자 주기로 자른다.

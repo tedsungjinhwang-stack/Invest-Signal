@@ -374,6 +374,10 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         if d.get("stage") in PULLBACK_STAGES:
             # 눌림목 — 타점(밴드 터치)과 대기(밴드 위)를 한눈에 구분
             tags.append("🎯타점" if d["stage"] == "타점" else "대기")
+        if e.signal == "wave_setup":
+            tv = _turnover_tag(d)
+            if tv:
+                tags.append(tv)     # ⚡와 같은 값·같은 표기 — 들어갈 수 있는 자리인지
         if e.signal == "wave_setup" and wm is None:
             # 마크가 붙은 줄은 선·방식을 이미 다 말했다 — 두 번 안 적는다.
             # 마크 없는 변형(ⓒ 되돌림 등)만 여기서 이름을 붙인다.
@@ -604,6 +608,9 @@ def format_events(events_crypto: list, events_etf: list,
             rt = _returns_compact(d)
             if rt:
                 tags.append(rt)
+            tv = _turnover_tag(d)
+            if tv:
+                tags.append(tv)
             if wm is not None:
                 pass                # 앞의 마크가 이미 말한다 — 두 번 안 적는다
             elif d.get("touched"):

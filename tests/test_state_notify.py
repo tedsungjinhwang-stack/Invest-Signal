@@ -1071,3 +1071,19 @@ def test_turnover_sort_leaves_other_sections_alone():
                           "turnover_24h": 1e6})
     out = format_events([], [], {}, ongoing_crypto=[lo, hi])
     assert out.index("↳ B") < out.index("↳ A")
+
+
+def test_wave_lines_show_turnover_too():
+    """🌊도 ⚡와 같은 값·같은 표기 — 들어갈 수 있는 자리인지는 같은 질문이다.
+
+    다만 파동은 **표시만** 한다. 정렬은 ⓐ 자리별 묶음 그대로다.
+    """
+    small = _wave("SMALLUSDT", "ABC", 0.40)
+    small.detail.update({"touched": "장기선", "kind": "터치", "turnover_24h": 2.4e6})
+    big = _wave("BIGUSDT", "ABC", 0.10)
+    big.detail.update({"touched": "장기선", "kind": "터치", "turnover_24h": 8.4e8})
+    out = format_events([small, big], [], {})
+    assert "$2.4M" in out and "$840M" in out
+    order = [ln.split(">")[1].split("<")[0] for ln in out.splitlines()
+             if ln.startswith("• ")]
+    assert order == ["SMALL", "BIG"]        # 24h 수익률 순 그대로 — 거래대금은 표시만
