@@ -37,9 +37,11 @@ def chart_url(symbol: str, kind: str, market: str = "US") -> str:
     return f"https://www.tradingview.com/symbols/{symbol}/"
 
 
-SIGNAL_EMOJI = {"상승초입": "🟢", "눌림목": "🔵", "펌핑초기": "🌱", "파동": "🌊",
-                "크립토 모멘텀 눌림목/이탈": "⚡", "하락전환": "🔻"}
-SIGNAL_ORDER = ["상승초입", "눌림목", "펌핑초기", "파동",
+SIGNAL_EMOJI = {"급등봉": "🚀", "상승초입": "🟢", "눌림목": "🔵", "펌핑초기": "🌱",
+                "파동": "🌊", "크립토 모멘텀 눌림목/이탈": "⚡", "하락전환": "🔻"}
+# 🚀급등봉이 맨 위다 — 방금 터진 봉이라 시의성이 제일 짧다. 나머지는
+# 자리(셋업)라 한두 시간 늦게 읽어도 뜻이 안 변하지만 이건 변한다.
+SIGNAL_ORDER = ["급등봉", "상승초입", "눌림목", "펌핑초기", "파동",
                 "크립토 모멘텀 눌림목/이탈", "하락전환"]
 PULLBACK_STAGES = ("타점", "대기")   # 그 외 stage는 시그널별로 따로 표기한다
 DISPLAY_GROUP = {"MSS": "눌림목", "풀백": "눌림목"}   # MSS는 눌림목 칸에 태그로 표시
@@ -240,6 +242,18 @@ def _turnover_desc(e):
     return (1, 0.0) if v is None else (0, -float(v))
 
 
+def _spike_desc(e):
+    """🚀 줄을 거래량 배수 내림차순으로. 급등봉 밖은 전부 같은 값.
+
+    몸통 크기가 아니라 **거래량 배수**로 세운다 — 몸통은 잡코인일수록 쉽게
+    커지지만, 평소의 몇 배가 들어왔는지는 그 종목 자신과의 비교라 공평하다.
+    """
+    if e.signal != "spike_bar":
+        return (0, 0.0)
+    v = e.detail.get("vol_mult")
+    return (1, 0.0) if v is None else (0, -float(v))
+
+
 def _quiet_first(e):
     """🍃조용을 칸 맨 위로 올리는 정렬 조각.
 
@@ -257,13 +271,13 @@ def _quiet_first(e):
 
 def _new_order(e):
     """신규 줄 — 변형·🍃로 묶고, ⚡는 거래대금 순·나머지는 24h 수익률 순."""
-    return (_variant(e), *_abc_first(e), *_turnover_desc(e),
+    return (_variant(e), *_abc_first(e), *_spike_desc(e), *_turnover_desc(e),
             _quiet_first(e), *_by_gain_desc(e), e.symbol)
 
 
 def _hold_order(e):
     """추적 줄 — 신규 줄과 같은 축(⚡는 거래대금 순), 동률이면 최신 발생 순."""
-    return (_variant(e), *_abc_first(e), *_turnover_desc(e),
+    return (_variant(e), *_abc_first(e), *_spike_desc(e), *_turnover_desc(e),
             _quiet_first(e), *_by_gain_desc(e), -e.bar_time.timestamp())
 
 
@@ -355,6 +369,13 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     ft = _fib_tag(d)
     if ft:
         tags.append(ft)
+    if e.signal == "spike_bar":
+        # **봉이 언제 터졌는지를 맨 앞에 적는다.** 스캔이 매시 한 번이라 이
+        # 줄은 최대 한 시간 묵은 소식이고, 15분봉이라 네 봉 중 어느 봉인지에
+        # 따라 지금 가격과의 거리가 완전히 다르다. 시각이 없으면 읽을 수 없다.
+        tags.append(f"🕒{_kst(e.bar_time)}")
+        tags.append(f"몸통 {_pct(d['body'])}")
+        tags.append(f"거래량 {d['vol_mult']:.0f}배")
     if e.signal == "leader_break":
         # **24h 상승률 몇 위로 뽑힌 종목인지.** ↳추적 줄에는 진작 있었는데
         # 정작 새로 알리는 줄에는 없어서, 목록만 보고는 1위가 깬 건지 10위가
@@ -374,6 +395,10 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         if d.get("stage") in PULLBACK_STAGES:
             # 눌림목 — 타점(밴드 터치)과 대기(밴드 위)를 한눈에 구분
             tags.append("🎯타점" if d["stage"] == "타점" else "대기")
+        if e.signal == "spike_bar":
+            tv = _turnover_tag(d)
+            if tv:
+                tags.append(tv)
         if e.signal == "wave_setup":
             tv = _turnover_tag(d)
             if tv:

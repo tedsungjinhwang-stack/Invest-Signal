@@ -7,17 +7,19 @@ GitHub Actions에서 런이 빨갛게 떠서 문제를 바로 알 수 있게 한
 """
 
 import collections
+import concurrent.futures
 import dataclasses
 import re
 import functools
 import os
+import threading
 
 import pandas as pd
 import requests
 
 from . import config as cfg_mod
 from . import data_binance, data_community, data_etf, data_qp, indicators, notify
-from .signals import SignalEvent, leader_break
+from .signals import SignalEvent, leader_break, spike_bar
 from . import sent_log
 from .state import AlertState
 
@@ -162,7 +164,8 @@ def _crypto_rank_eligible(frames: dict, rcfg: dict) -> set:
 def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                        state=None, log=print, frames: dict | None = None,
                        ticker: dict | None = None,
-                       intrabar: bool = False) -> tuple[list, list]:
+                       intrabar: bool = False,
+                       frames15: dict | None = None) -> tuple[list, list]:
     """크립토 모멘텀 눌림목/이탈 — 24h 상승률 상위 N종을 15m봉으로 따로 판정한다.
 
     나머지 시그널과 달리 4h 프레임을 쓰지 않는다: 대상 선정은 24hr 티커
@@ -316,12 +319,15 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         if is_blocked(sym):
             spent.append(sym)
             continue
-        try:
-            df = data_binance.klines(session, sym, source, leader_break.INTERVAL,
-                                     limit=leader_break.KLINE_LIMIT)
-        except Exception as e:                  # noqa: BLE001 — 종목별 실패는 건너뛴다
-            log(f"[binance] {sym} 15m 수집 실패: {data_binance._safe(e)}")
-            continue
+        # 급등봉이 전 종목 15m을 이미 받아 뒀으면 그대로 쓴다(같은 프레임이다).
+        df = (frames15 or {}).get(sym)
+        if df is None:
+            try:
+                df = data_binance.klines(session, sym, source, leader_break.INTERVAL,
+                                         limit=leader_break.KLINE_LIMIT)
+            except Exception as e:              # noqa: BLE001 — 종목별 실패는 건너뛴다
+                log(f"[binance] {sym} 15m 수집 실패: {data_binance._safe(e)}")
+                continue
         stat = ticker.get(sym) or {}
         # 📐 되돌림과 ↗️ 저항 테스트 — 구조 판정에서 이미 받아둔 1h 프레임을
         # 그대로 쓴다. 셋이 같은 프레임이라 종목당 1h 요청은 한 번뿐이다.
@@ -412,6 +418,77 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
               "price": t.get("last"), "turnover_24h": t.get("quote_volume")}
              for i, (sym, t) in enumerate(top[:max(0, params.board_top)])]
     return events, ongoing, board
+
+
+def _fetch_15m(session, source: str, symbols: list, limit: int,
+               workers: int, log=print) -> dict:
+    """전 종목 15m 캔들 병렬 수집 — 급등봉이 유니버스 전체를 봐야 해서 필요하다.
+
+    ⚡는 감시 대상(상위 N + 이월분)만 보므로 종목마다 하나씩 받아도 됐지만,
+    급등봉은 **아무 종목에서나 터진다.** 대신 받아 둔 프레임을 ⚡에 넘겨
+    겹치는 종목은 다시 받지 않는다.
+
+    개별 실패는 건너뛴다 — 한 종목 때문에 칸 전체를 비울 이유가 없다.
+    """
+    out, tls = {}, threading.local()
+
+    def grab(sym):
+        if getattr(tls, "s", None) is None:
+            tls.s = requests.Session()
+        try:
+            return sym, data_binance.klines(tls.s, sym, source,
+                                            spike_bar.INTERVAL, limit=limit)
+        except Exception:                       # noqa: BLE001
+            return sym, None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+        for sym, df in ex.map(grab, symbols):
+            if df is not None and len(df):
+                out[sym] = df
+    if len(out) < len(symbols):
+        log(f"[binance] 15m 수집 {len(out)}/{len(symbols)}종 "
+            f"({len(symbols) - len(out)}종 실패 — 건너뜀)")
+    return out
+
+
+def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None, log=print) -> list:
+    """🚀급등봉 — 15m 장대양봉 하나를 잡는다. 추적 없이 그 봉만 알린다.
+
+    거래대금 하한은 여기서 건다(캔들엔 그 값이 없다). 티커를 못 받았으면
+    하한을 못 걸지만 **그렇다고 칸을 비우지는 않는다** — 조건 ①②③이 이미
+    까다로워서, 유동성 필터가 빠져도 잡음이 쏟아지지는 않는다.
+    """
+    s = (cfg.get("signal") or {}).get("spike_bar") or {}
+    if not s.get("enabled", False):
+        return []
+    params = spike_bar.Params(
+        body=float(s.get("body", 0.08)),
+        vol_mult=float(s.get("vol_mult", 10.0)),
+        vol_ma=int(s.get("vol_ma", 96)),
+        close_pos=float(s.get("close_pos", 0.7)),
+        min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
+        grace_bars=int(s.get("grace_bars", 4)),
+    )
+    events, thin = [], 0
+    for sym, df in frames15.items():
+        for ev in spike_bar.detect(df, sym, params):
+            stat = (ticker or {}).get(sym) or {}
+            turn = stat.get("quote_volume")
+            if turn is not None and turn < params.min_turnover_usd:
+                thin += 1
+                continue
+            if turn is not None:
+                ev.detail["turnover_24h"] = turn
+            g = stat.get("change_pct")
+            if g is not None:
+                ev.detail["gain_24h"] = g
+            events.append(ev)
+    if events or thin:
+        log(f"[binance] 급등봉 {len(events)}건"
+            + (f" · 거래대금 하한 미달 {thin}건 제외" if thin else "")
+            + f" (몸통 {params.body:.0%} · 거래량 {params.vol_mult:.0f}배 · "
+              f"종가위치 {params.close_pos})")
+    return events
 
 
 def _crypto_ticker(session, source: str, log=print) -> dict | None:
@@ -523,10 +600,19 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         # 24hr 티커는 두 군데서 쓴다 — 크립토 모멘텀의 상위권 선정과, 모든
         # 추적 줄의 24h 수익률. 한 번만 받아 양쪽에 넘긴다.
         ticker = _crypto_ticker(s, source, log)
+        # 🚀급등봉 — 유니버스 전체의 15m이 필요하다. 받아 둔 프레임은 ⚡에도
+        # 넘겨 겹치는 종목을 다시 받지 않게 한다.
+        frames15 = {}
+        if ((scfg.get("spike_bar") or {}).get("enabled", False)):
+            frames15 = _fetch_15m(s, source, symbols, spike_bar.KLINE_LIMIT,
+                                  workers, log)
+        spike_events = _scan_spike(cfg, frames15, ticker, log)
         # 15m 판정이라 마감·인트라바 양쪽에서 매번 돈다. 4h 프레임은 제외 조건
         # (정배열 + 480선 아래) 판정에만 쓰고, 없으면 대상 종목만 따로 받는다.
         leader_events, leader_ongoing, board = _scan_leader_break(
-            s, source, symbols, cfg, state, log, frames, ticker, intrabar=intrabar)
+            s, source, symbols, cfg, state, log, frames, ticker,
+            intrabar=intrabar, frames15=frames15)
+        leader_events = spike_events + leader_events
         if not detectors:           # 인트라바인데 4h 대상 시그널이 없을 때
             return leader_events, leader_ongoing, board
     events, ongoing = _detect_all(frames, detectors, log)
