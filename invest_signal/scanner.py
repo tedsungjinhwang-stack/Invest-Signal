@@ -451,7 +451,8 @@ def _fetch_15m(session, source: str, symbols: list, limit: int,
     return out
 
 
-def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None, log=print) -> list:
+def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
+                log=print) -> tuple[list, list]:
     """🚀급등봉 — 15m 장대양봉 하나를 잡는다. 추적 없이 그 봉만 알린다.
 
     거래대금 하한은 여기서 건다(캔들엔 그 값이 없다). 티커를 못 받았으면
@@ -460,7 +461,7 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None, log=print) -> li
     """
     s = (cfg.get("signal") or {}).get("spike_bar") or {}
     if not s.get("enabled", False):
-        return []
+        return [], []
     params = spike_bar.Params(
         body=float(s.get("body", 0.08)),
         vol_mult=float(s.get("vol_mult", 10.0)),
@@ -468,27 +469,40 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None, log=print) -> li
         close_pos=float(s.get("close_pos", 0.7)),
         min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
         grace_bars=int(s.get("grace_bars", 4)),
+        track_bars=int(s.get("track_bars", 96)),
     )
-    events, thin = [], 0
+    events, ongoing, thin = [], [], 0
+
+    def stamp(ev) -> bool:
+        """티커 값을 붙이고 거래대금 하한을 건다. 통과하면 True."""
+        stat = (ticker or {}).get(ev.symbol) or {}
+        turn = stat.get("quote_volume")
+        if turn is not None and turn < params.min_turnover_usd:
+            return False
+        if turn is not None:
+            ev.detail["turnover_24h"] = turn
+        g = stat.get("change_pct")
+        if g is not None:
+            ev.detail["gain_24h"] = g
+        return True
+
     for sym, df in frames15.items():
         for ev in spike_bar.detect(df, sym, params):
-            stat = (ticker or {}).get(sym) or {}
-            turn = stat.get("quote_volume")
-            if turn is not None and turn < params.min_turnover_usd:
+            if stamp(ev):
+                events.append(ev)
+            else:
                 thin += 1
-                continue
-            if turn is not None:
-                ev.detail["turnover_24h"] = turn
-            g = stat.get("change_pct")
-            if g is not None:
-                ev.detail["gain_24h"] = g
-            events.append(ev)
-    if events or thin:
-        log(f"[binance] 급등봉 {len(events)}건"
+        # 발화 뒤 하루는 추적 줄로 남긴다 — 터진 종목이 값을 지키는지가
+        # 급등봉 자체만큼 중요하다.
+        old_ev = spike_bar.recent(df, sym, params)
+        if old_ev is not None and stamp(old_ev):
+            ongoing.append(old_ev)
+    if events or ongoing or thin:
+        log(f"[binance] 급등봉 {len(events)}건 · 추적 {len(ongoing)}건"
             + (f" · 거래대금 하한 미달 {thin}건 제외" if thin else "")
             + f" (몸통 {params.body:.0%} · 거래량 {params.vol_mult:.0f}배 · "
-              f"종가위치 {params.close_pos})")
-    return events
+              f"종가위치 {params.close_pos} · 추적 {params.track_bars}봉)")
+    return events, ongoing
 
 
 def _crypto_ticker(session, source: str, log=print) -> dict | None:
@@ -606,13 +620,14 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         if ((scfg.get("spike_bar") or {}).get("enabled", False)):
             frames15 = _fetch_15m(s, source, symbols, spike_bar.KLINE_LIMIT,
                                   workers, log)
-        spike_events = _scan_spike(cfg, frames15, ticker, log)
+        spike_events, spike_ongoing = _scan_spike(cfg, frames15, ticker, log)
         # 15m 판정이라 마감·인트라바 양쪽에서 매번 돈다. 4h 프레임은 제외 조건
         # (정배열 + 480선 아래) 판정에만 쓰고, 없으면 대상 종목만 따로 받는다.
         leader_events, leader_ongoing, board = _scan_leader_break(
             s, source, symbols, cfg, state, log, frames, ticker,
             intrabar=intrabar, frames15=frames15)
         leader_events = spike_events + leader_events
+        leader_ongoing = spike_ongoing + leader_ongoing
         if not detectors:           # 인트라바인데 4h 대상 시그널이 없을 때
             return leader_events, leader_ongoing, board
     events, ongoing = _detect_all(frames, detectors, log)

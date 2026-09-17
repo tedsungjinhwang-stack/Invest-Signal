@@ -85,3 +85,36 @@ def test_never_tracked():
 def test_zero_volume_history_does_not_divide_by_zero():
     df = _spike(_frame(vol=0.0), -1, base_vol=0.0)
     assert detect(df, "XUSDT") == []
+
+
+def test_tracked_for_a_day_after_firing():
+    """발화 뒤 하루는 추적 줄로 남는다 — 터진 종목이 값을 지키는지가 궁금하다."""
+    df = _spike(_frame(), -50)                  # 12시간 전 봉
+    ev = spike_bar.recent(df, "XUSDT")
+    assert ev is not None and ev.detail["label"] == "급등봉"
+    # 급등봉 종가 대비 지금 — 이게 추적 줄의 존재 이유다
+    assert ev.detail["last_price"] == 1.0
+    assert round(ev.detail["since"], 3) == round(1.0 / 1.10 - 1, 3)
+
+
+def test_fresh_bar_is_not_also_tracked():
+    """같은 봉이 신규(•)와 추적(↳) 두 칸에 동시에 실리면 같은 말을 두 번 한다."""
+    df = _spike(_frame(), -1)
+    assert len(detect(df, "XUSDT")) == 1
+    assert spike_bar.recent(df, "XUSDT") is None
+
+
+def test_older_than_a_day_drops_out():
+    df = _spike(_frame(), -120)                 # 30시간 전 — 창 밖
+    assert spike_bar.recent(df, "XUSDT") is None
+
+
+def test_latest_spike_wins_when_there_are_several():
+    df = _spike(_spike(_frame(), -80), -30)
+    ev = spike_bar.recent(df, "XUSDT")
+    assert ev is not None and ev.bar_time == df.index[-30]
+
+
+def test_tracking_can_be_turned_off():
+    df = _spike(_frame(), -50)
+    assert spike_bar.recent(df, "XUSDT", Params(track_bars=0)) is None

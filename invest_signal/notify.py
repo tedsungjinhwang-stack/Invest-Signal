@@ -617,6 +617,20 @@ def format_events(events_crypto: list, events_etf: list,
             return (f"↳ {_short_symbol(e.symbol, kind, name)}"
                     + (f"  {_fmt_price(d['last_price'])}" if d.get("last_price") else "")
                     + " · " + " · ".join(tags))
+        if e.signal == "spike_bar":
+            # 추적 줄의 존재 이유는 '터진 뒤에 값을 지키는가'다 — 급등봉
+            # 종가 대비 지금이 어디인지가 없으면 신규 줄을 하루 더 반복하는
+            # 것에 지나지 않는다.
+            tags = [f"🕒{_kst(e.bar_time)}", f"몸통 {_pct(d['body'])}",
+                    f"거래량 {d['vol_mult']:.0f}배"]
+            if d.get("since") is not None:
+                tags.append(f"이후 {_pct(d['since'])}")
+            tv = _turnover_tag(d)
+            if tv:
+                tags.append(tv)
+            return (f"↳ {_short_symbol(e.symbol, kind, name)}"
+                    + (f"  {_fmt_price(d['last_price'])}" if d.get("last_price") else "")
+                    + " · " + " · ".join(tags))
         tags = [f"{_age_days(e.bar_time)}d"]
         wm = _wave_mark(e)
         if wm:

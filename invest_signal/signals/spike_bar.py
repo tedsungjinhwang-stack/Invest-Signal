@@ -17,11 +17,13 @@ $1M 이상): 몸통 8%만 보면 하루 27건인데 ②·③을 얹으면 하루
 그 시점에 이미 끝난 사건이다. 2026-09-17 AVA(몸통 24.3% · 거래량 54배)는
 종가위치 0.88이었다.
 
-**추적하지 않는다.** 급등봉은 상태가 아니라 순간이라, 그 봉에서 한 번
-알리고 끝낸다. 같은 종목이 다시 터지면 새 봉이니 다시 알린다.
+급등봉 자체는 순간이지만 **그 뒤가 궁금하다** — 터진 종목이 값을 지키는지
+도로 뱉는지. 그래서 발화 봉에서 한 번 알리고(`•`), 그 뒤 track_bars(기본
+96봉 = 하루) 동안은 추적 줄(`↳`)로 남겨 **급등봉 종가 대비 지금 얼마인지**를
+같이 보여준다. 같은 종목이 다시 터지면 새 봉이니 다시 알린다.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclasses_replace
 
 import pandas as pd
 
@@ -45,6 +47,8 @@ class Params:
     # **이 시그널은 소급이 특히 중요하다** — 봉이 15분짜리라 소급이 없으면
     # 스캔 직전 봉 하나만 보게 되어 네 봉 중 셋을 놓친다.
     grace_bars: int = 4
+    # 발화 뒤 추적 줄로 남길 기간. 96봉 = 하루. 0이면 추적하지 않는다.
+    track_bars: int = 96
 
 
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
@@ -82,6 +86,31 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     return out
 
 
+def recent(df: pd.DataFrame, symbol: str, params: Params = Params()):
+    """추적 줄용 — track_bars 안의 **가장 최근** 급등봉 하나. 없으면 None.
+
+    신규(`•`)로 나가는 창(grace_bars)보다 **더 뒤**의 봉만 돌려준다. 같은 봉이
+    두 칸에 동시에 실리면 같은 말을 두 번 하게 된다.
+
+    급등봉 종가 대비 지금 가격(`since`)을 같이 채운다 — 추적 줄의 존재
+    이유가 '터진 뒤에 값을 지키는가'라서, 그게 없으면 신규 줄을 하루 더
+    반복하는 것에 지나지 않는다.
+    """
+    if params.track_bars <= 0:
+        return None
+    n = len(df)
+    wide = dataclasses_replace(params, grace_bars=params.track_bars)
+    past = [e for e in detect(df, symbol, wide)
+            if e.bar_time < df.index[max(0, n - 1 - params.grace_bars)]]
+    if not past:
+        return None
+    ev = max(past, key=lambda e: e.bar_time)
+    last = float(df["Close"].iloc[-1])
+    ev.detail["last_price"] = last
+    ev.detail["since"] = last / ev.price - 1 if ev.price else None
+    return ev
+
+
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:
-    """추적하지 않는다 — 급등봉은 상태가 아니라 순간이다."""
+    """_detect_all 경로를 타지 않는다 — 추적은 recent()가 따로 만든다."""
     return False
