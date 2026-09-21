@@ -30,7 +30,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from ..indicators import alignment, anchored_vwap_bands
+from ..indicators import alignment, anchored_vwap_bands, pct_over
 from . import SignalEvent
 
 NAME = "vwap_onset"
@@ -85,21 +85,30 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
     for a, b in zip(mas, mas[1:]):
         bear &= a < b
     bear &= ~mas[-1].isna()
+    # 7d = 15m 672봉. 1,000봉을 받으므로 마지막 구간에서는 늘 구할 수 있다.
+    d7 = c / c.shift(7 * 96) - 1
     return pd.DataFrame({"close": c, "bear": bear, "up_q": up_q, "up_m": up_m,
+                         "ret_7d": d7,
                          "ok": bear & (c > up_q) & (c < up_m)})
 
 
 def _detail(row, params: Params) -> dict:
-    """줄에 실을 값 — 구간 안 어디쯤인지까지 같이 낸다."""
+    """줄에 실을 값 — 구간 안 어디쯤인지와 종목 수익률.
+
+    **'월상단까지 몇 %'는 안 싣는다.** 밴드까지의 거리는 구간 위치(`band_pos`)가
+    이미 말하고, 그 자리에는 종목이 실제로 어떻게 움직였는지(24h·7d)를 두는
+    편이 읽을 값이 된다.
+    """
     span = row.up_m - row.up_q
     pos = (row.close - row.up_q) / span if span > 0 else None
-    return {"label": LABEL, "interval": INTERVAL,
-            "band_above": float(row.up_q), "band_below": float(row.up_m),
-            # 0이면 분기 상단에 붙어 있고 1이면 월 상단에 닿았다는 뜻 —
-            # 구간의 어디쯤인지가 '얼마나 남았나'를 바로 말해 준다.
-            "band_pos": None if pos is None else float(pos),
-            "to_upper": float(row.up_m / row.close - 1),
-            "align_mas": params.ma_align}
+    d = {"label": LABEL, "interval": INTERVAL,
+         "band_above": float(row.up_q), "band_below": float(row.up_m),
+         # 0이면 분기 상단에 붙어 있고 1이면 월 상단에 닿았다는 뜻.
+         "band_pos": None if pos is None else float(pos),
+         "align_mas": params.ma_align}
+    if pd.notna(row.ret_7d):
+        d["ret_7d"] = float(row.ret_7d)
+    return d
 
 
 def detect(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,

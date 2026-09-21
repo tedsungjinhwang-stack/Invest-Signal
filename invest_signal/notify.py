@@ -202,19 +202,16 @@ def _by_gain_desc(e):
 
 
 def _band_tags(d: dict) -> list[str]:
-    """🟢상승초입 줄 — 분기 상단과 월 상단 **사이 어디쯤인지**.
+    """🟢상승초입 줄 — 분기 상단과 월 상단 **사이 어디쯤인지** 하나만.
 
     `구간 0.19`는 0이면 분기 상단에 붙어 있고 1이면 월 상단에 닿았다는 뜻이다.
-    `월상단 +17%`는 위가 얼마나 남았는지 — 값 자체(밴드 가격)는 안 적는다.
-    줄마다 다른 숫자가 둘씩 더 붙을 뿐 '지금 어디고 얼마 남았나'에 답하지
-    않는다(⚡의 수퍼트렌드선 값을 안 싣는 것과 같은 이유).
+    밴드 가격도, 월 상단까지 몇 %인지도 안 적는다 — 거리는 이 값이 이미
+    말하고, 그 자리에는 종목이 실제로 어떻게 움직였는지(24h·7d)를 두는 편이
+    읽을 값이 된다(⚡의 수퍼트렌드선 값을 안 싣는 것과 같은 이유).
     """
-    out = []
-    if d.get("band_pos") is not None:
-        out.append(f"구간 {d['band_pos']:.2f}")
-    if d.get("to_upper") is not None:
-        out.append(f"월상단 {_pct(d['to_upper'])}")
-    return out
+    if d.get("band_pos") is None:
+        return []
+    return [f"구간 {d['band_pos']:.2f}"]
 
 
 def _turnover_tag(d: dict) -> str:
@@ -644,6 +641,8 @@ def format_events(events_crypto: list, events_etf: list,
             day = _daily_gain(d)
             if day is not None:
                 tags.append(f"24h {_pct(day)}")
+            if d.get("ret_7d") is not None:
+                tags.append(f"7d {_pct(d['ret_7d'])}")
             tv = _turnover_tag(d)
             if tv:
                 tags.append(tv)

@@ -63,7 +63,8 @@ def test_fires_between_the_two_upper_bands():
     # 정확히 0.5가 아닌 건 밴드가 4h봉마다 갱신되어 15m 마지막 봉이 보는
     # 값과 4h 마지막 봉의 값이 조금 다르기 때문이다 — 계단식 전방 채움.
     assert 0 < d["band_pos"] < 1
-    assert round(d["to_upper"], 4) == round(d["band_below"] / got[0].price - 1, 4)
+    assert "to_upper" not in d          # 월상단까지 몇 %는 안 싣는다
+    assert d["ret_7d"] is not None      # 대신 종목 수익률을 싣는다
 
 
 def test_below_the_quarter_band_does_not_fire():
