@@ -74,7 +74,7 @@ def _pct(x: float) -> str:
 
 # 신규 줄에 구간별 수익률을 붙일 시그널. 어떤 구간이 나오는지는 시그널이
 # 채워 준 키에 달렸다 — 파동만 4h·24h·7d 셋을 다 준다.
-RETURN_SIGNALS = {"uptrend_onset", "leader_break", "wave_setup"}
+RETURN_SIGNALS = {"uptrend_onset", "leader_break", "wave_setup", "vwap_onset"}
 
 
 def _daily_gain(d: dict) -> float | None:
@@ -199,6 +199,22 @@ def _by_gain_desc(e):
     """
     g = _daily_gain(e.detail)
     return (1, 0.0) if g is None else (0, -g)
+
+
+def _band_tags(d: dict) -> list[str]:
+    """🟢상승초입 줄 — 분기 상단과 월 상단 **사이 어디쯤인지**.
+
+    `구간 0.19`는 0이면 분기 상단에 붙어 있고 1이면 월 상단에 닿았다는 뜻이다.
+    `월상단 +17%`는 위가 얼마나 남았는지 — 값 자체(밴드 가격)는 안 적는다.
+    줄마다 다른 숫자가 둘씩 더 붙을 뿐 '지금 어디고 얼마 남았나'에 답하지
+    않는다(⚡의 수퍼트렌드선 값을 안 싣는 것과 같은 이유).
+    """
+    out = []
+    if d.get("band_pos") is not None:
+        out.append(f"구간 {d['band_pos']:.2f}")
+    if d.get("to_upper") is not None:
+        out.append(f"월상단 {_pct(d['to_upper'])}")
+    return out
 
 
 def _turnover_tag(d: dict) -> str:
@@ -369,6 +385,8 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     ft = _fib_tag(d)
     if ft:
         tags.append(ft)
+    if e.signal == "vwap_onset":
+        tags += _band_tags(d)
     if e.signal == "spike_bar":
         # **봉이 언제 터졌는지를 맨 앞에 적는다.** 스캔이 매시 한 번이라 이
         # 줄은 최대 한 시간 묵은 소식이고, 15분봉이라 네 봉 중 어느 봉인지에
@@ -395,7 +413,7 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         if d.get("stage") in PULLBACK_STAGES:
             # 눌림목 — 타점(밴드 터치)과 대기(밴드 위)를 한눈에 구분
             tags.append("🎯타점" if d["stage"] == "타점" else "대기")
-        if e.signal == "spike_bar":
+        if e.signal in ("spike_bar", "vwap_onset"):
             tv = _turnover_tag(d)
             if tv:
                 tags.append(tv)
@@ -614,6 +632,21 @@ def format_events(events_crypto: list, events_etf: list,
             # 🌱상승초기가 붙은 줄은 그 마크가 이미 역배열을 말한다.
             if d.get("align") and not _early(e):
                 tags.append(_align_tag(d))
+            return (f"↳ {_short_symbol(e.symbol, kind, name)}"
+                    + (f"  {_fmt_price(d['last_price'])}" if d.get("last_price") else "")
+                    + " · " + " · ".join(tags))
+        if e.signal == "vwap_onset":
+            # 구간에 얼마나 머물렀는지를 같이 적는다 — 방금 들어온 자리와
+            # 하루째 눌러앉은 자리는 같은 줄이라도 뜻이 다르다.
+            tags = list(_band_tags(d))
+            if d.get("in_bars"):
+                tags.append(f"{d['in_bars'] * 15 / 60:.0f}h째")
+            day = _daily_gain(d)
+            if day is not None:
+                tags.append(f"24h {_pct(day)}")
+            tv = _turnover_tag(d)
+            if tv:
+                tags.append(tv)
             return (f"↳ {_short_symbol(e.symbol, kind, name)}"
                     + (f"  {_fmt_price(d['last_price'])}" if d.get("last_price") else "")
                     + " · " + " · ".join(tags))

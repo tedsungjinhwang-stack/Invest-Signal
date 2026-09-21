@@ -19,7 +19,7 @@ import requests
 
 from . import config as cfg_mod
 from . import data_binance, data_community, data_etf, data_qp, indicators, notify
-from .signals import SignalEvent, leader_break, spike_bar
+from .signals import SignalEvent, leader_break, spike_bar, vwap_onset
 from . import sent_log
 from .state import AlertState
 
@@ -505,6 +505,65 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
     return events, ongoing
 
 
+def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
+                     ticker: dict | None, log=print) -> tuple[list, list]:
+    """🟢상승초입 — 분기 상단밴드 위 · 월 상단밴드 아래 · 15m 역배열.
+
+    프레임이 둘이다: ①역배열은 15m, ②③밴드는 4h. 둘 다 스캔이 이미 받아 둔
+    것이라 추가 요청이 없다(모듈 설명 참고). 4h 프레임이 없으면(인트라바인데
+    4h 시그널이 하나도 안 도는 경우) 그냥 건너뛴다 — 이 칸만 비면 된다.
+    """
+    s = (cfg.get("signal") or {}).get("vwap_onset") or {}
+    if not s.get("enabled", False):
+        return [], []
+    if not frames4h:
+        log("[binance] 상승초입 건너뜀 — 4h 프레임이 없다(밴드를 못 낸다)")
+        return [], []
+    params = vwap_onset.Params(
+        ma_align=tuple(s.get("ma_align", (240, 480, 960))),
+        band_mult=float(s.get("band_mult", 1.0)),
+        above_anchor=str(s.get("above_anchor", "Q")),
+        below_anchor=str(s.get("below_anchor", "M")),
+        grace_bars=int(s.get("grace_bars", 4)),
+        min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
+        track_bars=int(s.get("track_bars", 96)),
+    )
+    events, ongoing, thin = [], [], 0
+
+    def stamp(ev) -> bool:
+        stat = (ticker or {}).get(ev.symbol) or {}
+        turn = stat.get("quote_volume")
+        if turn is not None and turn < params.min_turnover_usd:
+            return False
+        if turn is not None:
+            ev.detail["turnover_24h"] = turn
+        g = stat.get("change_pct")
+        if g is not None:
+            ev.detail["gain_24h"] = g
+        return True
+
+    for sym, df15 in frames15.items():
+        df4 = frames4h.get(sym)
+        if df4 is None:
+            continue
+        got = vwap_onset.detect(df15, df4, sym, params)
+        for ev in got:
+            if stamp(ev):
+                events.append(ev)
+            else:
+                thin += 1
+        if not got:
+            held = vwap_onset.tracking(df15, df4, sym, params)
+            if held is not None and stamp(held):
+                ongoing.append(held)
+    if events or ongoing or thin:
+        log(f"[binance] 상승초입 {len(events)}건 · 추적 {len(ongoing)}건"
+            + (f" · 거래대금 하한 미달 {thin}건 제외" if thin else "")
+            + f" ({params.above_anchor} 상단 위 · {params.below_anchor} 상단 아래 · "
+              f"15m {'<'.join(str(x) for x in params.ma_align)} 역배열)")
+    return events, ongoing
+
+
 def _crypto_ticker(session, source: str, log=print) -> dict | None:
     """24hr 티커 — 실패하면 None. 호출 측이 그 시그널만 비우거나 캔들로 대체한다."""
     try:
@@ -616,18 +675,24 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         ticker = _crypto_ticker(s, source, log)
         # 🚀급등봉 — 유니버스 전체의 15m이 필요하다. 받아 둔 프레임은 ⚡에도
         # 넘겨 겹치는 종목을 다시 받지 않게 한다.
-        frames15 = {}
-        if ((scfg.get("spike_bar") or {}).get("enabled", False)):
-            frames15 = _fetch_15m(s, source, symbols, spike_bar.KLINE_LIMIT,
-                                  workers, log)
+        frames15, need15 = {}, 0
+        if (scfg.get("spike_bar") or {}).get("enabled", False):
+            need15 = max(need15, spike_bar.KLINE_LIMIT)
+        if (scfg.get("vwap_onset") or {}).get("enabled", False):
+            # 상승초입은 MA960을 봐야 해서 훨씬 길다 — 둘 중 긴 쪽에 맞춰
+            # 한 번만 받는다(요청 수는 그대로, 페이로드만 커진다).
+            need15 = max(need15, vwap_onset.KLINE_LIMIT)
+        if need15:
+            frames15 = _fetch_15m(s, source, symbols, need15, workers, log)
         spike_events, spike_ongoing = _scan_spike(cfg, frames15, ticker, log)
+        vo_events, vo_ongoing = _scan_vwap_onset(cfg, frames15, frames, ticker, log)
         # 15m 판정이라 마감·인트라바 양쪽에서 매번 돈다. 4h 프레임은 제외 조건
         # (정배열 + 480선 아래) 판정에만 쓰고, 없으면 대상 종목만 따로 받는다.
         leader_events, leader_ongoing, board = _scan_leader_break(
             s, source, symbols, cfg, state, log, frames, ticker,
             intrabar=intrabar, frames15=frames15)
-        leader_events = spike_events + leader_events
-        leader_ongoing = spike_ongoing + leader_ongoing
+        leader_events = spike_events + vo_events + leader_events
+        leader_ongoing = spike_ongoing + vo_ongoing + leader_ongoing
         if not detectors:           # 인트라바인데 4h 대상 시그널이 없을 때
             return leader_events, leader_ongoing, board
     events, ongoing = _detect_all(frames, detectors, log)
