@@ -142,11 +142,20 @@ def _slow_break(e) -> bool:
             and e.detail.get("stage") == WAVE_SLOW_BREAK)
 
 
-def _wave_mark(e) -> str | None:
-    """파동 줄 앞에 붙일 마크 — 네 자리 중 하나. 아니면 None.
+# ⚡ 줄의 4h 마크(leader_break.wave_mark_4h) → 파동과 같은 네 마크.
+LEADER_WAVE_TAGS = {"장기선 돌파": SLOW_BREAK_TAG, "장기선 터치": SLOW_TOUCH_TAG,
+                    "단기선 돌파": FAST_BREAK_TAG, "단기선 터치": FAST_TOUCH_TAG}
 
+
+def _wave_mark(e) -> str | None:
+    """🌊·⚡ 줄 앞에 붙일 마크 — 네 자리 중 하나. 아니면 None.
+
+    파동은 사건 자체가 이 네 자리 중 하나고, ⚡는 4h에서 최근 24시간 안에
+    단기·장기선을 뚫었거나 건드렸는지를 붙인다(같은 두 선이다).
     마크가 붙으면 줄 끝에 변형 이름을 다시 적지 않는다(두 번 말하게 된다).
     """
+    if e.signal == "leader_break":
+        return LEADER_WAVE_TAGS.get(e.detail.get("wave4h"))
     if _slow_touch(e):
         return SLOW_TOUCH_TAG
     if _fast_touch(e):
@@ -378,7 +387,9 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     tt = _turn_tag(d)
     if tt:
         tags.append(tt)
-    tags += _resist_tags(d)
+    if e.signal != "leader_break":
+        # ⚡는 ↗️1h 대신 4h 단기·장기선 마크(위 wm)를 쓴다. 파동은 둘 다 싣는다.
+        tags += _resist_tags(d)
     ft = _fib_tag(d)
     if ft:
         tags.append(ft)
@@ -606,8 +617,9 @@ def format_events(events_crypto: list, events_etf: list,
             ft = _fib_tag(d)
             if ft:
                 tags.insert(0, ft)
-            for t in reversed(_resist_tags(d)):
-                tags.insert(0, t)
+            wm = _wave_mark(e)          # ↗️1h 대신 4h 단기·장기선 마크
+            if wm:
+                tags.insert(0, wm)
             tt = _turn_tag(d)
             if tt:
                 tags.insert(0, tt)

@@ -16,6 +16,7 @@
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from ..indicators import alignment, atr, pct_over, sma, supertrend_full
@@ -91,6 +92,11 @@ class Params:
     turn15m_enabled: bool = True
     turn15m_bars: int = 8           # 터치·돌파 후 이 봉 수까지 표시 (2시간)
     turn15m_require_bearish: bool = False
+    # 🧱🔁🔓💥 4h 단기·장기선 터치·돌파 — ⚡ 줄에서 ↗️1h 표시를 대신한다.
+    # 선은 파동과 같은 두 수퍼트렌드(turn_fast_* 22×3 · turn_slow_* 30×6)라
+    # 같은 마크가 같은 선을 가리킨다(wave_mark_4h()).
+    wave4h_enabled: bool = True
+    wave4h_bars: int = 6            # 이 봉 수 안에 있었던 사건까지 표시 (6 × 4h = 24시간)
 
 
 def leaders(ticker: dict[str, dict], symbols: set[str],
@@ -359,6 +365,61 @@ def retrace(df: pd.DataFrame, params: Params = Params()) -> float | None:
 
 TURN_FLIP = "전환"
 TURN_TOUCH = "터치"
+
+
+WAVE_SLOW_BREAK = "장기선 돌파"
+WAVE_SLOW_TOUCH = "장기선 터치"
+WAVE_FAST_BREAK = "단기선 돌파"
+WAVE_FAST_TOUCH = "단기선 터치"
+
+
+def wave_mark_4h(df4h: pd.DataFrame | None, params: Params = Params()) -> str | None:
+    """⚡ 줄의 4h 마크 — 단기선·장기선을 **최근에** 뚫었거나 건드렸는지.
+
+    파동과 **같은 두 선**(단기 22×3 · 장기 30×6 수퍼트렌드)을 보고 같은 네
+    이름을 쓴다. 다른 점은 파동의 전제(장기는 아직 하락)를 걸지 않는다는 것 —
+    ⚡ 종목은 대부분 이미 오른 뒤라, 그 전제를 걸면 마크가 거의 안 붙는다.
+
+      장기선 돌파 — 장기 수퍼트렌드가 하락→상승으로 뒤집힌 봉
+      장기선 터치 — 봉의 고가~저가가 장기선을 걸쳤다
+      단기선 돌파 — 단기 수퍼트렌드가 하락→상승으로 뒤집힌 봉
+      단기선 터치 — 봉의 고가~저가가 단기선을 걸쳤다
+
+    터치는 파동과 같은 정의다(`저가 ≤ 선 ≤ 고가`). 선이 지지(아래)인지
+    저항(위)인지는 가르지 않는다 — '지금 그 선에 와 있다'가 이 마크의 뜻이다.
+
+    wave4h_bars(기본 6봉 = 24시간) 안에서 찾고, 여럿이면 **큰 사건 하나만**
+    돌려준다: 장기선 돌파 > 장기선 터치 > 단기선 돌파 > 단기선 터치(파동 칸의
+    읽는 순서와 같다). 돌파는 하락에서 뒤집힌 것만 센다 — ATR 워밍업 구간의
+    dir은 NaN이라 'not up'으로 세면 유령 돌파가 생긴다(파동 _break_index와 같다).
+
+    해당 없으면 None.
+    """
+    if not params.wave4h_enabled or df4h is None:
+        return None
+    need = max(params.turn_fast_period, params.turn_slow_period) + 2
+    if len(df4h) < need:
+        return None
+    fast = supertrend_full(df4h, params.turn_fast_period, params.turn_fast_mult)
+    slow = supertrend_full(df4h, params.turn_slow_period, params.turn_slow_mult)
+    hi = df4h["High"].to_numpy(float)
+    lo = df4h["Low"].to_numpy(float)
+    last = len(df4h) - 1
+    first = max(1, last - max(1, params.wave4h_bars) + 1)
+    found = set()
+    for st, brk, tch in ((slow, WAVE_SLOW_BREAK, WAVE_SLOW_TOUCH),
+                         (fast, WAVE_FAST_BREAK, WAVE_FAST_TOUCH)):
+        d = st["dir"].to_numpy(float)
+        line = st["line"].to_numpy(float)
+        for i in range(first, last + 1):
+            if d[i] > 0 and d[i - 1] < 0:
+                found.add(brk)
+            if not np.isnan(line[i]) and lo[i] <= line[i] <= hi[i]:
+                found.add(tch)
+    for name in (WAVE_SLOW_BREAK, WAVE_SLOW_TOUCH, WAVE_FAST_BREAK, WAVE_FAST_TOUCH):
+        if name in found:
+            return name
+    return None
 
 
 def turn_up(df4h: pd.DataFrame, params: Params = Params()) -> "str | bool | None":
