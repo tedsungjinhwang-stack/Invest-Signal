@@ -1,27 +1,29 @@
-"""상승초입 — 분기 상단밴드 위 · 월 상단밴드 아래 (15m 역배열).
-
-**두 시간 눈금이 엇갈리는 자리를 잡는다.**
+"""상승초입 — 15m 역배열에서 종가가 MA960 근처 · 월 상단밴드가 분기 상단밴드 위.
 
   ① 15m **역배열** — MA240 < MA480 < MA960 (2.5일 < 5일 < 10일).
-     짧은 눈금에서는 아직 하락 구조다.
-  ② 종가가 **분기 앵커드 VWAP 상단밴드(+1σ) 위**.
-     분기 기준으로는 이미 평균 위로 한참 올라왔다.
-  ③ 종가가 **월 앵커드 VWAP 상단밴드(+1σ) 아래**.
-     이달 기준으로는 아직 위가 남았다.
+     짧은 눈금에서는 아직 하락 구조다. 그래서 MA960이 **제일 위**에 있다.
+  ② **월 앵커드 VWAP 상단밴드(+1σ)가 분기 상단밴드보다 위** — 이번 달
+     가격대가 분기 평균보다 높다. 월 단위로는 이미 올라서고 있다는 뜻이다.
+  ③ 종가가 **15m MA960 근처**(±near_pct) — 역배열의 제일 위 선까지
+     올라와 닿은 자리다.
 
-즉 **캔들이 분기 상단과 월 상단 사이**에 있는 구간이다. ②가 '바닥은
-지났다'를, ③이 '아직 안 갔다'를 말하고, ①이 '짧은 눈금은 아직 안 돌았다'를
-말한다 — 셋이 같이 서면 오래 눌렸다가 막 올라오기 시작한 자리가 된다.
+셋이 같이 서면 '월 단위로는 오르는데 짧은 눈금은 아직 역배열이고, 그
+역배열의 천장(10일선)까지 가격이 올라왔다'가 된다.
+
+> 처음엔 ③이 '종가가 분기 상단과 월 상단 **사이**'였다. 그걸 960선 근처로
+> 바꾸고 ②는 두 밴드의 **위아래 관계**만 남겼다.
 
 VWAP 밴드는 TradingView의 Anchored VWAP(Standard Deviation 모드)과 같은
 식이다: 소스 (고+저+종)/3, 거래량 가중 표준편차, 배수 1.
 
-**프레임이 둘이다.** ①은 15m, ②③은 4h로 잰다 — 분기 앵커드 VWAP을 15m으로
+**프레임이 둘이다.** ①③은 15m, ②는 4h로 잰다 — 분기 앵커드 VWAP을 15m으로
 계산하려면 한 분기치 ≈ 8,800봉이라 종목당 요청이 아홉 번이 된다. 4h 프레임은
-스캔이 이미 받아 두고, 실측으로 밴드 값 차이가 0.04~0.4%였다(BTC·NEAR·AVA를
-15m 10,559봉과 맞대 봤다). 밴드는 넓은 레벨이라 이 정도는 판정을 안 바꾼다.
+스캔이 이미 받아 두고, 실측으로 밴드 값 차이가 0.04~0.4%였다.
 
-**구간에 처음 들어온 봉에서 알리고, 머무는 동안 추적한다.** 상태 조건이라
+**분기 첫 달(1·4·7·10월)에는 ②가 성립하지 않는다.** 월과 분기가 같은 날부터
+누적해서 두 상단밴드가 똑같아지기 때문이다.
+
+**조건에 처음 들어온 봉에서 알리고, 머무는 동안 추적한다.** 상태 조건이라
 매 스캔 다시 알리면 같은 말을 반복하게 된다.
 """
 
@@ -45,9 +47,11 @@ KLINE_LIMIT = 1000
 @dataclass(frozen=True)
 class Params:
     ma_align: tuple = (240, 480, 960)   # ① 15m 역배열 판정선
-    band_mult: float = 1.0              # ②③ 표준편차 배수
-    above_anchor: str = "Q"             # ② 이 밴드 **위**에 있어야 한다
-    below_anchor: str = "M"             # ③ 이 밴드 **아래**에 있어야 한다
+    band_mult: float = 1.0              # ② 표준편차 배수
+    band_top: str = "M"                 # ② 이 상단밴드가
+    band_bottom: str = "Q"              # ② 이 상단밴드보다 위에 있어야 한다
+    near_ma: int = 960                  # ③ 종가가 이 15m 이평선 근처여야 한다
+    near_pct: float = 0.02              # ③ '근처' 허용폭 — ±2%
     grace_bars: int = 4                 # 15m × 4 = 1시간(스캔 주기)
     min_turnover_usd: float = 1_000_000
     track_bars: int = 96                # 추적 상한 — 96봉 = 하루
@@ -72,12 +76,12 @@ def _band_on_15m(df15: pd.DataFrame, df4h: pd.DataFrame, anchor: str,
 def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
            params: Params) -> pd.DataFrame | None:
     """15m 봉마다 ①②③ 판정 — 못 재면 None."""
-    need = max(params.ma_align)
+    need = max(max(params.ma_align), params.near_ma)
     if len(df15) < need + 2 or df4h is None or len(df4h) < 10:
         return None
-    up_q = _band_on_15m(df15, df4h, params.above_anchor, params.band_mult)
-    up_m = _band_on_15m(df15, df4h, params.below_anchor, params.band_mult)
-    if up_q is None or up_m is None:
+    up_top = _band_on_15m(df15, df4h, params.band_top, params.band_mult)
+    up_bot = _band_on_15m(df15, df4h, params.band_bottom, params.band_mult)
+    if up_top is None or up_bot is None:
         return None
     c = df15["Close"]
     mas = [c.rolling(k).mean() for k in params.ma_align]
@@ -85,26 +89,23 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
     for a, b in zip(mas, mas[1:]):
         bear &= a < b
     bear &= ~mas[-1].isna()
+    ma = c.rolling(params.near_ma).mean()
+    dist = c / ma - 1
+    near = dist.abs() <= params.near_pct
     # 7d = 15m 672봉. 1,000봉을 받으므로 마지막 구간에서는 늘 구할 수 있다.
     d7 = c / c.shift(7 * 96) - 1
-    return pd.DataFrame({"close": c, "bear": bear, "up_q": up_q, "up_m": up_m,
-                         "ret_7d": d7,
-                         "ok": bear & (c > up_q) & (c < up_m)})
+    return pd.DataFrame({"close": c, "bear": bear, "up_top": up_top,
+                         "up_bot": up_bot, "ma": ma, "dist": dist, "ret_7d": d7,
+                         "ok": bear & (up_top > up_bot) & near})
 
 
 def _detail(row, params: Params) -> dict:
-    """줄에 실을 값 — 구간 안 어디쯤인지와 종목 수익률.
-
-    **'월상단까지 몇 %'는 안 싣는다.** 밴드까지의 거리는 구간 위치(`band_pos`)가
-    이미 말하고, 그 자리에는 종목이 실제로 어떻게 움직였는지(24h·7d)를 두는
-    편이 읽을 값이 된다.
-    """
-    span = row.up_m - row.up_q
-    pos = (row.close - row.up_q) / span if span > 0 else None
+    """줄에 실을 값 — 960선에서 얼마나 떨어졌는지와 종목 수익률."""
     d = {"label": LABEL, "interval": INTERVAL,
-         "band_above": float(row.up_q), "band_below": float(row.up_m),
-         # 0이면 분기 상단에 붙어 있고 1이면 월 상단에 닿았다는 뜻.
-         "band_pos": None if pos is None else float(pos),
+         "near_ma": params.near_ma,
+         # 종가 ÷ MA960 − 1 — 음수면 선 아래, 양수면 선 위
+         "ma_dist": float(row.dist),
+         "band_top": float(row.up_top), "band_bottom": float(row.up_bot),
          "align_mas": params.ma_align}
     if pd.notna(row.ret_7d):
         d["ret_7d"] = float(row.ret_7d)
@@ -151,6 +152,11 @@ def tracking(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
     row = st.iloc[-1]
     d = _detail(row, params)
     d["last_price"] = float(row.close)
-    d["in_bars"] = int(len(ok) - start)      # 구간에 머문 15m 봉 수
+    d["in_bars"] = int(len(ok) - start)      # 조건에 머문 15m 봉 수
+    # 머문 시간이 **판정이 시작되는 봉**까지 거슬러 올라갔으면 그보다 오래
+    # 머물렀을 수 있다. 1,000봉 중 MA960이 서는 건 마지막 41봉(≈10시간)뿐이라,
+    # 그 앞은 역배열을 잴 수가 없어 무조건 '밖'으로 나온다. 표시를 10h+로 한다.
+    first = int(np.argmax(~np.isnan(st.ma.to_numpy(float))))
+    d["in_capped"] = bool(start <= first)
     return SignalEvent(symbol=symbol, signal=NAME, bar_time=st.index[start],
                        price=float(st.close.iloc[start]), detail=d)

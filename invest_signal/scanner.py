@@ -513,9 +513,9 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
 
 def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
                      ticker: dict | None, log=print) -> tuple[list, list]:
-    """🟢상승초입 — 분기 상단밴드 위 · 월 상단밴드 아래 · 15m 역배열.
+    """🟢상승초입 — 15m 역배열 · 월 상단밴드 > 분기 상단밴드 · 종가 15m 960선 근처.
 
-    프레임이 둘이다: ①역배열은 15m, ②③밴드는 4h. 둘 다 스캔이 이미 받아 둔
+    프레임이 둘이다: ①역배열·③960선은 15m, ②밴드는 4h. 둘 다 스캔이 이미 받아 둔
     것이라 추가 요청이 없다(모듈 설명 참고). 4h 프레임이 없으면(인트라바인데
     4h 시그널이 하나도 안 도는 경우) 그냥 건너뛴다 — 이 칸만 비면 된다.
     """
@@ -528,8 +528,10 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
     params = vwap_onset.Params(
         ma_align=tuple(s.get("ma_align", (240, 480, 960))),
         band_mult=float(s.get("band_mult", 1.0)),
-        above_anchor=str(s.get("above_anchor", "Q")),
-        below_anchor=str(s.get("below_anchor", "M")),
+        band_top=str(s.get("band_top", "M")),
+        band_bottom=str(s.get("band_bottom", "Q")),
+        near_ma=int(s.get("near_ma", 960)),
+        near_pct=float(s.get("near_pct", 0.02)),
         grace_bars=int(s.get("grace_bars", 4)),
         min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
         track_bars=int(s.get("track_bars", 96)),
@@ -565,8 +567,9 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
     if events or ongoing or thin:
         log(f"[binance] 상승초입 {len(events)}건 · 추적 {len(ongoing)}건"
             + (f" · 거래대금 하한 미달 {thin}건 제외" if thin else "")
-            + f" ({params.above_anchor} 상단 위 · {params.below_anchor} 상단 아래 · "
-              f"15m {'<'.join(str(x) for x in params.ma_align)} 역배열)")
+            + f" (15m {'<'.join(str(x) for x in params.ma_align)} 역배열 · "
+              f"{params.band_top} 상단 > {params.band_bottom} 상단 · "
+              f"{params.near_ma}선 ±{params.near_pct:.0%})")
     return events, ongoing
 
 

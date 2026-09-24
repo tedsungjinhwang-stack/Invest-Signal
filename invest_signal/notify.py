@@ -211,16 +211,16 @@ def _by_gain_desc(e):
 
 
 def _band_tags(d: dict) -> list[str]:
-    """🟢상승초입 줄 — 분기 상단과 월 상단 **사이 어디쯤인지** 하나만.
+    """🟢상승초입 줄 — 종가가 15m 960선에서 **얼마나 떨어져 있는지** 하나만.
 
-    `구간 0.19`는 0이면 분기 상단에 붙어 있고 1이면 월 상단에 닿았다는 뜻이다.
-    밴드 가격도, 월 상단까지 몇 %인지도 안 적는다 — 거리는 이 값이 이미
-    말하고, 그 자리에는 종목이 실제로 어떻게 움직였는지(24h·7d)를 두는 편이
-    읽을 값이 된다(⚡의 수퍼트렌드선 값을 안 싣는 것과 같은 이유).
+    `960선 -0.7%`는 종가가 MA960보다 0.7% 아래라는 뜻이다. 판정이 이 선
+    근처(±2%)인지를 보므로, 선 위인지 아래인지가 줄에서 읽혀야 한다.
+    밴드 가격은 안 적는다 — 그 자리에는 종목이 실제로 어떻게 움직였는지
+    (24h·7d)를 두는 편이 읽을 값이 된다.
     """
-    if d.get("band_pos") is None:
+    if d.get("ma_dist") is None:
         return []
-    return [f"구간 {d['band_pos']:.2f}"]
+    return [f"{d.get('near_ma', 960)}선 {_pct(d['ma_dist'])}"]
 
 
 def _turnover_tag(d: dict) -> str:
@@ -645,11 +645,13 @@ def format_events(events_crypto: list, events_etf: list,
                     + (f"  {_fmt_price(d['last_price'])}" if d.get("last_price") else "")
                     + " · " + " · ".join(tags))
         if e.signal == "vwap_onset":
-            # 구간에 얼마나 머물렀는지를 같이 적는다 — 방금 들어온 자리와
-            # 하루째 눌러앉은 자리는 같은 줄이라도 뜻이 다르다.
+            # 조건에 얼마나 머물렀는지를 같이 적는다 — 방금 들어온 자리와
+            # 하루째 눌러앉은 자리는 같은 줄이라도 뜻이 다르다. MA960이
+            # 마지막 ≈10h만 값이 있어서 그보다 길면 `10h+째`로 적는다.
             tags = list(_band_tags(d))
             if d.get("in_bars"):
-                tags.append(f"{d['in_bars'] * 15 / 60:.0f}h째")
+                hrs = f"{d['in_bars'] * 15 / 60:.0f}h"
+                tags.append(hrs + ("+째" if d.get("in_capped") else "째"))
             day = _daily_gain(d)
             if day is not None:
                 tags.append(f"24h {_pct(day)}")
