@@ -1,10 +1,9 @@
-"""상승초입(15m 역배열 · 월 상단 > 분기 상단 · 종가 MA960 근처) 테스트."""
+"""상승초입(15m 역배열 또는 정배열 · 월 상단 > 분기 상단 · 상단밴드 근처) 테스트."""
 
 import numpy as np
 import pandas as pd
 
 from invest_signal import notify
-from invest_signal.signals import SignalEvent
 from invest_signal.signals import vwap_onset as vo
 from invest_signal.signals.vwap_onset import Params, detect, tracking
 
@@ -20,9 +19,9 @@ def _f15(closes):
 def _f4h(old_price=90.0, sep_price=130.0):
     """7·8월은 old_price, 9월은 sep_price인 연속 4h 프레임.
 
-    기본값(90 → 130)이면 9월 앵커인 월 상단은 130이고, 7~9월을 다 담는
-    분기 상단은 그보다 낮다 — **월 상단 > 분기 상단**(②가 선다).
-    거꾸로(130 → 90) 주면 ②가 안 선다.
+    9월 값이 일정하니 월 상단은 sep_price 그대로(σ=0)이고, 7~9월을 다 담는
+    분기 상단은 두 값 사이에 선다. 기본값(90 → 130)이면 **월 상단 130 >
+    분기 상단 ≈114** — ②가 서고 두 밴드가 12%쯤 떨어져 있다.
     """
     idx = pd.date_range("2026-07-01", periods=500, freq="4h", tz="UTC")
     price = pd.Series(np.where(idx.month >= 9, sep_price, old_price),
@@ -31,124 +30,196 @@ def _f4h(old_price=90.0, sep_price=130.0):
                          "Close": price, "Volume": 1000.0}, index=idx)
 
 
-def _regime(df4h):
-    """이 프레임의 (월 상단, 분기 상단) — 마지막 봉 기준."""
-    m = vo.anchored_vwap_bands(df4h, "M", 1.0)[2].iloc[-1]
-    q = vo.anchored_vwap_bands(df4h, "Q", 1.0)[2].iloc[-1]
+def _bands(df15, df4h):
+    """15m 마지막 봉이 보는 (월 상단, 분기 상단)."""
+    m = vo._band_on_15m(df15, df4h, "M", 1.0).iloc[-1]
+    q = vo._band_on_15m(df15, df4h, "Q", 1.0).iloc[-1]
     return float(m), float(q)
 
 
-def _bear(n=1100, off=None, tail=1):
-    """MA240 < MA480 < MA960이 서도록 가파르게 내려오는 시리즈.
+def _bear(n=1100):
+    """MA240 < MA480 < MA960 — 400에서 200으로 가파르게 내려온다.
 
-    그대로 두면 종가가 MA960보다 ≈30% 아래라 ③이 안 선다. off를 주면
-    마지막 tail개 봉을 'MA960 × (1+off)'로 덮는다 — MA는 전체 하락 추세에서
-    나오므로 꼬리 몇 봉을 바꿔도 역배열은 유지된다.
+    밴드(≈114~130)보다 한참 위라 그대로는 ③이 안 선다. 꼬리를 밴드 근처로
+    덮어 쓴다 — 값을 **낮추는** 쪽이라 역배열은 그대로 유지된다.
     """
-    arr = np.linspace(400.0, 200.0, n)
-    df = _f15(arr)
-    if off is not None:
-        ma = df["Close"].rolling(960).mean().iloc[-1]
-        df.iloc[-tail:, df.columns.get_loc("Close")] = ma * (1 + off)
+    return _f15(np.linspace(400.0, 200.0, n))
+
+
+def _bull(n=1100):
+    """MA120 > MA240 > MA480 — 20에서 60으로 오른다(밴드보다 한참 아래).
+
+    꼬리를 밴드 근처로 **올리면** 짧은 선이 더 올라가 정배열이 유지된다.
+    """
+    return _f15(np.linspace(20.0, 60.0, n))
+
+
+def _tail(df, value, tail=1):
+    df = df.copy()
+    df.iloc[-tail:, df.columns.get_loc("Close")] = value
     return df
 
 
-def _gentle(n=1100):
-    """아주 완만하게 내려오는 시리즈 — 역배열이면서 종가가 늘 MA960 근처.
-
-    MA960이 서는 첫 봉부터 끝까지 세 조건이 다 선다.
-    """
-    return _f15(np.linspace(101.0, 100.0, n))
+def _stack(df, periods):
+    c = df["Close"]
+    return [c.rolling(k).mean().iloc[-1] for k in periods]
 
 
 def test_fixture_regimes():
-    m, q = _regime(_f4h())
-    assert m > q
-    m, q = _regime(_f4h(old_price=130.0, sep_price=90.0))
-    assert m < q
+    m, q = _bands(_bear(), _f4h())
+    assert m > q * 1.08                 # ② 선다 · 두 밴드가 떨어져 있다
+    m, q = _bands(_bear(), _f4h(old_price=130.0, sep_price=90.0))
+    assert m < q                        # ② 안 선다
 
 
-def test_fires_when_close_is_near_ma960():
-    """역배열 · 월상단>분기상단에서 종가가 960선 근처로 처음 들어온 봉."""
-    df15 = _bear(off=0.0)
-    got = detect(df15, _f4h(), "XUSDT")
+def test_bearish_near_the_month_band_fires():
+    df4h = _f4h()
+    m, _ = _bands(_bear(), df4h)
+    got = detect(_tail(_bear(), m), df4h, "XUSDT")
     assert len(got) == 1
     d = got[0].detail
     assert d["label"] == "상승초입"
-    assert d["near_ma"] == 960
-    assert abs(d["ma_dist"]) <= 0.02
+    assert d["trend"] == "역배열"
+    assert d["near_band"] == "M" and abs(d["band_dist"]) < 1e-9
     assert d["band_top"] > d["band_bottom"]
-    assert "band_pos" not in d          # '사이 어디쯤'은 더 이상 없다
-    assert d["ret_7d"] is not None      # 대신 종목 수익률을 싣는다
+    assert d["ret_7d"] is not None
 
 
-def test_near_from_above_also_fires():
-    """선 위 +1%도 '근처'다 — 판정은 절댓값으로 본다."""
-    got = detect(_bear(off=0.01), _f4h(), "XUSDT")
-    assert len(got) == 1 and got[0].detail["ma_dist"] > 0
+def test_bullish_near_the_quarter_band_fires():
+    """정배열도 **또는**으로 통과한다 — 분기 상단 하나에만 붙어도 된다."""
+    df4h = _f4h()
+    _, q = _bands(_bull(), df4h)
+    df15 = _tail(_bull(), q * 1.01)
+    a, b, c = _stack(df15, (120, 240, 480))
+    assert a > b > c
+    got = detect(df15, df4h, "XUSDT")
+    assert len(got) == 1
+    d = got[0].detail
+    assert d["trend"] == "정배열"
+    assert d["near_band"] == "Q" and 0 < d["band_dist"] <= 0.02
 
 
-def test_far_from_ma960_does_not_fire():
-    """허용폭(±2%) 밖이면 아래든 위든 안 알린다."""
-    assert detect(_bear(off=-0.05), _f4h(), "XUSDT") == []
-    assert detect(_bear(off=0.05), _f4h(), "XUSDT") == []
-    assert detect(_bear(), _f4h(), "XUSDT") == []        # ≈ −30%
+def test_between_the_bands_but_near_neither_does_not_fire():
+    """두 밴드 **사이**라도 어느 쪽에도 ±2% 안이 아니면 안 알린다."""
+    df4h = _f4h()
+    m, q = _bands(_bear(), df4h)
+    assert detect(_tail(_bear(), (m + q) / 2), df4h, "XUSDT") == []
+
+
+def test_far_from_both_bands_does_not_fire():
+    df4h = _f4h()
+    m, q = _bands(_bear(), df4h)
+    assert detect(_tail(_bear(), m * 1.05), df4h, "XUSDT") == []
+    assert detect(_tail(_bear(), q * 0.95), df4h, "XUSDT") == []
+    assert detect(_bear(), df4h, "XUSDT") == []
 
 
 def test_tolerance_is_configurable():
-    p = Params(near_pct=0.06)
-    assert len(detect(_bear(off=-0.05), _f4h(), "XUSDT", p)) == 1
+    df4h = _f4h()
+    m, _ = _bands(_bear(), df4h)
+    df15 = _tail(_bear(), m * 1.03)
+    assert detect(df15, df4h, "XUSDT") == []
+    assert len(detect(df15, df4h, "XUSDT", Params(near_pct=0.04))) == 1
+
+
+def test_near_both_requires_both_bands():
+    """near_both면 두 밴드 **모두** ±2% 안이어야 한다."""
+    p = Params(near_both=True)
+    far4h = _f4h()                                  # 두 밴드가 12% 떨어짐
+    m, _ = _bands(_bear(), far4h)
+    assert detect(_tail(_bear(), m), far4h, "XUSDT", p) == []
+
+    close4h = _f4h(old_price=125.0, sep_price=130.0)  # 두 밴드가 붙어 있음
+    m, q = _bands(_bear(), close4h)
+    assert m > q and m / q - 1 < 0.03
+    got = detect(_tail(_bear(), (m + q) / 2), close4h, "XUSDT", p)
+    assert len(got) == 1
 
 
 def test_month_band_below_quarter_band_does_not_fire():
-    """②가 안 서면(월 상단 < 분기 상단) 960선 근처여도 안 알린다."""
+    """②가 안 서면(월 상단 < 분기 상단) 밴드 근처여도 안 알린다."""
     df4h = _f4h(old_price=130.0, sep_price=90.0)
-    assert detect(_bear(off=0.0), df4h, "XUSDT") == []
+    m, q = _bands(_bear(), df4h)
+    assert detect(_tail(_bear(), m), df4h, "XUSDT") == []
+    assert detect(_tail(_bear(), q), df4h, "XUSDT") == []
 
 
-def test_not_bearish_on_15m_does_not_fire():
-    """짧은 눈금이 이미 돌았으면(정배열) '초입'이 아니다."""
-    up = _f15(np.linspace(200.0, 400.0, 1100))
-    ma = up["Close"].rolling(960).mean().iloc[-1]
-    up.iloc[-1, up.columns.get_loc("Close")] = ma
-    assert detect(up, _f4h(), "XUSDT") == []
+def test_mixed_alignment_does_not_fire():
+    """역배열도 정배열도 아니면(혼조) 밴드 근처여도 안 알린다."""
+    df4h = _f4h()
+    m, _ = _bands(_bear(), df4h)
+    arr = np.concatenate([np.linspace(50.0, 200.0, 1040),
+                          np.linspace(200.0, m, 60)])
+    df15 = _f15(arr)
+    s120, s240, s480, s960 = _stack(df15, (120, 240, 480, 960))
+    assert not (s120 > s240 > s480)
+    assert not (s240 < s480 < s960)
+    assert detect(df15, df4h, "XUSDT") == []
+    assert tracking(df15, df4h, "XUSDT") is None
 
 
 def test_only_the_entry_bar_fires():
     """상태 조건이라 매 스캔 다시 알리면 같은 말을 반복한다 — 진입 봉만."""
-    df15 = _bear(off=0.0, tail=3)
-    got = detect(df15, _f4h(), "XUSDT")
+    df4h = _f4h()
+    m, _ = _bands(_bear(), df4h)
+    df15 = _tail(_bear(), m, tail=3)
+    got = detect(df15, df4h, "XUSDT")
+    assert len(got) == 1 and got[0].bar_time == df15.index[-3]
+
+
+def test_reentry_within_rearm_window_is_tracked_not_realerted():
+    """±2% 경계에서 깜빡이는 종목 — 24h 안에 다시 들어오면 새로 안 알린다."""
+    df4h = _f4h()
+    m, _ = _bands(_bear(), df4h)
+    df15 = _bear()
+    col = df15.columns.get_loc("Close")
+    df15.iloc[-30:-20, col] = m          # 들어왔다가
+    df15.iloc[-3:, col] = m              # 나갔다(원래 값 ≈200) 다시 들어옴
+    assert detect(df15, df4h, "XUSDT") == []
+    held = tracking(df15, df4h, "XUSDT")
+    assert held is not None
+    assert held.detail["in_bars"] == 30          # 처음 들어온 봉부터 잰다
+    assert held.detail["in_capped"] is False
+
+    # rearm을 끄면(1봉) 다시 들어온 봉이 새 알림이 된다
+    got = detect(df15, df4h, "XUSDT", Params(rearm_bars=1))
     assert len(got) == 1 and got[0].bar_time == df15.index[-3]
 
 
 def test_tracking_holds_while_inside_but_not_right_after_entry():
     """방금 들어온 건은 신규 줄이 맡는다 — 같은 봉이 두 칸에 실리면 안 된다."""
-    assert tracking(_bear(off=0.0, tail=2), _f4h(), "XUSDT") is None
+    df4h = _f4h()
+    m, _ = _bands(_bear(), df4h)
+    assert tracking(_tail(_bear(), m, tail=2), df4h, "XUSDT") is None
 
-    # 꼬리가 길면 MA960이 그 사이 움직여 앞쪽 봉이 ±2% 밖으로 나간다 — 20봉.
-    df15 = _bear(off=0.0, tail=20)
-    held = tracking(df15, _f4h(), "XUSDT")
+    held = tracking(_tail(_bear(), m, tail=20), df4h, "XUSDT")
     assert held is not None
     assert held.detail["in_bars"] == 20
     assert held.detail["in_capped"] is False
-    assert held.detail["last_price"] == df15["Close"].iloc[-1]
+    assert held.detail["last_price"] == m
 
 
-def test_tracking_marks_dwell_capped_at_ma960_warmup():
-    """MA960이 서는 첫 봉부터 줄곧 안이었으면 그보다 오래였을 수 있다."""
-    held = tracking(_gentle(), _f4h(), "XUSDT")
+def test_bearish_dwell_is_capped_at_ma960_warmup():
+    """1,000봉이면 MA960은 마지막 41봉만 선다 — 그 앞은 역배열을 못 잰다."""
+    df4h = _f4h()
+    m, _ = _bands(_bear(1000), df4h)
+    held = tracking(_tail(_bear(1000), m, tail=100), df4h, "XUSDT")
     assert held is not None
-    assert held.detail["in_bars"] == 1100 - 959
+    assert held.detail["trend"] == "역배열"
+    assert held.detail["in_bars"] == 41
     assert held.detail["in_capped"] is True
+    assert notify._dwell_tag(held.detail) == "10h+째"
 
 
 def test_short_history_is_skipped():
-    """MA960이 안 서면 판정 자체가 불가능하다."""
-    assert detect(_f15(np.linspace(101.0, 100.0, 500)), _f4h(), "XUSDT") == []
+    """정배열(MA480)조차 안 서면 판정 자체가 불가능하다."""
+    df4h = _f4h()
+    m, _ = _bands(_bull(400), df4h)
+    assert detect(_tail(_bull(400), m), df4h, "XUSDT") == []
 
 
 def test_missing_4h_frame_is_skipped():
-    assert detect(_bear(off=0.0), None, "XUSDT") == []
+    assert detect(_tail(_bear(), 130.0), None, "XUSDT") == []
 
 
 def test_band_is_carried_onto_15m_bars():
@@ -159,6 +230,15 @@ def test_band_is_carried_onto_15m_bars():
     assert up.index.equals(df15.index)
 
 
-def test_line_shows_distance_to_ma960():
-    assert notify._band_tags({"ma_dist": -0.0071, "near_ma": 960}) == ["960선 -0.7%"]
+def test_line_shows_alignment_and_nearest_band():
+    d = {"trend": "정배열", "near_band": "M", "band_dist": -0.008}
+    assert notify._band_tags(d) == ["↑정배열", "월상단 -0.8%"]
+    d = {"trend": "역배열", "near_band": "Q", "band_dist": 0.011}
+    assert notify._band_tags(d) == ["↓역배열", "분기상단 +1.1%"]
     assert notify._band_tags({}) == []
+
+
+def test_dwell_tag():
+    assert notify._dwell_tag({"in_bars": 16}) == "4h째"
+    assert notify._dwell_tag({"in_bars": 144}) == "1.5일째"
+    assert notify._dwell_tag({"in_bars": 41, "in_capped": True}) == "10h+째"

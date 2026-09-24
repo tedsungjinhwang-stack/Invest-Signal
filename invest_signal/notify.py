@@ -210,17 +210,35 @@ def _by_gain_desc(e):
     return (1, 0.0) if g is None else (0, -g)
 
 
-def _band_tags(d: dict) -> list[str]:
-    """🟢상승초입 줄 — 종가가 15m 960선에서 **얼마나 떨어져 있는지** 하나만.
+BAND_NAME = {"M": "월상단", "Q": "분기상단"}
 
-    `960선 -0.7%`는 종가가 MA960보다 0.7% 아래라는 뜻이다. 판정이 이 선
-    근처(±2%)인지를 보므로, 선 위인지 아래인지가 줄에서 읽혀야 한다.
-    밴드 가격은 안 적는다 — 그 자리에는 종목이 실제로 어떻게 움직였는지
-    (24h·7d)를 두는 편이 읽을 값이 된다.
+
+def _band_tags(d: dict) -> list[str]:
+    """🟢상승초입 줄 — **어느 배열로 섰는지**와 **어느 밴드에 얼마나 붙었는지**.
+
+    ①이 역배열 또는 정배열이라 둘 중 무엇인지가 줄에서 읽혀야 한다(`↓역배열`
+    `↑정배열`). `월상단 -0.8%`는 종가가 월 상단밴드보다 0.8% 아래라는 뜻 —
+    두 상단밴드 중 가까운 쪽 하나만 적는다. 판정이 그 밴드 근처인지를 보므로
+    밴드 위인지 아래인지가 보여야 한다.
     """
-    if d.get("ma_dist") is None:
-        return []
-    return [f"{d.get('near_ma', 960)}선 {_pct(d['ma_dist'])}"]
+    tags = []
+    if d.get("trend"):
+        tags.append(ALIGN_TAG.get(d["trend"], d["trend"]))
+    if d.get("band_dist") is not None:
+        name = BAND_NAME.get(d.get("near_band"), d.get("near_band") or "상단")
+        tags.append(f"{name} {_pct(d['band_dist'])}")
+    return tags
+
+
+def _dwell_tag(d: dict) -> str:
+    """조건에 머문 시간 — `4h째`, 하루가 넘으면 `1.5일째`.
+
+    판정할 수 없는 봉에서 끊겼으면(in_capped) 그보다 오래였을 수 있어 `+`를
+    붙인다. 역배열은 MA960이 서는 마지막 ≈10h만 잴 수 있어서 `10h+째`가 된다.
+    """
+    hours = d["in_bars"] * 15 / 60
+    text = f"{hours:.0f}h" if hours < 24 else f"{hours / 24:.1f}일"
+    return text + ("+째" if d.get("in_capped") else "째")
 
 
 def _turnover_tag(d: dict) -> str:
@@ -646,12 +664,10 @@ def format_events(events_crypto: list, events_etf: list,
                     + " · " + " · ".join(tags))
         if e.signal == "vwap_onset":
             # 조건에 얼마나 머물렀는지를 같이 적는다 — 방금 들어온 자리와
-            # 하루째 눌러앉은 자리는 같은 줄이라도 뜻이 다르다. MA960이
-            # 마지막 ≈10h만 값이 있어서 그보다 길면 `10h+째`로 적는다.
+            # 하루째 눌러앉은 자리는 같은 줄이라도 뜻이 다르다.
             tags = list(_band_tags(d))
             if d.get("in_bars"):
-                hrs = f"{d['in_bars'] * 15 / 60:.0f}h"
-                tags.append(hrs + ("+째" if d.get("in_capped") else "째"))
+                tags.append(_dwell_tag(d))
             day = _daily_gain(d)
             if day is not None:
                 tags.append(f"24h {_pct(day)}")

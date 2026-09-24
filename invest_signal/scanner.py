@@ -513,9 +513,10 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
 
 def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
                      ticker: dict | None, log=print) -> tuple[list, list]:
-    """🟢상승초입 — 15m 역배열 · 월 상단밴드 > 분기 상단밴드 · 종가 15m 960선 근처.
+    """🟢상승초입 — 15m 역배열 또는 정배열 · 월 상단밴드 > 분기 상단밴드 ·
+    종가가 두 상단밴드 중 하나 근처.
 
-    프레임이 둘이다: ①역배열·③960선은 15m, ②밴드는 4h. 둘 다 스캔이 이미 받아 둔
+    프레임이 둘이다: ①배열은 15m, ②③밴드는 4h. 둘 다 스캔이 이미 받아 둔
     것이라 추가 요청이 없다(모듈 설명 참고). 4h 프레임이 없으면(인트라바인데
     4h 시그널이 하나도 안 도는 경우) 그냥 건너뛴다 — 이 칸만 비면 된다.
     """
@@ -526,12 +527,14 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         log("[binance] 상승초입 건너뜀 — 4h 프레임이 없다(밴드를 못 낸다)")
         return [], []
     params = vwap_onset.Params(
-        ma_align=tuple(s.get("ma_align", (240, 480, 960))),
+        bear_align=tuple(s.get("bear_align", (240, 480, 960))),
+        bull_align=tuple(s.get("bull_align", (120, 240, 480))),
         band_mult=float(s.get("band_mult", 1.0)),
         band_top=str(s.get("band_top", "M")),
         band_bottom=str(s.get("band_bottom", "Q")),
-        near_ma=int(s.get("near_ma", 960)),
         near_pct=float(s.get("near_pct", 0.02)),
+        near_both=bool(s.get("near_both", False)),
+        rearm_bars=int(s.get("rearm_bars", 96)),
         grace_bars=int(s.get("grace_bars", 4)),
         min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
         track_bars=int(s.get("track_bars", 96)),
@@ -567,9 +570,11 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
     if events or ongoing or thin:
         log(f"[binance] 상승초입 {len(events)}건 · 추적 {len(ongoing)}건"
             + (f" · 거래대금 하한 미달 {thin}건 제외" if thin else "")
-            + f" (15m {'<'.join(str(x) for x in params.ma_align)} 역배열 · "
+            + f" (15m {'<'.join(str(x) for x in params.bear_align)} 역배열 또는 "
+              f"{'>'.join(str(x) for x in params.bull_align)} 정배열 · "
               f"{params.band_top} 상단 > {params.band_bottom} 상단 · "
-              f"{params.near_ma}선 ±{params.near_pct:.0%})")
+              f"종가가 {'둘 다' if params.near_both else '둘 중 하나'} "
+              f"±{params.near_pct:.0%})")
     return events, ongoing
 
 
