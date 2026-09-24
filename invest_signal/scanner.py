@@ -535,20 +535,31 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         near_pct=float(s.get("near_pct", 0.02)),
         near_both=bool(s.get("near_both", False)),
         rearm_bars=int(s.get("rearm_bars", 96)),
+        min_ret_24h=(None if s.get("min_ret_24h", 0.0) is None
+                     else float(s.get("min_ret_24h", 0.0))),
         grace_bars=int(s.get("grace_bars", 4)),
         min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
         track_bars=int(s.get("track_bars", 96)),
     )
-    events, ongoing, thin = [], [], 0
+    events, ongoing, thin, falling = [], [], 0, 0
 
     def stamp(ev) -> bool:
+        nonlocal thin, falling
         stat = (ticker or {}).get(ev.symbol) or {}
         turn = stat.get("quote_volume")
         if turn is not None and turn < params.min_turnover_usd:
+            thin += 1
+            return False
+        g = stat.get("change_pct")
+        # ④ 24h 하한을 **스캔 시점 티커 값으로 한 번 더** 본다. 판정은 15m
+        # 96봉 전 대비로 했는데, 줄에 찍히는 24h는 티커 값이다 — 둘이 어긋나
+        # '24h -0.3%'가 찍힌 줄이 나가면 필터가 안 먹은 것처럼 읽힌다.
+        if (g is not None and params.min_ret_24h is not None
+                and g < params.min_ret_24h):
+            falling += 1
             return False
         if turn is not None:
             ev.detail["turnover_24h"] = turn
-        g = stat.get("change_pct")
         if g is not None:
             ev.detail["gain_24h"] = g
         return True
@@ -561,20 +572,21 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         for ev in got:
             if stamp(ev):
                 events.append(ev)
-            else:
-                thin += 1
         if not got:
             held = vwap_onset.tracking(df15, df4, sym, params)
             if held is not None and stamp(held):
                 ongoing.append(held)
-    if events or ongoing or thin:
+    if events or ongoing or thin or falling:
         log(f"[binance] 상승초입 {len(events)}건 · 추적 {len(ongoing)}건"
             + (f" · 거래대금 하한 미달 {thin}건 제외" if thin else "")
+            + (f" · 24h 하락 {falling}건 제외" if falling else "")
             + f" (15m {'<'.join(str(x) for x in params.bear_align)} 역배열 또는 "
               f"{'>'.join(str(x) for x in params.bull_align)} 정배열 · "
               f"{params.band_top} 상단 > {params.band_bottom} 상단 · "
               f"종가가 {'둘 다' if params.near_both else '둘 중 하나'} "
-              f"±{params.near_pct:.0%})")
+              f"±{params.near_pct:.0%}"
+              + (f" · 24h {params.min_ret_24h:+.0%} 이상"
+                 if params.min_ret_24h is not None else "") + ")")
     return events, ongoing
 
 

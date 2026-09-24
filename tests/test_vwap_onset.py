@@ -1,4 +1,4 @@
-"""상승초입(15m 역배열 또는 정배열 · 월 상단 > 분기 상단 · 상단밴드 근처) 테스트."""
+"""상승초입(15m 역배열 또는 정배열 · 월 상단 > 분기 상단 · 상단밴드 근처 · 24h 플러스) 테스트."""
 
 import numpy as np
 import pandas as pd
@@ -37,13 +37,15 @@ def _bands(df15, df4h):
     return float(m), float(q)
 
 
-def _bear(n=1100):
-    """MA240 < MA480 < MA960 — 400에서 200으로 가파르게 내려온다.
+def _bear(n=1100, rise=150):
+    """MA240 < MA480 < MA960 — 400에서 100까지 내려왔다가 105로 살짝 반등.
 
-    밴드(≈114~130)보다 한참 위라 그대로는 ③이 안 선다. 꼬리를 밴드 근처로
-    덮어 쓴다 — 값을 **낮추는** 쪽이라 역배열은 그대로 유지된다.
+    끝이 밴드(≈114~130)보다 한참 아래라 그대로는 ③이 안 선다. 꼬리를 밴드
+    근처로 덮어 쓰면 24h(96봉 전 ≈102 대비)가 플러스가 되어 ④도 선다.
+    반등이 작아 긴 선들의 역배열은 그대로다.
     """
-    return _f15(np.linspace(400.0, 200.0, n))
+    return _f15(np.concatenate([np.linspace(400.0, 100.0, n - rise),
+                                np.linspace(100.0, 105.0, rise)]))
 
 
 def _bull(n=1100):
@@ -140,8 +142,9 @@ def test_month_band_below_quarter_band_does_not_fire():
     """②가 안 서면(월 상단 < 분기 상단) 밴드 근처여도 안 알린다."""
     df4h = _f4h(old_price=130.0, sep_price=90.0)
     m, q = _bands(_bear(), df4h)
-    assert detect(_tail(_bear(), m), df4h, "XUSDT") == []
-    assert detect(_tail(_bear(), q), df4h, "XUSDT") == []
+    p = Params(min_ret_24h=None)            # ④는 빼고 ②만 본다
+    assert detect(_tail(_bear(), m), df4h, "XUSDT", p) == []
+    assert detect(_tail(_bear(), q), df4h, "XUSDT", p) == []
 
 
 def test_mixed_alignment_does_not_fire():
@@ -154,8 +157,9 @@ def test_mixed_alignment_does_not_fire():
     s120, s240, s480, s960 = _stack(df15, (120, 240, 480, 960))
     assert not (s120 > s240 > s480)
     assert not (s240 < s480 < s960)
-    assert detect(df15, df4h, "XUSDT") == []
-    assert tracking(df15, df4h, "XUSDT") is None
+    p = Params(min_ret_24h=None)            # 끝이 내려오는 모양이라 ④는 뺀다
+    assert detect(df15, df4h, "XUSDT", p) == []
+    assert tracking(df15, df4h, "XUSDT", p) is None
 
 
 def test_only_the_entry_bar_fires():
@@ -203,12 +207,50 @@ def test_bearish_dwell_is_capped_at_ma960_warmup():
     """1,000봉이면 MA960은 마지막 41봉만 선다 — 그 앞은 역배열을 못 잰다."""
     df4h = _f4h()
     m, _ = _bands(_bear(1000), df4h)
-    held = tracking(_tail(_bear(1000), m, tail=100), df4h, "XUSDT")
+    held = tracking(_tail(_bear(1000), m, tail=60), df4h, "XUSDT")
     assert held is not None
     assert held.detail["trend"] == "역배열"
     assert held.detail["in_bars"] == 41
     assert held.detail["in_capped"] is True
     assert notify._dwell_tag(held.detail) == "10h+째"
+
+
+def test_falling_into_the_band_does_not_fire():
+    """④ 24h 동안 밀려 내려와 밴드에 걸린 종목은 '초입'이 아니다."""
+    df4h = _f4h()
+    m, _ = _bands(_bear(), df4h)
+    df15 = _tail(_bear(), m)
+    df15.iloc[-97, df15.columns.get_loc("Close")] = m * 1.08   # 24h 전엔 더 위
+    assert detect(df15, df4h, "XUSDT") == []
+    got = detect(df15, df4h, "XUSDT", Params(min_ret_24h=-0.10))
+    assert len(got) == 1 and got[0].detail["ret_24h"] < 0
+    assert len(detect(df15, df4h, "XUSDT", Params(min_ret_24h=None))) == 1
+
+
+def test_rising_into_the_band_carries_24h():
+    df4h = _f4h()
+    m, _ = _bands(_bear(), df4h)
+    got = detect(_tail(_bear(), m), df4h, "XUSDT")
+    assert len(got) == 1 and got[0].detail["ret_24h"] > 0
+
+
+def test_scanner_drops_lines_whose_ticker_24h_is_negative():
+    """판정은 15m 96봉 기준이라도, 줄에 찍힐 티커 24h가 마이너스면 뺀다."""
+    from invest_signal import scanner
+    df4h = _f4h()
+    m, _ = _bands(_bear(), df4h)
+    df15 = _tail(_bear(), m)
+    cfg = {"signal": {"vwap_onset": {"enabled": True}}}
+    up = {"XUSDT": {"quote_volume": 5e6, "change_pct": 0.03}}
+    down = {"XUSDT": {"quote_volume": 5e6, "change_pct": -0.004}}
+    logs = []
+    ev, _ = scanner._scan_vwap_onset(cfg, {"XUSDT": df15}, {"XUSDT": df4h}, up,
+                                     logs.append)
+    assert len(ev) == 1 and ev[0].detail["gain_24h"] == 0.03
+    ev, _ = scanner._scan_vwap_onset(cfg, {"XUSDT": df15}, {"XUSDT": df4h}, down,
+                                     logs.append)
+    assert ev == []
+    assert "24h 하락 1건 제외" in logs[-1]
 
 
 def test_short_history_is_skipped():

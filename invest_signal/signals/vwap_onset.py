@@ -9,6 +9,9 @@
      가격대가 분기 평균보다 높다. 월 단위로는 이미 올라서고 있다는 뜻이다.
   ③ 종가가 **월 상단밴드 또는 분기 상단밴드 근처**(±near_pct) — 둘 중
      가까운 쪽 하나에만 붙어 있으면 된다.
+  ④ **24h 상승률이 min_ret_24h(기본 0) 이상** — 떨어지다가 밴드에 걸린
+     종목을 뺀다. 09-24 스냅샷에서 조건 안 26종 중 25종이 24h −5~−10%로
+     밀려 내려와 밴드에 닿은 종목이었다. '초입'은 올라와서 닿은 자리다.
 
 > 처음엔 ③이 '종가가 분기 상단과 월 상단 **사이**'였고, 그다음 '15m 960선
 > 근처'였다가 지금의 '두 상단밴드 근처'가 됐다. ①도 역배열만 보던 것에
@@ -56,6 +59,7 @@ class Params:
     near_pct: float = 0.02              # ③ 종가가 상단밴드의 ±2% 안
     near_both: bool = False             # ③ True면 두 밴드 **모두** 근처여야 한다
     rearm_bars: int = 96                # 나갔다 이만큼 안에 다시 들어오면 새로 안 알린다
+    min_ret_24h: float | None = 0.0     # ④ 24h 상승률 하한 — None이면 안 본다
     grace_bars: int = 4                 # 15m × 4 = 1시간(스캔 주기)
     min_turnover_usd: float = 1_000_000
     track_bars: int = 96                # 추적 상한 — 96봉 = 하루
@@ -113,13 +117,18 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
     n_top = d_top.abs() <= params.near_pct
     n_bot = d_bot.abs() <= params.near_pct
     near = (n_top & n_bot) if params.near_both else (n_top | n_bot)
+    # ④ 24h = 15m 96봉 전 종가 대비. 봉마다 재야 진입 봉을 정할 수 있다
+    # (스캔 시점의 티커 값은 스캐너가 한 번 더 거른다).
+    d1 = c / c.shift(96) - 1
     rest = (up_top > up_bot) & near
+    if params.min_ret_24h is not None:
+        rest &= d1 >= params.min_ret_24h
     # 7d = 15m 672봉. 1,000봉을 받으므로 마지막 구간에서는 늘 구할 수 있다.
     d7 = c / c.shift(7 * 96) - 1
     return pd.DataFrame({"close": c, "bear": bear, "bull": bull,
                          "bear_known": bear_known, "up_top": up_top,
                          "up_bot": up_bot, "d_top": d_top, "d_bot": d_bot,
-                         "ret_7d": d7, "rest": rest,
+                         "ret_24h": d1, "ret_7d": d7, "rest": rest,
                          "ok": (bear | bull) & rest})
 
 
@@ -132,6 +141,8 @@ def _detail(row, params: Params) -> dict:
          "near_band": params.band_top if top_closer else params.band_bottom,
          "band_dist": float(row.d_top if top_closer else row.d_bot),
          "band_top": float(row.up_top), "band_bottom": float(row.up_bot)}
+    if pd.notna(row.ret_24h):
+        d["ret_24h"] = float(row.ret_24h)   # 티커 값(gain_24h)이 있으면 그게 우선
     if pd.notna(row.ret_7d):
         d["ret_7d"] = float(row.ret_7d)
     return d
