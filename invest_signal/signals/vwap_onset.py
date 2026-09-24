@@ -1,31 +1,32 @@
-"""상승초입 — 15m 역배열 또는 정배열 · 월 상단밴드가 분기 상단밴드 위 · 종가가 그 밴드 근처.
+"""상승초입 — 15m 역배열 또는 정배열 · 종가가 월 VWAP 상단밴드 근처 · 24h 플러스.
 
   ① 15m 배열 — 둘 중 **하나**만 서면 된다.
        역배열 MA240 < MA480 < MA960 (2.5일 < 5일 < 10일) — 짧은 눈금은 아직
        하락 구조인데 가격이 밴드까지 올라왔다.
        정배열 MA120 > MA240 > MA480 (1.25일 > 2.5일 > 5일) — 짧은 눈금이
        이미 돌아서 올라가는 중에 밴드에 닿았다.
-  ② **월 앵커드 VWAP 상단밴드(+1σ)가 분기 상단밴드보다 위** — 이번 달
-     가격대가 분기 평균보다 높다. 월 단위로는 이미 올라서고 있다는 뜻이다.
-  ③ 종가가 **월 상단밴드 또는 분기 상단밴드 근처**(±near_pct) — 둘 중
-     가까운 쪽 하나에만 붙어 있으면 된다.
-  ④ **24h 상승률이 min_ret_24h(기본 0) 이상** — 떨어지다가 밴드에 걸린
-     종목을 뺀다. 09-24 스냅샷에서 조건 안 26종 중 25종이 24h −5~−10%로
-     밀려 내려와 밴드에 닿은 종목이었다. '초입'은 올라와서 닿은 자리다.
+  ② 종가가 **월 앵커드 VWAP 상단밴드(+1σ) 근처**(±near_pct).
+  ③ **24h 상승률이 min_ret_24h(기본 0) 이상** — 떨어지다가 밴드에 걸린
+     종목을 뺀다. 09-24 스냅샷에서 이게 없을 때 조건 안 26종 중 25종이
+     24h −5~−10%로 밀려 내려와 밴드에 닿은 종목이었다.
 
-> 처음엔 ③이 '종가가 분기 상단과 월 상단 **사이**'였고, 그다음 '15m 960선
-> 근처'였다가 지금의 '두 상단밴드 근처'가 됐다. ①도 역배열만 보던 것에
-> 정배열을 **또는**으로 더했다.
+> 조건 변천: 가격 조건은 '분기 상단과 월 상단 **사이**' → '15m 960선 근처'
+> → '월·분기 상단 중 하나 근처' → 지금의 '월 상단 근처'가 됐다. '월 상단 >
+> 분기 상단' 조건은 뺐다 — 분기 첫 달(1·4·7·10월)에는 두 밴드가 같은 날부터
+> 누적해서 똑같아지므로 한 달 내내 한 건도 안 나왔다(7월 실측 0%).
+
+**월초 가드.** 월 VWAP은 매달 1일에 새로 시작해서, 월초에는 σ가 작아
+상단밴드가 VWAP에 붙어 있다. 그대로면 '상단밴드 근처'가 사실상 'VWAP 근처'라
+1일에는 24h 플러스 종목의 49%가 걸렸다(월 중순 ≈10%). 그래서 **±near_pct
+구간이 VWAP을 품지 않을 때만**(상단 × (1 − near_pct) > VWAP) 판정한다 —
+1일 49% → 2%, 월 중순은 거의 그대로(9.8% → 8.2%). `band_gap: false`면 끈다.
 
 VWAP 밴드는 TradingView의 Anchored VWAP(Standard Deviation 모드)과 같은
 식이다: 소스 (고+저+종)/3, 거래량 가중 표준편차, 배수 1.
 
-**프레임이 둘이다.** ①은 15m, ②③의 밴드는 4h로 잰다 — 분기 앵커드 VWAP을
-15m으로 계산하려면 한 분기치 ≈ 8,800봉이라 종목당 요청이 아홉 번이 된다.
-4h 프레임은 스캔이 이미 받아 두고, 실측으로 밴드 값 차이가 0.04~0.4%였다.
-
-**분기 첫 달(1·4·7·10월)에는 ②가 성립하지 않는다.** 월과 분기가 같은 날부터
-누적해서 두 상단밴드가 똑같아지기 때문이다.
+**프레임이 둘이다.** ①은 15m, ②의 밴드는 4h로 잰다 — 월 앵커드 VWAP을
+15m으로 계산하려면 월말엔 ≈3,000봉이라 종목당 요청이 세 번이 된다. 4h
+프레임은 스캔이 이미 받아 두고, 실측으로 밴드 값 차이가 0.04~0.4%였다.
 
 **조건에 처음 들어온 봉에서 알리고, 머무는 동안 추적한다.** 상태 조건이라
 매 스캔 다시 알리면 같은 말을 반복하게 된다.
@@ -53,21 +54,20 @@ KLINE_LIMIT = 1000
 class Params:
     bear_align: tuple = (240, 480, 960)  # ① 15m 역배열 판정선 (짧은 것부터)
     bull_align: tuple = (120, 240, 480)  # ① 15m 정배열 판정선 — 둘 중 하나면 된다
-    band_mult: float = 1.0              # ②③ 표준편차 배수
-    band_top: str = "M"                 # ② 이 상단밴드가
-    band_bottom: str = "Q"              # ② 이 상단밴드보다 위에 있어야 한다
-    near_pct: float = 0.02              # ③ 종가가 상단밴드의 ±2% 안
-    near_both: bool = False             # ③ True면 두 밴드 **모두** 근처여야 한다
+    band_anchor: str = "M"              # ② 이 앵커드 VWAP의 상단밴드 (M=월)
+    band_mult: float = 1.0              # ② 표준편차 배수
+    near_pct: float = 0.02              # ② 종가가 상단밴드의 ±2% 안
+    band_gap: bool = True               # ② 월초 가드 — ±구간이 VWAP을 품으면 안 본다
+    min_ret_24h: float | None = 0.0     # ③ 24h 상승률 하한 — None이면 안 본다
     rearm_bars: int = 96                # 나갔다 이만큼 안에 다시 들어오면 새로 안 알린다
-    min_ret_24h: float | None = 0.0     # ④ 24h 상승률 하한 — None이면 안 본다
     grace_bars: int = 4                 # 15m × 4 = 1시간(스캔 주기)
     min_turnover_usd: float = 1_000_000
     track_bars: int = 96                # 추적 상한 — 96봉 = 하루
 
 
 def _band_on_15m(df15: pd.DataFrame, df4h: pd.DataFrame, anchor: str,
-                 mult: float) -> pd.Series | None:
-    """4h로 낸 상단밴드를 15m 인덱스에 얹는다(계단식 전방 채움).
+                 mult: float) -> pd.DataFrame | None:
+    """4h로 낸 VWAP·상단밴드를 15m 인덱스에 얹는다(계단식 전방 채움).
 
     4h 한 봉 안의 15m 열여섯 봉은 같은 밴드 값을 본다 — 밴드가 4시간에
     한 번 갱신된다는 뜻이고, VWAP이 느리게 움직이니 문제가 되지 않는다.
@@ -75,10 +75,10 @@ def _band_on_15m(df15: pd.DataFrame, df4h: pd.DataFrame, anchor: str,
     got = anchored_vwap_bands(df4h, anchor, mult)
     if got is None:
         return None
-    upper = got[2].dropna()
-    if upper.empty:
+    both = pd.DataFrame({"vwap": got[0], "upper": got[2]}).dropna()
+    if both.empty:
         return None
-    return upper.reindex(df15.index, method="ffill")
+    return both.reindex(df15.index, method="ffill")
 
 
 def _stacked(c: pd.Series, periods: tuple, rising: bool) -> tuple:
@@ -105,42 +105,37 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
     need = min(max(params.bear_align), max(params.bull_align))
     if len(df15) < need + 2 or df4h is None or len(df4h) < 10:
         return None
-    up_top = _band_on_15m(df15, df4h, params.band_top, params.band_mult)
-    up_bot = _band_on_15m(df15, df4h, params.band_bottom, params.band_mult)
-    if up_top is None or up_bot is None:
+    band = _band_on_15m(df15, df4h, params.band_anchor, params.band_mult)
+    if band is None:
         return None
     c = df15["Close"]
     bear, bear_known = _stacked(c, params.bear_align, rising=False)
     bull, _ = _stacked(c, params.bull_align, rising=True)
-    d_top = c / up_top - 1
-    d_bot = c / up_bot - 1
-    n_top = d_top.abs() <= params.near_pct
-    n_bot = d_bot.abs() <= params.near_pct
-    near = (n_top & n_bot) if params.near_both else (n_top | n_bot)
-    # ④ 24h = 15m 96봉 전 종가 대비. 봉마다 재야 진입 봉을 정할 수 있다
+    dist = c / band.upper - 1
+    rest = dist.abs() <= params.near_pct
+    if params.band_gap:
+        rest &= band.upper * (1 - params.near_pct) > band.vwap
+    # ③ 24h = 15m 96봉 전 종가 대비. 봉마다 재야 진입 봉을 정할 수 있다
     # (스캔 시점의 티커 값은 스캐너가 한 번 더 거른다).
     d1 = c / c.shift(96) - 1
-    rest = (up_top > up_bot) & near
     if params.min_ret_24h is not None:
         rest &= d1 >= params.min_ret_24h
     # 7d = 15m 672봉. 1,000봉을 받으므로 마지막 구간에서는 늘 구할 수 있다.
     d7 = c / c.shift(7 * 96) - 1
     return pd.DataFrame({"close": c, "bear": bear, "bull": bull,
-                         "bear_known": bear_known, "up_top": up_top,
-                         "up_bot": up_bot, "d_top": d_top, "d_bot": d_bot,
+                         "bear_known": bear_known, "upper": band.upper,
+                         "vwap": band.vwap, "dist": dist,
                          "ret_24h": d1, "ret_7d": d7, "rest": rest,
                          "ok": (bear | bull) & rest})
 
 
 def _detail(row, params: Params) -> dict:
-    """줄에 실을 값 — 어느 배열로 섰는지, 어느 밴드에 얼마나 붙었는지, 수익률."""
-    top_closer = abs(row.d_top) <= abs(row.d_bot)
+    """줄에 실을 값 — 어느 배열로 섰는지, 밴드에 얼마나 붙었는지, 수익률."""
     d = {"label": LABEL, "interval": INTERVAL,
          "trend": "역배열" if row.bear else "정배열",
-         # 두 상단밴드 중 가까운 쪽과 그 거리(종가 ÷ 밴드 − 1)
-         "near_band": params.band_top if top_closer else params.band_bottom,
-         "band_dist": float(row.d_top if top_closer else row.d_bot),
-         "band_top": float(row.up_top), "band_bottom": float(row.up_bot)}
+         "near_band": params.band_anchor,
+         "band_dist": float(row.dist),        # 종가 ÷ 상단밴드 − 1
+         "band_upper": float(row.upper)}
     if pd.notna(row.ret_24h):
         d["ret_24h"] = float(row.ret_24h)   # 티커 값(gain_24h)이 있으면 그게 우선
     if pd.notna(row.ret_7d):

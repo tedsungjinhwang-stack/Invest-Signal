@@ -513,10 +513,10 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
 
 def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
                      ticker: dict | None, log=print) -> tuple[list, list]:
-    """🟢상승초입 — 15m 역배열 또는 정배열 · 월 상단밴드 > 분기 상단밴드 ·
-    종가가 두 상단밴드 중 하나 근처.
+    """🟢상승초입 — 15m 역배열 또는 정배열 · 종가가 월 VWAP 상단밴드 근처 ·
+    24h 플러스.
 
-    프레임이 둘이다: ①배열은 15m, ②③밴드는 4h. 둘 다 스캔이 이미 받아 둔
+    프레임이 둘이다: ①배열은 15m, ②밴드는 4h. 둘 다 스캔이 이미 받아 둔
     것이라 추가 요청이 없다(모듈 설명 참고). 4h 프레임이 없으면(인트라바인데
     4h 시그널이 하나도 안 도는 경우) 그냥 건너뛴다 — 이 칸만 비면 된다.
     """
@@ -529,14 +529,13 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
     params = vwap_onset.Params(
         bear_align=tuple(s.get("bear_align", (240, 480, 960))),
         bull_align=tuple(s.get("bull_align", (120, 240, 480))),
+        band_anchor=str(s.get("band_anchor", "M")),
         band_mult=float(s.get("band_mult", 1.0)),
-        band_top=str(s.get("band_top", "M")),
-        band_bottom=str(s.get("band_bottom", "Q")),
         near_pct=float(s.get("near_pct", 0.02)),
-        near_both=bool(s.get("near_both", False)),
-        rearm_bars=int(s.get("rearm_bars", 96)),
+        band_gap=bool(s.get("band_gap", True)),
         min_ret_24h=(None if s.get("min_ret_24h", 0.0) is None
                      else float(s.get("min_ret_24h", 0.0))),
+        rearm_bars=int(s.get("rearm_bars", 96)),
         grace_bars=int(s.get("grace_bars", 4)),
         min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
         track_bars=int(s.get("track_bars", 96)),
@@ -551,7 +550,7 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
             thin += 1
             return False
         g = stat.get("change_pct")
-        # ④ 24h 하한을 **스캔 시점 티커 값으로 한 번 더** 본다. 판정은 15m
+        # ③ 24h 하한을 **스캔 시점 티커 값으로 한 번 더** 본다. 판정은 15m
         # 96봉 전 대비로 했는데, 줄에 찍히는 24h는 티커 값이다 — 둘이 어긋나
         # '24h -0.3%'가 찍힌 줄이 나가면 필터가 안 먹은 것처럼 읽힌다.
         if (g is not None and params.min_ret_24h is not None
@@ -582,9 +581,7 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
             + (f" · 24h 하락 {falling}건 제외" if falling else "")
             + f" (15m {'<'.join(str(x) for x in params.bear_align)} 역배열 또는 "
               f"{'>'.join(str(x) for x in params.bull_align)} 정배열 · "
-              f"{params.band_top} 상단 > {params.band_bottom} 상단 · "
-              f"종가가 {'둘 다' if params.near_both else '둘 중 하나'} "
-              f"±{params.near_pct:.0%}"
+              f"종가가 {params.band_anchor} 상단 ±{params.near_pct:.0%}"
               + (f" · 24h {params.min_ret_24h:+.0%} 이상"
                  if params.min_ret_24h is not None else "") + ")")
     return events, ongoing
