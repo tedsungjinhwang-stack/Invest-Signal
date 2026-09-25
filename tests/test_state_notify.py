@@ -1047,6 +1047,22 @@ def test_leader_lines_sort_by_turnover_not_gain():
     assert out.index("↳ H") < out.index("↳ K")       # 추적도 같은 축
 
 
+def test_leader_fast_marks_come_first():
+    """⚡ — 4h 단기선 터치·돌파(🔁·🔓) 줄이 신규·추적 모두 맨 위, 그 안은
+    거래대금 순. 장기선 마크는 끌어올리지 않는다."""
+    new = [_lb("BIGUSDT", 9e8, 0.1, rank=1),
+           _lb("SLOWUSDT", 5e8, 0.1, rank=2, wave4h="장기선 돌파"),
+           _lb("TOUCHUSDT", 3e6, 0.1, rank=3, wave4h="단기선 터치"),
+           _lb("BREAKUSDT", 8e6, 0.1, rank=4, wave4h="단기선 돌파")]
+    hold = [_lb("HBIGUSDT", 2e9, 0.05, watch_days=2, above_ma=True),
+            _lb("HFASTUSDT", 1e6, 0.05, watch_days=1, above_ma=True,
+                wave4h="단기선 터치")]
+    out = format_events(new, [], {}, ongoing_crypto=hold)
+    pos = [out.index(f">{s}<") for s in ("BREAK", "TOUCH", "BIG", "SLOW")]
+    assert pos == sorted(pos), out
+    assert out.index("↳ HFAST") < out.index("↳ HBIG")
+
+
 def test_turnover_is_printed_so_the_order_is_readable():
     """정렬 축이 줄에 안 보이면 왜 이 순서인지 알 수가 없다."""
     out = format_events([_lb("AUSDT", 8.4e8, 0.11, rank=1),
