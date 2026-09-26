@@ -1061,6 +1061,9 @@ def test_leader_fast_marks_come_first():
     pos = [out.index(f">{s}<") for s in ("BREAK", "TOUCH", "BIG", "SLOW")]
     assert pos == sorted(pos), out
     assert out.index("↳ HFAST") < out.index("↳ HBIG")
+    # 추적의 단기선 줄도 신규 나머지보다 위 — • 단기선 → ↳ 단기선 → • 나머지 → ↳ 나머지
+    assert out.index(">TOUCH<") < out.index("↳ HFAST") < out.index(">BIG<")
+    assert out.index(">SLOW<") < out.index("↳ HBIG")
 
 
 def test_turnover_is_printed_so_the_order_is_readable():

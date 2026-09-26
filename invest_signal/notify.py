@@ -289,7 +289,9 @@ LEADER_FAST_MARKS = ("단기선 돌파", "단기선 터치")
 def _leader_fast_first(e) -> int:
     """⚡ 줄 중 4h **단기선 터치·돌파**(🔁·🔓)가 붙은 줄을 칸 맨 위로.
 
-    신규(•)·추적(↳) 둘 다 같다. 그 무리 안과 나머지는 거래대금 순이다.
+    신규(•)·추적(↳) 둘 다 같다 — 칸을 조립할 때 **추적의 단기선 줄도 신규
+    나머지보다 위로** 올린다(• 단기선 → ↳ 단기선 → • 나머지 → ↳ 나머지).
+    그 무리 안과 나머지는 거래대금 순이다.
     장기선 마크(🧱·💥)는 끌어올리지 않는다 — 요청이 단기선 둘이었다. 마크는
     줄마다 하나(장기선 돌파 > 장기선 터치 > 단기선 돌파 > 단기선 터치)라서,
     같은 창에서 장기선까지 건드린 줄은 장기선 마크가 붙어 이 무리에 안 든다.
@@ -785,16 +787,33 @@ def format_events(events_crypto: list, events_etf: list,
             lines.append("")
             lines.append(f"{MARKET_EMOJI.get(mtitle, '▪')} <b>{mtitle}</b>")
             variant = None      # 파동 추적 블록의 변형 소제목 추적용
-            for e in new_sel:
+
+            def new_line(e):
                 name = etf_names.get(e.symbol, "") if kind != "crypto" else ""
                 market = "KR" if (kind != "crypto" and e.symbol[:1].isdigit()) else "US"
-                lines.append(_event_line(e, chart_url(e.symbol, kind, market), name, kind))
+                return _event_line(e, chart_url(e.symbol, kind, market), name, kind)
+
+            # ⚡ — 4h 단기선 터치·돌파 줄은 **추적(↳) 줄까지 칸 맨 위로** 올린다.
+            # 신규 뒤에 추적을 붙이는 순서 그대로면 추적 줄의 🔓·🔁가 신규
+            # 스무 줄 아래에 묻힌다. 순서: • 단기선 → ↳ 단기선 → • 나머지 →
+            # ↳ 나머지. 다른 칸은 fast가 비어 예전 순서 그대로다.
+            fast_new = [e for e in new_sel if not _leader_fast_first(e)
+                        and e.signal == "leader_break"]
+            fast_hold = [e for e in hold_sel if not _leader_fast_first(e)
+                         and e.signal == "leader_break"]
+            lines.extend(new_line(e) for e in fast_new)
+            lines.extend(hold_line(e, kind) for e in fast_hold)
+            for e in new_sel:
+                if e not in fast_new:
+                    lines.append(new_line(e))
             # 추적 리스트 — 종목마다 한 줄, 현재가 포함. 자르지 않고 전부 보여준다
             # (길어지면 split_chunks가 여러 메시지로 나눠 보낸다).
             # 파동은 변형이 바뀌는 자리에 소제목을 넣는다 — 이미 변형별로
             # 묶여 있으므로 줄마다 변형 이름을 반복할 이유가 없고, 서른 줄
             # 내내 같은 말이 붙으면 정작 다른 값이 눈에 안 들어온다.
             for e in hold_sel:
+                if e in fast_hold:
+                    continue
                 stage = e.detail.get("stage") if e.signal == "wave_setup" else None
                 if stage is not None and stage != variant:
                     lines.append(WAVE_HEADERS.get(stage, f"  {stage}"))
