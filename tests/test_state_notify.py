@@ -1061,24 +1061,25 @@ def test_leader_lines_sort_by_turnover_not_gain():
 
 
 def test_leader_fast_marks_come_first():
-    """⚡ — 단기선 터치·돌파(🔁·🔓, 1h·4h 어느 쪽이든) 줄이 신규·추적 모두 맨 위,
-    그 안은 거래대금 순. 장기선 마크만 있는 줄은 끌어올리지 않는다."""
+    """⚡ — 1h 단기선 줄 → 4h 단기선 줄 → 나머지. 층마다 • → ↳, 층 안은
+    거래대금 순. 장기선 마크만 있는 줄은 끌어올리지 않는다."""
     new = [_lb("BIGUSDT", 9e8, 0.1, rank=1),
            _lb("SLOWUSDT", 5e8, 0.1, rank=2, wave_mark_1h="장기선 돌파",
                wave_mark_4h="장기선 터치"),
-           _lb("TOUCHUSDT", 3e6, 0.1, rank=3, wave_mark_4h="단기선 터치"),
-           _lb("BREAKUSDT", 8e6, 0.1, rank=4, wave_mark_1h="단기선 돌파",
-               wave_mark_4h="장기선 돌파")]
+           _lb("F4HUSDT", 7e8, 0.1, rank=3, wave_mark_4h="단기선 터치"),
+           _lb("F1LOUSDT", 3e6, 0.1, rank=4, wave_mark_1h="단기선 터치"),
+           _lb("F1HIUSDT", 8e6, 0.1, rank=5, wave_mark_1h="단기선 돌파",
+               wave_mark_4h="단기선 돌파")]
     hold = [_lb("HBIGUSDT", 2e9, 0.05, watch_days=2, above_ma=True),
-            _lb("HFASTUSDT", 1e6, 0.05, watch_days=1, above_ma=True,
+            _lb("HF4HUSDT", 5e9, 0.05, watch_days=1, above_ma=True,
+                wave_mark_4h="단기선 돌파"),
+            _lb("HF1HUSDT", 1e6, 0.05, watch_days=1, above_ma=True,
                 wave_mark_1h="단기선 터치")]
     out = format_events(new, [], {}, ongoing_crypto=hold)
-    pos = [out.index(f">{s}<") for s in ("BREAK", "TOUCH", "BIG", "SLOW")]
+    order = [">F1HI<", ">F1LO<", "↳ HF1H", ">F4H<", "↳ HF4H", ">BIG<", ">SLOW<",
+             "↳ HBIG"]
+    pos = [out.index(k) for k in order]
     assert pos == sorted(pos), out
-    assert out.index("↳ HFAST") < out.index("↳ HBIG")
-    # 추적의 단기선 줄도 신규 나머지보다 위 — • 단기선 → ↳ 단기선 → • 나머지 → ↳ 나머지
-    assert out.index(">TOUCH<") < out.index("↳ HFAST") < out.index(">BIG<")
-    assert out.index(">SLOW<") < out.index("↳ HBIG")
 
 
 def test_turnover_is_printed_so_the_order_is_readable():

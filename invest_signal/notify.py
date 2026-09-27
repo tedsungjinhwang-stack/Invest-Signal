@@ -292,21 +292,24 @@ LEADER_FAST_MARKS = ("단기선 돌파", "단기선 터치")
 
 
 def _leader_fast_first(e) -> int:
-    """⚡ 줄 중 **단기선 터치·돌파**(🔁·🔓)가 붙은 줄을 칸 맨 위로 — 1h·4h 중
-    어느 쪽이든 단기선 마크가 있으면 올린다.
+    """⚡ 줄의 단기선 층 — 0: 1h 단기선 · 1: 4h 단기선 · 2: 나머지.
 
-    신규(•)·추적(↳) 둘 다 같다 — 칸을 조립할 때 **추적의 단기선 줄도 신규
-    나머지보다 위로** 올린다(• 단기선 → ↳ 단기선 → • 나머지 → ↳ 나머지).
-    그 무리 안과 나머지는 거래대금 순이다.
-    장기선 마크(🧱·💥)는 끌어올리지 않는다 — 요청이 단기선 둘이었다. 마크는
+    **1h 단기선 터치·돌파(🔓·🔁)가 붙은 줄이 맨 위, 그다음 4h 단기선 줄**이다
+    (1h에 단기선 마크가 있으면 4h 마크와 무관하게 첫 층). 신규(•)·추적(↳)
+    둘 다 같고, 칸을 조립할 때 층마다 • → ↳ 순으로 싣는다(• 1h단기 → ↳ 1h단기
+    → • 4h단기 → ↳ 4h단기 → • 나머지 → ↳ 나머지). 층 안은 거래대금 순이다.
+
+    장기선 마크(🧱·💥)는 끌어올리지 않는다 — 요청이 단기선이었다. 마크는
     프레임마다 하나(장기선 돌파 > 장기선 터치 > 단기선 돌파 > 단기선 터치)라서,
     같은 창에서 장기선까지 건드린 프레임은 장기선 마크가 붙는다.
-    ⚡ 밖은 전부 같은 값이라 다른 칸의 순서가 안 흔들린다.
+    ⚡ 밖은 전부 0이라 다른 칸의 순서가 안 흔들린다.
     """
     if e.signal != "leader_break":
         return 0
-    return 0 if any(e.detail.get(f"wave_mark_{tf}") in LEADER_FAST_MARKS
-                    for tf in LEADER_MARK_TFS) else 1
+    for i, tf in enumerate(LEADER_MARK_TFS):
+        if e.detail.get(f"wave_mark_{tf}") in LEADER_FAST_MARKS:
+            return i
+    return len(LEADER_MARK_TFS)
 
 
 def _spike_desc(e):
@@ -802,16 +805,19 @@ def format_events(events_crypto: list, events_etf: list,
 
             # ⚡ — 단기선 터치·돌파 줄은 **추적(↳) 줄까지 칸 맨 위로** 올린다.
             # 신규 뒤에 추적을 붙이는 순서 그대로면 추적 줄의 🔓·🔁가 신규
-            # 스무 줄 아래에 묻힌다. 순서: • 단기선 → ↳ 단기선 → • 나머지 →
-            # ↳ 나머지. 다른 칸은 fast가 비어 예전 순서 그대로다.
-            fast_new = [e for e in new_sel if not _leader_fast_first(e)
-                        and e.signal == "leader_break"]
-            fast_hold = [e for e in hold_sel if not _leader_fast_first(e)
-                         and e.signal == "leader_break"]
-            lines.extend(new_line(e) for e in fast_new)
-            lines.extend(hold_line(e, kind) for e in fast_hold)
+            # 스무 줄 아래에 묻힌다. 층(1h 단기선 → 4h 단기선)마다 • → ↳ 순이고
+            # 나머지는 그 아래 • → ↳. 다른 칸은 층이 없어 예전 순서 그대로다.
+            lifted = set()
+            for tier in range(len(LEADER_MARK_TFS)):
+                for sel, render in ((new_sel, new_line),
+                                    (hold_sel, lambda e: hold_line(e, kind))):
+                    for e in sel:
+                        if (e.signal == "leader_break"
+                                and _leader_fast_first(e) == tier):
+                            lines.append(render(e))
+                            lifted.add(id(e))
             for e in new_sel:
-                if e not in fast_new:
+                if id(e) not in lifted:
                     lines.append(new_line(e))
             # 추적 리스트 — 종목마다 한 줄, 현재가 포함. 자르지 않고 전부 보여준다
             # (길어지면 split_chunks가 여러 메시지로 나눠 보낸다).
@@ -819,7 +825,7 @@ def format_events(events_crypto: list, events_etf: list,
             # 묶여 있으므로 줄마다 변형 이름을 반복할 이유가 없고, 서른 줄
             # 내내 같은 말이 붙으면 정작 다른 값이 눈에 안 들어온다.
             for e in hold_sel:
-                if e in fast_hold:
+                if id(e) in lifted:
                     continue
                 stage = e.detail.get("stage") if e.signal == "wave_setup" else None
                 if stage is not None and stage != variant:
