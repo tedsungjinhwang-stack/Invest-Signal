@@ -708,7 +708,7 @@ def test_wave_mark_break_after_long_decline():
     import numpy as np
     from invest_signal.signals.leader_break import Params, wave_mark
     closes = np.r_[np.linspace(200, 100, 150), np.linspace(100, 160, 12)]
-    got = wave_mark(_st_frame(closes), Params(wave_mark_bars=12))
+    got = wave_mark(_st_frame(closes), Params(), bars=12)
     assert got in ("장기선 돌파", "단기선 돌파")
 
 
@@ -719,11 +719,11 @@ def test_wave_mark_prefers_the_bigger_event():
     from invest_signal.signals.leader_break import Params, wave_mark
     closes = np.r_[np.linspace(200, 100, 150), np.linspace(100, 180, 20)]
     df = _st_frame(closes)
-    p = Params(wave_mark_bars=20)
+    p = Params()
     slow = supertrend_full(df, p.turn_slow_period, p.turn_slow_mult)["dir"].to_numpy()
     flipped = any(slow[i] > 0 and slow[i - 1] < 0 for i in range(len(df) - 20, len(df)))
     assert flipped, "픽스처가 장기 돌파를 못 만들었다"
-    assert wave_mark(df, p) == "장기선 돌파"
+    assert wave_mark(df, p, bars=20) == "장기선 돌파"
 
 
 def test_wave_mark_old_events_fall_out_of_the_window():
@@ -733,7 +733,7 @@ def test_wave_mark_old_events_fall_out_of_the_window():
     # 반등 뒤 한참 옆으로 — 돌파는 오래전이고, 선에서도 멀리 떨어져 있다
     closes = np.r_[np.linspace(200, 100, 150), np.linspace(100, 160, 12),
                    np.linspace(160, 200, 60)]
-    assert wave_mark(_st_frame(closes, spread=0.001), Params(wave_mark_bars=6)) is None
+    assert wave_mark(_st_frame(closes, spread=0.001), Params(), bars=6) is None
 
 
 def test_wave_mark_off_or_short_is_none():

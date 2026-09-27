@@ -637,8 +637,8 @@ def test_turn_up_mark_reads_pre_kind_events_as_a_flip():
     assert "🔼단기전환" in format_events([e], [], {})
 
 
-def test_momentum_rows_show_4h_marks_instead_of_resist():
-    """⚡ 줄은 ↗️1h 대신 4h 단기·장기선 마크(파동과 같은 네 마크)를 싣는다.
+def test_momentum_rows_show_line_marks_instead_of_resist():
+    """⚡ 줄은 ↗️1h 대신 단기·장기선 마크(파동과 같은 네 마크)를 싣는다.
 
     신규·추적 양쪽 다. resist_1h 값이 남아 있어도 ⚡ 줄에는 안 나온다.
     """
@@ -646,7 +646,7 @@ def test_momentum_rows_show_4h_marks_instead_of_resist():
         e = _leader(symbol, hold=hold)
         e.detail["resist_1h"] = "돌파"          # 계산은 돼도 ⚡엔 안 나와야 한다
         if mark:
-            e.detail["wave_mark"] = mark
+            e.detail["wave_mark_4h"] = mark
         return e
 
     out = format_events([lead("SBRUSDT", "장기선 돌파"), lead("STCUSDT", "장기선 터치"),
@@ -655,23 +655,36 @@ def test_momentum_rows_show_4h_marks_instead_of_resist():
                         ongoing_crypto=[lead("HOLDUSDT", "단기선 터치", hold=True)])
     line = {n: [ln for ln in out.splitlines() if f">{n}</a>" in ln][0]
             for n in ("SBR", "STC", "FBR", "FTC", "NONE")}
-    assert "💥장기선돌파" in line["SBR"]
-    assert "🧱장기선터치" in line["STC"]
-    assert "🔓단기선돌파" in line["FBR"]
-    assert "🔁단기선터치" in line["FTC"]
+    assert "4h💥장기선돌파" in line["SBR"]
+    assert "4h🧱장기선터치" in line["STC"]
+    assert "4h🔓단기선돌파" in line["FBR"]
+    assert "4h🔁단기선터치" in line["FTC"]
     assert not any(m in line["NONE"] for m in ("💥", "🧱", "🔓", "🔁"))
     assert "↗️" not in out
     hold = [ln for ln in out.splitlines() if ln.startswith("↳")][0]
-    assert "🔁단기선터치" in hold
+    assert "4h🔁단기선터치" in hold
+
+
+def test_momentum_rows_show_1h_and_4h_marks_together():
+    """1h·4h 마크를 둘 다 싣고 프레임을 앞에 붙인다 — 1h 먼저."""
+    e = _leader("BOTHUSDT")
+    e.detail["wave_mark_1h"] = "단기선 돌파"
+    e.detail["wave_mark_4h"] = "장기선 터치"
+    h = _leader("HOLDUSDT", hold=True)
+    h.detail["wave_mark_1h"] = "단기선 터치"
+    out = format_events([e], [], {}, ongoing_crypto=[h])
+    assert "1h🔓단기선돌파 · 4h🧱장기선터치" in out
+    hold = [ln for ln in out.splitlines() if ln.startswith("↳")][0]
+    assert "1h🔁단기선터치" in hold and "4h" not in hold.split("·")[1]
 
 
 def test_4h_mark_and_turn_up_can_share_a_row():
     """🔼(꺼져 있지만 켜면)와 4h 마크는 한 줄에 같이 붙을 수 있다."""
     e = _leader("BOTHUSDT")
     e.detail["turn_up"] = "전환"
-    e.detail["wave_mark"] = "단기선 돌파"
+    e.detail["wave_mark_4h"] = "단기선 돌파"
     out = format_events([e], [], {})
-    assert "🔼단기전환" in out and "🔓단기선돌파" in out
+    assert "🔼단기전환" in out and "4h🔓단기선돌파" in out
 
 
 def test_resist_marks_render_on_wave_rows_too():
@@ -1048,15 +1061,17 @@ def test_leader_lines_sort_by_turnover_not_gain():
 
 
 def test_leader_fast_marks_come_first():
-    """⚡ — 4h 단기선 터치·돌파(🔁·🔓) 줄이 신규·추적 모두 맨 위, 그 안은
-    거래대금 순. 장기선 마크는 끌어올리지 않는다."""
+    """⚡ — 단기선 터치·돌파(🔁·🔓, 1h·4h 어느 쪽이든) 줄이 신규·추적 모두 맨 위,
+    그 안은 거래대금 순. 장기선 마크만 있는 줄은 끌어올리지 않는다."""
     new = [_lb("BIGUSDT", 9e8, 0.1, rank=1),
-           _lb("SLOWUSDT", 5e8, 0.1, rank=2, wave_mark="장기선 돌파"),
-           _lb("TOUCHUSDT", 3e6, 0.1, rank=3, wave_mark="단기선 터치"),
-           _lb("BREAKUSDT", 8e6, 0.1, rank=4, wave_mark="단기선 돌파")]
+           _lb("SLOWUSDT", 5e8, 0.1, rank=2, wave_mark_1h="장기선 돌파",
+               wave_mark_4h="장기선 터치"),
+           _lb("TOUCHUSDT", 3e6, 0.1, rank=3, wave_mark_4h="단기선 터치"),
+           _lb("BREAKUSDT", 8e6, 0.1, rank=4, wave_mark_1h="단기선 돌파",
+               wave_mark_4h="장기선 돌파")]
     hold = [_lb("HBIGUSDT", 2e9, 0.05, watch_days=2, above_ma=True),
             _lb("HFASTUSDT", 1e6, 0.05, watch_days=1, above_ma=True,
-                wave_mark="단기선 터치")]
+                wave_mark_1h="단기선 터치")]
     out = format_events(new, [], {}, ongoing_crypto=hold)
     pos = [out.index(f">{s}<") for s in ("BREAK", "TOUCH", "BIG", "SLOW")]
     assert pos == sorted(pos), out

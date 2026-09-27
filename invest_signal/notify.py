@@ -142,9 +142,10 @@ def _slow_break(e) -> bool:
             and e.detail.get("stage") == WAVE_SLOW_BREAK)
 
 
-# ⚡ 줄의 마크(leader_break.wave_mark, 기본 1h) → 파동과 같은 네 마크.
+# ⚡ 줄의 마크(leader_break.wave_mark, 1h·4h 각각) → 파동과 같은 네 마크.
 LEADER_WAVE_TAGS = {"장기선 돌파": SLOW_BREAK_TAG, "장기선 터치": SLOW_TOUCH_TAG,
                     "단기선 돌파": FAST_BREAK_TAG, "단기선 터치": FAST_TOUCH_TAG}
+LEADER_MARK_TFS = ("1h", "4h")      # 줄에 싣는 순서
 
 
 def _wave_mark(e) -> str | None:
@@ -155,7 +156,11 @@ def _wave_mark(e) -> str | None:
     마크가 붙으면 줄 끝에 변형 이름을 다시 적지 않는다(두 번 말하게 된다).
     """
     if e.signal == "leader_break":
-        return LEADER_WAVE_TAGS.get(e.detail.get("wave_mark"))
+        # 1h·4h를 각각 싣고 프레임을 앞에 붙인다 — `1h🔁단기선터치 · 4h💥장기선돌파`.
+        # 둘 다 없으면 None, 하나만 있으면 그것만.
+        parts = [tf + LEADER_WAVE_TAGS[m] for tf in LEADER_MARK_TFS
+                 if (m := e.detail.get(f"wave_mark_{tf}")) in LEADER_WAVE_TAGS]
+        return " · ".join(parts) or None
     if _slow_touch(e):
         return SLOW_TOUCH_TAG
     if _fast_touch(e):
@@ -269,7 +274,7 @@ def _turnover_desc(e):
     다른 칸은 랭크 필터의 하드 하한을 이미 통과한 종목만 남아 거래대금으로
     다시 줄 세워도 새 정보가 없다. 그래서 ⚡에만 건다.
 
-    **⚡ 칸의 정렬 축이다** — 그 앞에 1h 단기선 터치·돌파 줄을 맨 위로 올리는
+    **⚡ 칸의 정렬 축이다** — 그 앞에 단기선 터치·돌파(1h·4h) 줄을 맨 위로 올리는
     묶음 하나만 있다(_leader_fast_first). 예전엔 ↗️1h돌파 → 🪜회복구간 → 🍃조용으로
     묶고 그 안에서 세웠는데, 묶음이 셋이나 되니 정작 거래대금 순서가 묶음
     안으로 숨었다. 셋 다 정렬에서 빼고 **표시로만** 남긴다 — 승률 차이는
@@ -282,24 +287,26 @@ def _turnover_desc(e):
     return (1, 0.0) if v is None else (0, -float(v))
 
 
-# ⚡ 줄에서 맨 위로 올리는 마크(기본 1h) — 단기선을 건드렸거나 뚫은 줄.
+# ⚡ 줄에서 맨 위로 올리는 마크(1h·4h 어느 쪽이든) — 단기선을 건드렸거나 뚫은 줄.
 LEADER_FAST_MARKS = ("단기선 돌파", "단기선 터치")
 
 
 def _leader_fast_first(e) -> int:
-    """⚡ 줄 중 **단기선 터치·돌파**(기본 1h)(🔁·🔓)가 붙은 줄을 칸 맨 위로.
+    """⚡ 줄 중 **단기선 터치·돌파**(🔁·🔓)가 붙은 줄을 칸 맨 위로 — 1h·4h 중
+    어느 쪽이든 단기선 마크가 있으면 올린다.
 
     신규(•)·추적(↳) 둘 다 같다 — 칸을 조립할 때 **추적의 단기선 줄도 신규
     나머지보다 위로** 올린다(• 단기선 → ↳ 단기선 → • 나머지 → ↳ 나머지).
     그 무리 안과 나머지는 거래대금 순이다.
     장기선 마크(🧱·💥)는 끌어올리지 않는다 — 요청이 단기선 둘이었다. 마크는
-    줄마다 하나(장기선 돌파 > 장기선 터치 > 단기선 돌파 > 단기선 터치)라서,
-    같은 창에서 장기선까지 건드린 줄은 장기선 마크가 붙어 이 무리에 안 든다.
+    프레임마다 하나(장기선 돌파 > 장기선 터치 > 단기선 돌파 > 단기선 터치)라서,
+    같은 창에서 장기선까지 건드린 프레임은 장기선 마크가 붙는다.
     ⚡ 밖은 전부 같은 값이라 다른 칸의 순서가 안 흔들린다.
     """
     if e.signal != "leader_break":
         return 0
-    return 0 if e.detail.get("wave_mark") in LEADER_FAST_MARKS else 1
+    return 0 if any(e.detail.get(f"wave_mark_{tf}") in LEADER_FAST_MARKS
+                    for tf in LEADER_MARK_TFS) else 1
 
 
 def _spike_desc(e):
@@ -429,7 +436,7 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     if tt:
         tags.append(tt)
     if e.signal != "leader_break":
-        # ⚡는 ↗️1h 대신 단기·장기선 마크(위 wm, 기본 1h)를 쓴다. 파동은 둘 다 싣는다.
+        # ⚡는 ↗️1h 대신 단기·장기선 마크(위 wm, 1h·4h)를 쓴다. 파동은 둘 다 싣는다.
         tags += _resist_tags(d)
     ft = _fib_tag(d)
     if ft:
@@ -658,7 +665,7 @@ def format_events(events_crypto: list, events_etf: list,
             ft = _fib_tag(d)
             if ft:
                 tags.insert(0, ft)
-            wm = _wave_mark(e)          # ↗️1h 대신 단기·장기선 마크(기본 1h)
+            wm = _wave_mark(e)          # ↗️1h 대신 단기·장기선 마크(1h·4h)
             if wm:
                 tags.insert(0, wm)
             tt = _turn_tag(d)

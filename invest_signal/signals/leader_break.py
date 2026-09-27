@@ -94,10 +94,11 @@ class Params:
     turn15m_require_bearish: bool = False
     # 🧱🔁🔓💥 단기·장기선 터치·돌파 — ⚡ 줄의 마크(wave_mark()).
     # 선은 파동과 같은 두 수퍼트렌드(turn_fast_* 22×3 · turn_slow_* 30×6)를
-    # wave_mark_interval 프레임에 건다. 처음엔 4h였고 09-27에 1h로 바꿨다.
+    # **1h와 4h 두 프레임에 각각** 건다. 줄에는 `1h🔁단기선터치 · 4h💥장기선돌파`
+    # 처럼 프레임을 앞에 붙여 둘 다 싣는다. 창은 둘 다 24시간이다.
     wave_mark_enabled: bool = True
-    wave_mark_interval: str = "1h"  # "1h"(구조 판정 프레임) 또는 "4h"
-    wave_mark_bars: int = 24        # 이 봉 수 안에 있었던 사건까지 표시 (24 × 1h = 24시간)
+    wave_mark_1h_bars: int = 24     # 1h 창 (24 × 1h = 24시간)
+    wave_mark_4h_bars: int = 6      # 4h 창 (6 × 4h = 24시간)
 
 
 def leaders(ticker: dict[str, dict], symbols: set[str],
@@ -374,13 +375,14 @@ WAVE_FAST_BREAK = "단기선 돌파"
 WAVE_FAST_TOUCH = "단기선 터치"
 
 
-def wave_mark(df: pd.DataFrame | None, params: Params = Params()) -> str | None:
+def wave_mark(df: pd.DataFrame | None, params: Params = Params(),
+              bars: int = 24) -> str | None:
     """⚡ 줄의 마크 — 단기선·장기선을 **최근에** 뚫었거나 건드렸는지.
 
-    프레임은 wave_mark_interval(기본 1h)이다. 스캐너가 알맞은 프레임을 넘긴다
-    — 1h면 구조 판정에 쓰는 1h 프레임(ALIGN_INTERVAL)이라 추가 요청이 없다.
-    **4h에서 1h로 옮겼다**(09-27): 4h 마크는 사건이 하루에 여섯 봉뿐이라
-    눌림 안의 잔 전환을 못 봤다. 창은 같은 24시간(1h × 24봉)이다.
+    프레임에 무관한 계산이다. 스캐너가 **1h와 4h로 한 번씩** 부른다(창은
+    둘 다 24시간 — 1h 24봉, 4h 6봉). 두 프레임 모두 스캔이 이미 받아 둔
+    것이라 추가 요청이 없다. 처음엔 4h만 보다가(09-26) 1h로 옮겼고(09-27),
+    둘 다 싣기로 했다 — 4h는 큰 흐름의 선을, 1h는 눌림 안의 잔 전환을 본다.
 
     파동과 **같은 두 선**(단기 22×3 · 장기 30×6 수퍼트렌드)을 보고 같은 네
     이름을 쓴다. 다른 점은 파동의 전제(장기는 아직 하락)를 걸지 않는다는 것 —
@@ -394,7 +396,7 @@ def wave_mark(df: pd.DataFrame | None, params: Params = Params()) -> str | None:
     터치는 파동과 같은 정의다(`저가 ≤ 선 ≤ 고가`). 선이 지지(아래)인지
     저항(위)인지는 가르지 않는다 — '지금 그 선에 와 있다'가 이 마크의 뜻이다.
 
-    wave_mark_bars(기본 24봉 = 24시간) 안에서 찾고, 여럿이면 **큰 사건 하나만**
+    마지막 bars봉 안에서 찾고, 여럿이면 **큰 사건 하나만**
     돌려준다: 장기선 돌파 > 장기선 터치 > 단기선 돌파 > 단기선 터치(파동 칸의
     읽는 순서와 같다). 돌파는 하락에서 뒤집힌 것만 센다 — ATR 워밍업 구간의
     dir은 NaN이라 'not up'으로 세면 유령 돌파가 생긴다(파동 _break_index와 같다).
@@ -411,7 +413,7 @@ def wave_mark(df: pd.DataFrame | None, params: Params = Params()) -> str | None:
     hi = df["High"].to_numpy(float)
     lo = df["Low"].to_numpy(float)
     last = len(df) - 1
-    first = max(1, last - max(1, params.wave_mark_bars) + 1)
+    first = max(1, last - max(1, bars) + 1)
     found = set()
     for st, brk, tch in ((slow, WAVE_SLOW_BREAK, WAVE_SLOW_TOUCH),
                          (fast, WAVE_FAST_BREAK, WAVE_FAST_TOUCH)):
