@@ -646,7 +646,7 @@ def test_momentum_rows_show_4h_marks_instead_of_resist():
         e = _leader(symbol, hold=hold)
         e.detail["resist_1h"] = "돌파"          # 계산은 돼도 ⚡엔 안 나와야 한다
         if mark:
-            e.detail["wave4h"] = mark
+            e.detail["wave_mark"] = mark
         return e
 
     out = format_events([lead("SBRUSDT", "장기선 돌파"), lead("STCUSDT", "장기선 터치"),
@@ -669,7 +669,7 @@ def test_4h_mark_and_turn_up_can_share_a_row():
     """🔼(꺼져 있지만 켜면)와 4h 마크는 한 줄에 같이 붙을 수 있다."""
     e = _leader("BOTHUSDT")
     e.detail["turn_up"] = "전환"
-    e.detail["wave4h"] = "단기선 돌파"
+    e.detail["wave_mark"] = "단기선 돌파"
     out = format_events([e], [], {})
     assert "🔼단기전환" in out and "🔓단기선돌파" in out
 
@@ -1051,12 +1051,12 @@ def test_leader_fast_marks_come_first():
     """⚡ — 4h 단기선 터치·돌파(🔁·🔓) 줄이 신규·추적 모두 맨 위, 그 안은
     거래대금 순. 장기선 마크는 끌어올리지 않는다."""
     new = [_lb("BIGUSDT", 9e8, 0.1, rank=1),
-           _lb("SLOWUSDT", 5e8, 0.1, rank=2, wave4h="장기선 돌파"),
-           _lb("TOUCHUSDT", 3e6, 0.1, rank=3, wave4h="단기선 터치"),
-           _lb("BREAKUSDT", 8e6, 0.1, rank=4, wave4h="단기선 돌파")]
+           _lb("SLOWUSDT", 5e8, 0.1, rank=2, wave_mark="장기선 돌파"),
+           _lb("TOUCHUSDT", 3e6, 0.1, rank=3, wave_mark="단기선 터치"),
+           _lb("BREAKUSDT", 8e6, 0.1, rank=4, wave_mark="단기선 돌파")]
     hold = [_lb("HBIGUSDT", 2e9, 0.05, watch_days=2, above_ma=True),
             _lb("HFASTUSDT", 1e6, 0.05, watch_days=1, above_ma=True,
-                wave4h="단기선 터치")]
+                wave_mark="단기선 터치")]
     out = format_events(new, [], {}, ongoing_crypto=hold)
     pos = [out.index(f">{s}<") for s in ("BREAK", "TOUCH", "BIG", "SLOW")]
     assert pos == sorted(pos), out

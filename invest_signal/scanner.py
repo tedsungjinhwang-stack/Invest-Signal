@@ -213,8 +213,9 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         turn15m_enabled=bool(s.get("turn15m_enabled", True)),
         turn15m_bars=int(s.get("turn15m_bars", 8)),
         turn15m_require_bearish=bool(s.get("turn15m_require_bearish", False)),
-        wave4h_enabled=bool(s.get("wave4h_enabled", True)),
-        wave4h_bars=int(s.get("wave4h_bars", 6)),
+        wave_mark_enabled=bool(s.get("wave_mark_enabled", True)),
+        wave_mark_interval=str(s.get("wave_mark_interval", "1h")),
+        wave_mark_bars=int(s.get("wave_mark_bars", 24)),
     )
     if ticker is None:              # 호출 측이 미리 받아두지 않았을 때만 직접 조회
         ticker = _crypto_ticker(session, source, log)
@@ -349,10 +350,12 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             t = leader_break.turn_up(df4, params)
             if t:
                 detail["turn_up"] = t
-            # 🧱🔁🔓💥 4h 단기·장기선 터치·돌파 — ⚡ 줄에서 ↗️1h 대신 보인다
-            w = leader_break.wave_mark_4h(df4, params)
+            # 🧱🔁🔓💥 단기·장기선 터치·돌파 — 기본 1h. 구조 판정에서 이미
+            # 받아 둔 1h 프레임이라 추가 요청이 없다(4h면 받아 둔 4h 프레임).
+            w = leader_break.wave_mark(
+                hour_frame(sym) if params.wave_mark_interval == "1h" else df4, params)
             if w:
-                detail["wave4h"] = w
+                detail["wave_mark"] = w
             if resist:
                 detail["resist_1h"] = resist
             if resist15:

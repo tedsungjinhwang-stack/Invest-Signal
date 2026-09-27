@@ -92,11 +92,12 @@ class Params:
     turn15m_enabled: bool = True
     turn15m_bars: int = 8           # 터치·돌파 후 이 봉 수까지 표시 (2시간)
     turn15m_require_bearish: bool = False
-    # 🧱🔁🔓💥 4h 단기·장기선 터치·돌파 — ⚡ 줄에서 ↗️1h 표시를 대신한다.
-    # 선은 파동과 같은 두 수퍼트렌드(turn_fast_* 22×3 · turn_slow_* 30×6)라
-    # 같은 마크가 같은 선을 가리킨다(wave_mark_4h()).
-    wave4h_enabled: bool = True
-    wave4h_bars: int = 6            # 이 봉 수 안에 있었던 사건까지 표시 (6 × 4h = 24시간)
+    # 🧱🔁🔓💥 단기·장기선 터치·돌파 — ⚡ 줄의 마크(wave_mark()).
+    # 선은 파동과 같은 두 수퍼트렌드(turn_fast_* 22×3 · turn_slow_* 30×6)를
+    # wave_mark_interval 프레임에 건다. 처음엔 4h였고 09-27에 1h로 바꿨다.
+    wave_mark_enabled: bool = True
+    wave_mark_interval: str = "1h"  # "1h"(구조 판정 프레임) 또는 "4h"
+    wave_mark_bars: int = 24        # 이 봉 수 안에 있었던 사건까지 표시 (24 × 1h = 24시간)
 
 
 def leaders(ticker: dict[str, dict], symbols: set[str],
@@ -373,8 +374,13 @@ WAVE_FAST_BREAK = "단기선 돌파"
 WAVE_FAST_TOUCH = "단기선 터치"
 
 
-def wave_mark_4h(df4h: pd.DataFrame | None, params: Params = Params()) -> str | None:
-    """⚡ 줄의 4h 마크 — 단기선·장기선을 **최근에** 뚫었거나 건드렸는지.
+def wave_mark(df: pd.DataFrame | None, params: Params = Params()) -> str | None:
+    """⚡ 줄의 마크 — 단기선·장기선을 **최근에** 뚫었거나 건드렸는지.
+
+    프레임은 wave_mark_interval(기본 1h)이다. 스캐너가 알맞은 프레임을 넘긴다
+    — 1h면 구조 판정에 쓰는 1h 프레임(ALIGN_INTERVAL)이라 추가 요청이 없다.
+    **4h에서 1h로 옮겼다**(09-27): 4h 마크는 사건이 하루에 여섯 봉뿐이라
+    눌림 안의 잔 전환을 못 봤다. 창은 같은 24시간(1h × 24봉)이다.
 
     파동과 **같은 두 선**(단기 22×3 · 장기 30×6 수퍼트렌드)을 보고 같은 네
     이름을 쓴다. 다른 점은 파동의 전제(장기는 아직 하락)를 걸지 않는다는 것 —
@@ -388,24 +394,24 @@ def wave_mark_4h(df4h: pd.DataFrame | None, params: Params = Params()) -> str | 
     터치는 파동과 같은 정의다(`저가 ≤ 선 ≤ 고가`). 선이 지지(아래)인지
     저항(위)인지는 가르지 않는다 — '지금 그 선에 와 있다'가 이 마크의 뜻이다.
 
-    wave4h_bars(기본 6봉 = 24시간) 안에서 찾고, 여럿이면 **큰 사건 하나만**
+    wave_mark_bars(기본 24봉 = 24시간) 안에서 찾고, 여럿이면 **큰 사건 하나만**
     돌려준다: 장기선 돌파 > 장기선 터치 > 단기선 돌파 > 단기선 터치(파동 칸의
     읽는 순서와 같다). 돌파는 하락에서 뒤집힌 것만 센다 — ATR 워밍업 구간의
     dir은 NaN이라 'not up'으로 세면 유령 돌파가 생긴다(파동 _break_index와 같다).
 
     해당 없으면 None.
     """
-    if not params.wave4h_enabled or df4h is None:
+    if not params.wave_mark_enabled or df is None:
         return None
     need = max(params.turn_fast_period, params.turn_slow_period) + 2
-    if len(df4h) < need:
+    if len(df) < need:
         return None
-    fast = supertrend_full(df4h, params.turn_fast_period, params.turn_fast_mult)
-    slow = supertrend_full(df4h, params.turn_slow_period, params.turn_slow_mult)
-    hi = df4h["High"].to_numpy(float)
-    lo = df4h["Low"].to_numpy(float)
-    last = len(df4h) - 1
-    first = max(1, last - max(1, params.wave4h_bars) + 1)
+    fast = supertrend_full(df, params.turn_fast_period, params.turn_fast_mult)
+    slow = supertrend_full(df, params.turn_slow_period, params.turn_slow_mult)
+    hi = df["High"].to_numpy(float)
+    lo = df["Low"].to_numpy(float)
+    last = len(df) - 1
+    first = max(1, last - max(1, params.wave_mark_bars) + 1)
     found = set()
     for st, brk, tch in ((slow, WAVE_SLOW_BREAK, WAVE_SLOW_TOUCH),
                          (fast, WAVE_FAST_BREAK, WAVE_FAST_TOUCH)):

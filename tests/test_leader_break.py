@@ -703,43 +703,43 @@ def _st_frame(closes, spread=0.01):
                          "Close": c, "Volume": 1000.0}, index=idx)
 
 
-def test_wave_mark_4h_break_after_long_decline():
+def test_wave_mark_break_after_long_decline():
     """길게 빠지다가 크게 반등하면 수퍼트렌드가 뒤집힌다 — 돌파로 잡는다."""
     import numpy as np
-    from invest_signal.signals.leader_break import Params, wave_mark_4h
+    from invest_signal.signals.leader_break import Params, wave_mark
     closes = np.r_[np.linspace(200, 100, 150), np.linspace(100, 160, 12)]
-    got = wave_mark_4h(_st_frame(closes), Params(wave4h_bars=12))
+    got = wave_mark(_st_frame(closes), Params(wave_mark_bars=12))
     assert got in ("장기선 돌파", "단기선 돌파")
 
 
-def test_wave_mark_4h_prefers_the_bigger_event():
+def test_wave_mark_prefers_the_bigger_event():
     """장기선 돌파가 있으면 같은 창의 단기선 돌파·터치보다 앞선다."""
     import numpy as np
     from invest_signal.indicators import supertrend_full
-    from invest_signal.signals.leader_break import Params, wave_mark_4h
+    from invest_signal.signals.leader_break import Params, wave_mark
     closes = np.r_[np.linspace(200, 100, 150), np.linspace(100, 180, 20)]
     df = _st_frame(closes)
-    p = Params(wave4h_bars=20)
+    p = Params(wave_mark_bars=20)
     slow = supertrend_full(df, p.turn_slow_period, p.turn_slow_mult)["dir"].to_numpy()
     flipped = any(slow[i] > 0 and slow[i - 1] < 0 for i in range(len(df) - 20, len(df)))
     assert flipped, "픽스처가 장기 돌파를 못 만들었다"
-    assert wave_mark_4h(df, p) == "장기선 돌파"
+    assert wave_mark(df, p) == "장기선 돌파"
 
 
-def test_wave_mark_4h_old_events_fall_out_of_the_window():
+def test_wave_mark_old_events_fall_out_of_the_window():
     """창(기본 6봉 = 24시간) 밖의 돌파는 표시하지 않는다."""
     import numpy as np
-    from invest_signal.signals.leader_break import Params, wave_mark_4h
+    from invest_signal.signals.leader_break import Params, wave_mark
     # 반등 뒤 한참 옆으로 — 돌파는 오래전이고, 선에서도 멀리 떨어져 있다
     closes = np.r_[np.linspace(200, 100, 150), np.linspace(100, 160, 12),
                    np.linspace(160, 200, 60)]
-    assert wave_mark_4h(_st_frame(closes, spread=0.001), Params(wave4h_bars=6)) is None
+    assert wave_mark(_st_frame(closes, spread=0.001), Params(wave_mark_bars=6)) is None
 
 
-def test_wave_mark_4h_off_or_short_is_none():
+def test_wave_mark_off_or_short_is_none():
     import numpy as np
-    from invest_signal.signals.leader_break import Params, wave_mark_4h
+    from invest_signal.signals.leader_break import Params, wave_mark
     df = _st_frame(np.linspace(200, 100, 150))
-    assert wave_mark_4h(df, Params(wave4h_enabled=False)) is None
-    assert wave_mark_4h(df.iloc[:10], Params()) is None
-    assert wave_mark_4h(None, Params()) is None
+    assert wave_mark(df, Params(wave_mark_enabled=False)) is None
+    assert wave_mark(df.iloc[:10], Params()) is None
+    assert wave_mark(None, Params()) is None
