@@ -81,6 +81,27 @@ class AlertState:
                 out[s] = t
         return out
 
+    def alerted_within(self, symbol: str, signal: str, hours: float,
+                       now: datetime | None = None) -> bool:
+        """이 종목·시그널을 최근 hours시간 안에 **보낸 적이 있는지**.
+
+        alerts의 키가 `종목|시그널|봉시각…`이고 값이 보낸 시각이라 따로 적어
+        둘 것 없이 그대로 센다. 같은 종목을 하루에 여러 번 • 로 올리지 않을 때
+        쓴다(⚡ rearm_hours).
+        """
+        now = now or datetime.now(timezone.utc)
+        cutoff = now - timedelta(hours=hours)
+        head = f"{symbol}|{signal}|"
+        for k, v in self._alerts.items():
+            if not k.startswith(head):
+                continue
+            try:
+                if datetime.fromisoformat(v) >= cutoff:
+                    return True
+            except ValueError:
+                continue
+        return False
+
     def is_new(self, key: str) -> bool:
         return key not in self._alerts
 

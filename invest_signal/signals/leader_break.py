@@ -1,9 +1,13 @@
-"""크립토 모멘텀 눌림목/이탈 시그널 (15m봉) — 크립토 선물 전용.
+"""크립토 모멘텀 눌림목/이탈 시그널 — 크립토 선물 전용.
 
-24시간 상승률 **상위 top_n종** 중 **1h가 정배열인 종목**만 대상으로,
+24시간 상승률 **상위 top_n종**(+ 밀려난 뒤 watch_days 동안 이월)을 감시하고,
+1h 배열로 거른다(blocked()). 감시 종목은 전부 ↳ 추적 줄로 보이고, • 신규는
+**마감된 봉에서 새로 생긴 사건**으로 낸다(entry_mode "wave", 09-28~):
+3파 진입 · 1h 단기선 터치·돌파 · 4h 단기선 터치·돌파(entry_triggers()).
+
+아래는 예전 방식(entry_mode "15m")의 설명이다 — detect()가 그대로 남아 있다:
 15분봉 종가가 ma(기본 20)선을 **하향 이탈하는 첫 봉**에서 알린다.
 하루 사이 가장 많이 오른 주도주가 단기 추세선을 깨는 자리를 잡는다.
-제외 규칙은 blocked() 참고.
 
 다른 시그널과 두 가지가 다르다:
   · 4h봉이 아니라 **15m봉**으로 판정한다 (20봉 = 5시간).
@@ -107,6 +111,13 @@ class Params:
     wave3_enabled: bool = True
     wave3_ma_4h: int = 960
     wave3_ma_1h: int = 20
+    # • 신규 알림을 무엇으로 낼지. "wave"(기본, 09-28~): 마감된 봉에서 새로 생긴
+    # ① 3파 진입 ② 1h 단기선 터치·돌파 ③ 4h 단기선 터치·돌파(entry_triggers()).
+    # "15m": 예전 동작 — 15m 종가가 ma선을 하향 이탈한 첫 봉(detect()).
+    entry_mode: str = "wave"
+    entry_1h_bars: int = 2          # 마감된 1h봉 중 최근 몇 개까지 볼지 (스캔 한 번 놓쳐도 잡게)
+    entry_4h_bars: int = 1          # 마감된 4h봉 중 최근 몇 개 (4h봉 하나를 매시 스캔 넷이 본다)
+    rearm_hours: int = 24           # 같은 종목은 이 시간 안에 • 로 다시 안 알린다
 
 
 def leaders(ticker: dict[str, dict], symbols: set[str],
@@ -405,8 +416,8 @@ def third_wave(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
 
     4h MA960(160일)은 큰 흐름이 아직 위라는 확인이고, 1h 20선 하회는 그 안에서
     짧게 눌린 자리다 — 파동으로 치면 1파(상위권 급등) 뒤 2파 조정을 지나 3파를
-    노리는 눌림이라는 뜻으로 붙인 이름이다. 판정은 둘 다 **지금 봉**(인트라바면
-    진행 중인 봉) 종가로 한다.
+    노리는 눌림이라는 뜻으로 붙인 이름이다. 판정은 넘겨받은 프레임의 마지막
+    봉 종가로 한다 — 스캐너는 **마감된 봉만** 넘긴다(• 3파진입과 같은 기준).
 
     4h 이력이 960봉(160일)이 안 되는 종목은 MA960을 못 구해 None이다 — 신규
     상장은 이 표시가 안 붙는다.
@@ -421,6 +432,128 @@ def third_wave(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
     if not last > m:
         return None
     return {"d1h": d1, "d4h": last / m - 1}
+
+
+ENTRY_W3 = "3파진입"
+
+
+def _closed(df: pd.DataFrame | None, hours: int, now: pd.Timestamp):
+    """now 기준 **마감된 봉만** — 봉 시각(시작) + 주기 ≤ now. 인트라바 프레임의
+    진행 중인 봉을 뗀다. None이면 None."""
+    if df is None:
+        return None
+    return df[df.index + pd.Timedelta(hours=hours) <= now]
+
+
+def _fast_events(df: pd.DataFrame, params: Params, bars: int):
+    """마지막 bars개 봉에서 단기선(22×3) 사건 — (봉 위치, '돌파'|'터치') 목록.
+
+    돌파는 단기 수퍼트렌드가 하락→상승으로 뒤집힌 봉, 터치는 봉의 고가~저가가
+    단기선을 걸친 봉이다(wave_mark와 같은 정의). 한 봉이 둘 다면 돌파다.
+    """
+    if len(df) < params.turn_fast_period + 2:
+        return []
+    st = supertrend_full(df, params.turn_fast_period, params.turn_fast_mult)
+    d = st["dir"].to_numpy(float)
+    line = st["line"].to_numpy(float)
+    hi = df["High"].to_numpy(float)
+    lo = df["Low"].to_numpy(float)
+    out = []
+    for t in range(max(1, len(df) - max(1, bars)), len(df)):
+        if d[t] > 0 and d[t - 1] < 0:
+            out.append((t, "돌파"))
+        elif not np.isnan(line[t]) and lo[t] <= line[t] <= hi[t]:
+            out.append((t, "터치"))
+    return out
+
+
+def w3_candidate(df1h: pd.DataFrame | None, params: Params, now: pd.Timestamp) -> bool:
+    """3파 진입을 볼 가치가 있는지 — 마감된 1h 최근 봉들 중 20선 아래가 있나.
+
+    스캐너가 이걸 보고 통과한 종목만 4h 1,000봉을 따로 받는다.
+    """
+    h1 = _closed(df1h, 1, now)
+    k = params.wave3_ma_1h
+    if not params.wave3_enabled or h1 is None or len(h1) < k + 1:
+        return False
+    c = h1["Close"]
+    m = c.rolling(k).mean()
+    tail = max(1, params.entry_1h_bars)
+    return bool((c.iloc[-tail:] < m.iloc[-tail:]).any())
+
+
+def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
+                   df4h_long: pd.DataFrame | None, params: Params,
+                   now: pd.Timestamp) -> list[tuple[str, pd.Timestamp]]:
+    """• 신규 알림 사건 — **마감된 봉에서 새로 생긴 것만**. (이름, 그 봉의 마감 시각).
+
+      3파진입        직전 1h봉은 아니었는데 이번 1h봉에서 '1h 종가 < 1h MA20 이면서
+                     4h 종가 > 4h MA960'이 됐다(4h는 그 1h봉 마감 시점까지 마감된
+                     4h봉으로 본다)
+      1h단기선터치/돌파  마감된 1h봉이 단기선(22×3)을 걸쳤거나 단기가 뒤집혔다
+      4h단기선터치/돌파  마감된 4h봉에서 같은 사건
+
+    1h는 최근 entry_1h_bars개(기본 2 — 스캔 한 번을 놓쳐도 잡게), 4h는 최근
+    entry_4h_bars개(기본 1 — 4h봉 하나를 매시 스캔 넷이 본다)를 본다. 같은 봉이
+    두 번 나가는 건 호출 측의 dedup과 rearm_hours가 막는다.
+    """
+    out: list[tuple[str, pd.Timestamp]] = []
+    hour, four = pd.Timedelta(hours=1), pd.Timedelta(hours=4)
+    h1 = _closed(df1h, 1, now)
+    if h1 is not None and len(h1) > 2:
+        for t, kind in _fast_events(h1, params, params.entry_1h_bars):
+            out.append((f"1h단기선{kind}", h1.index[t] + hour))
+        k1, k4 = params.wave3_ma_1h, params.wave3_ma_4h
+        l4 = _closed(df4h_long, 4, now)
+        if (params.wave3_enabled and l4 is not None and len(l4) >= k4
+                and len(h1) > k1 + 1):
+            c4 = l4["Close"]
+            up4 = pd.Series((c4 > c4.rolling(k4).mean()).to_numpy(),
+                            index=l4.index + four)          # 4h봉 마감 시각
+            close_t = h1.index + hour
+            up = up4.reindex(close_t, method="ffill").fillna(False).astype(bool).to_numpy()
+            c1 = h1["Close"]
+            below = (c1 < c1.rolling(k1).mean()).to_numpy()
+            w3 = below & up
+            for t in range(max(1, len(h1) - max(1, params.entry_1h_bars)), len(h1)):
+                if w3[t] and not w3[t - 1]:
+                    out.append((ENTRY_W3, close_t[t]))
+    h4 = _closed(df4h, 4, now)
+    if h4 is not None and len(h4) > 2:
+        for t, kind in _fast_events(h4, params, params.entry_4h_bars):
+            out.append((f"4h단기선{kind}", h4.index[t] + four))
+    return out
+
+
+ENTRY_ORDER = (ENTRY_W3, "1h단기선돌파", "1h단기선터치", "4h단기선돌파", "4h단기선터치")
+
+
+def entry_event(symbol: str, triggers: list, df15: pd.DataFrame,
+                params: Params = Params()) -> "SignalEvent | None":
+    """사건 목록을 **종목당 • 하나**로 묶는다. 없으면 None.
+
+    봉 시각은 사건 봉 중 가장 늦은 마감 시각(dedup 키가 된다), 가격은 지금 값
+    (15m 마지막 종가)이다. 사건 이름은 ENTRY_ORDER 순으로 detail["triggers"]에
+    싣는다. 15m 20선 위/아래와 1h·4h 수익률도 같이 채운다 — 예전 15m 이탈
+    줄에 있던 값이다.
+    """
+    if not triggers:
+        return None
+    names = sorted({n for n, _ in triggers},
+                   key=lambda n: ENTRY_ORDER.index(n) if n in ENTRY_ORDER else 99)
+    when = max(t for _, t in triggers)
+    close = df15["Close"]
+    n = len(close)
+    detail = {"label": LABEL, "interval": INTERVAL, "ma_period": params.ma,
+              "triggers": names,
+              "ret_1h": pct_over(close, 4, n - 1),
+              "ret_4h": pct_over(close, 16, n - 1)}
+    if n >= params.ma:
+        m = float(sma(close, params.ma).iloc[-1])
+        detail["ma"] = m
+        detail["above_ma"] = bool(float(close.iloc[-1]) >= m)
+    return SignalEvent(symbol=symbol, signal=NAME, bar_time=pd.Timestamp(when),
+                       price=float(close.iloc[-1]), detail=detail)
 
 
 def wave_mark(df: pd.DataFrame | None, params: Params = Params(),

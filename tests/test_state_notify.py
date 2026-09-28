@@ -1135,3 +1135,15 @@ def test_wave_lines_show_turnover_too():
     order = [ln.split(">")[1].split("<")[0] for ln in out.splitlines()
              if ln.startswith("• ")]
     assert order == ["SMALL", "BIG"]        # 24h 수익률 순 그대로 — 거래대금은 표시만
+
+
+def test_trigger_line_shows_why_it_fired_instead_of_15m_break():
+    """• 가 사건으로 난 줄은 🆕사건을 맨 앞에, 15m 이탈 대신 20선 위/아래를 싣는다."""
+    e = _lb("TRGUSDT", 5e7, 0.2, rank=1, triggers=["3파진입", "1h단기선터치"],
+            above_ma=False, wave3={"d1h": -0.02, "d4h": 0.5})
+    out = format_events([e], [], {})
+    line = [ln for ln in out.splitlines() if ">TRG<" in ln][0]
+    tags = line.split(" · ")
+    assert tags[1] == "🆕3파진입·1h단기선터치"
+    assert tags[2] == "3️⃣3파눌림목"
+    assert "🔻20선 아래" in line and "SMA" not in line

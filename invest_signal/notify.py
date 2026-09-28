@@ -436,6 +436,9 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tags.append(BAND_TAG)
     if e.signal == "leader_break" and d.get("wave3"):
         tags.insert(0, WAVE3_TAG)       # 칸 맨 위에 모이는 이유 — 줄 맨 앞에 둔다
+    if e.signal == "leader_break" and d.get("triggers"):
+        # 이 줄이 **왜 지금 • 로 났는지** — 마감된 봉에서 새로 생긴 사건
+        tags.insert(0, "🆕" + "·".join(d["triggers"]))
     wm = _wave_mark(e)
     if wm:
         tags.append(wm)
@@ -503,8 +506,15 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
             tv = _turnover_tag(d)
             if tv:
                 tags.append(tv)     # 줄을 이 값으로 세운다 — 보여야 순서가 읽힌다
-            tags.append(f"{d.get('interval', '15m')} "
-                        f"{d.get('ma_period', 60)}SMA {_fmt_price(d['ma'])} 이탈")
+            if d.get("triggers"):
+                # • 가 15m 이탈이 아니라 사건(3파 진입·단기선)으로 난 줄 — 사건은
+                # 맨 앞 🆕에 있고, 여기엔 추적 줄과 같은 15m 20선 위/아래를 적는다.
+                if d.get("above_ma") is not None:
+                    ma = d.get("ma_period", 20)
+                    tags.append(f"{ma}선 위" if d["above_ma"] else f"🔻{ma}선 아래")
+            else:
+                tags.append(f"{d.get('interval', '15m')} "
+                            f"{d.get('ma_period', 60)}SMA {_fmt_price(d['ma'])} 이탈")
         if d.get("align") and not _early(e):
             tags.append(_align_tag(d))
     return head + (" · " + " · ".join(tags) if tags else "")

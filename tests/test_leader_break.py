@@ -622,7 +622,8 @@ def test_config_yaml_reaches_the_alignment_switches():
     finally:
         leader_break.Params = real
     for key in ("require_aligned", "allow_mixed", "allow_bearish",
-                "exhausted_filter", "require_resist"):
+                "exhausted_filter", "require_resist", "entry_mode",
+                "rearm_hours", "entry_1h_bars", "entry_4h_bars"):
         assert captured.get(key) == s[key], (key, captured.get(key), s[key])
 
 
@@ -776,3 +777,96 @@ def test_third_wave_short_history_or_off_is_none():
     up4 = _flat(np.linspace(50.0, 150.0, 1000), "4h")
     assert third_wave(dip1, up4, Params(wave3_enabled=False)) is None
     assert third_wave(None, up4, Params()) is None
+
+
+# ── • 신규 = 마감된 봉의 사건(3파 진입 · 1h/4h 단기선) ─────────────────────
+
+def _bars(closes, freq, start="2026-09-01", spread=0.01):
+    idx = pd.date_range(start, periods=len(closes), freq=freq, tz="UTC")
+    c = pd.Series(np.asarray(closes, dtype=float), index=idx)
+    return pd.DataFrame({"Open": c, "High": c * (1 + spread), "Low": c * (1 - spread),
+                         "Close": c, "Volume": 1000.0}, index=idx)
+
+
+def _now_after(df, hours):
+    """마지막 봉까지 마감된 시각."""
+    return df.index[-1] + pd.Timedelta(hours=hours)
+
+
+def test_closed_drops_the_live_bar():
+    df = _bars(np.linspace(100, 110, 10), "1h")
+    now = df.index[-1] + pd.Timedelta(minutes=30)          # 마지막 봉은 진행 중
+    assert len(leader_break._closed(df, 1, now)) == 9
+    assert len(leader_break._closed(df, 1, _now_after(df, 1))) == 10
+
+
+def test_entry_1h_fast_break_on_closed_bar():
+    """길게 빠지다 크게 오른 1h봉 — 단기선 돌파로 잡는다(마감봉만)."""
+    closes = np.r_[np.linspace(200, 100, 150), [100, 130]]
+    h1 = _bars(closes, "1h")
+    trig = leader_break.entry_triggers(h1, None, None, P, _now_after(h1, 1))
+    assert ("1h단기선돌파", h1.index[-1] + pd.Timedelta(hours=1)) in trig
+    # 같은 봉이 아직 진행 중이면 안 본다
+    live = leader_break.entry_triggers(h1, None, None, P,
+                                       h1.index[-1] + pd.Timedelta(minutes=10))
+    assert all(t <= h1.index[-1] for _, t in live)
+
+
+def test_entry_4h_fast_touch_on_last_closed_bar():
+    """4h 마지막 마감봉이 단기선을 걸치면 4h단기선터치."""
+    h4 = _bars(np.linspace(100, 180, 80), "4h")            # 상승 — 단기선은 아래 지지
+    h4.iloc[-1, h4.columns.get_loc("Low")] = h4["Close"].iloc[-1] * 0.85  # 꼬리가 선을 문다
+    trig = leader_break.entry_triggers(None, h4, None, P, _now_after(h4, 4))
+    assert [n for n, _ in trig] == ["4h단기선터치"]
+    # 그 전 봉까지만 마감이면(마지막 봉 진행 중) 안 난다
+    assert leader_break.entry_triggers(None, h4, None, P,
+                                       _now_after(h4, 4) - pd.Timedelta(hours=1)) == []
+
+
+def test_entry_third_wave_fires_on_the_crossing_1h_bar_only():
+    """3파 진입 — 직전 1h봉은 20선 위, 이번 봉이 20선 아래 · 4h는 960선 위."""
+    long4 = _bars(np.linspace(50, 150, 1000), "4h", start="2026-01-01")
+    end = long4.index[-1] + pd.Timedelta(hours=4)
+    idx = pd.date_range(end - pd.Timedelta(hours=60), periods=60, freq="1h", tz="UTC")
+    c = np.r_[np.full(59, 150.0), 140.0]                   # 마지막 봉에서 20선 하회
+    h1 = pd.DataFrame({"Open": c, "High": c, "Low": c, "Close": c, "Volume": 1.0},
+                      index=idx)
+    now = idx[-1] + pd.Timedelta(hours=1)
+    trig = leader_break.entry_triggers(h1, None, long4, P, now)
+    assert (leader_break.ENTRY_W3, now) in trig
+    # 한 봉 더 아래에 머물면 '진입'이 아니다(직전 봉도 이미 아래)
+    c2 = np.r_[np.full(58, 150.0), 140.0, 139.0]
+    h1b = h1.assign(Close=c2, Open=c2, High=c2, Low=c2)
+    p1 = dataclasses_replace(P, entry_1h_bars=1)
+    assert not any(n == leader_break.ENTRY_W3
+                   for n, _ in leader_break.entry_triggers(h1b, None, long4, p1, now))
+    # 4h가 960선 아래면 안 난다
+    down4 = _bars(np.linspace(150, 50, 1000), "4h", start="2026-01-01")
+    assert not any(n == leader_break.ENTRY_W3
+                   for n, _ in leader_break.entry_triggers(h1, None, down4, P, now))
+
+
+def test_entry_event_bundles_triggers_into_one_line():
+    df15 = make_df(rising(bars=40))
+    t = pd.Timestamp("2026-09-01T10:00:00Z")
+    ev = leader_break.entry_event("XUSDT", [("4h단기선터치", t),
+                                            ("1h단기선돌파", t + pd.Timedelta(hours=1)),
+                                            (leader_break.ENTRY_W3, t)], df15, P)
+    assert ev.detail["triggers"] == ["3파진입", "1h단기선돌파", "4h단기선터치"]
+    assert ev.bar_time == t + pd.Timedelta(hours=1)
+    assert ev.price == df15["Close"].iloc[-1]
+    assert ev.detail["above_ma"] is True
+    assert leader_break.entry_event("XUSDT", [], df15, P) is None
+
+
+def test_state_alerted_within(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    from invest_signal.state import AlertState
+    st = AlertState(str(tmp_path / "s.json"))
+    now = datetime(2026, 9, 28, 12, tzinfo=timezone.utc)
+    st.mark("AUSDT|leader_break|2026-09-28T02:00:00+00:00", when=now - timedelta(hours=10))
+    st.mark("BUSDT|leader_break|2026-09-27T02:00:00+00:00", when=now - timedelta(hours=30))
+    assert st.alerted_within("AUSDT", "leader_break", 24, now=now)
+    assert not st.alerted_within("BUSDT", "leader_break", 24, now=now)
+    assert not st.alerted_within("AUSDT", "wave_setup", 24, now=now)
+    assert not st.alerted_within("AUS", "leader_break", 24, now=now)   # 접두어만 같은 종목
