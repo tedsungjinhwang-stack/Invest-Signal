@@ -1082,6 +1082,26 @@ def test_leader_fast_marks_come_first():
     assert pos == sorted(pos), out
 
 
+def test_third_wave_rows_come_first_with_tag():
+    """3️⃣3파 눌림목 줄이 ⚡ 칸 맨 위 — 1h 단기선 줄보다도 위, 층마다 • → ↳."""
+    w3 = {"d1h": -0.02, "d4h": 0.4}
+    new = [_lb("BIGUSDT", 9e8, 0.1, rank=1),
+           _lb("F1HUSDT", 8e8, 0.1, rank=2, wave_mark_1h="단기선 돌파"),
+           _lb("W3USDT", 2e6, 0.1, rank=3, wave3=w3)]
+    hold = [_lb("HF1HUSDT", 5e9, 0.05, watch_days=1, above_ma=True,
+                wave_mark_1h="단기선 터치"),
+            _lb("HW3USDT", 1e6, 0.05, watch_days=2, above_ma=False, wave3=w3)]
+    out = format_events(new, [], {}, ongoing_crypto=hold)
+    order = [">W3<", "↳ HW3", ">F1H<", "↳ HF1H", ">BIG<"]
+    pos = [out.index(k) for k in order]
+    assert pos == sorted(pos), out
+    w3_new = [ln for ln in out.splitlines() if ">W3<" in ln][0]
+    assert w3_new.split(" · ")[1] == "3️⃣3파눌림목"
+    w3_hold = [ln for ln in out.splitlines() if ln.startswith("↳ HW3")][0]
+    assert w3_hold.split(" · ")[1] == "3️⃣3파눌림목"
+    assert out.count("3️⃣3파눌림목") == 2
+
+
 def test_turnover_is_printed_so_the_order_is_readable():
     """정렬 축이 줄에 안 보이면 왜 이 순서인지 알 수가 없다."""
     out = format_events([_lb("AUSDT", 8.4e8, 0.11, rank=1),

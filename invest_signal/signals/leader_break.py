@@ -31,6 +31,9 @@ ALIGN_INTERVAL = "1h"   # blocked() 구조 판정용 — 종목마다 따로 받
 ALIGN_LIMIT = 600       # MA480 성립(480봉 = 20일) + 여유
 TREND_INTERVAL = "4h"   # quiet()·turn_up() 판정용 — 스캔이 받아둔 프레임을 쓴다
 TREND_LIMIT = 600
+# 3️⃣3파 눌림목 — 4h MA960을 봐야 해서 따로 받는다(스캔 4h는 750봉이라 모자란다).
+# 1000은 현물 미러의 요청당 상한이다(선물은 1500). MA960이 마지막 41봉에 선다.
+WAVE3_LIMIT = 1000
 
 
 @dataclass(frozen=True)
@@ -99,6 +102,11 @@ class Params:
     wave_mark_enabled: bool = True
     wave_mark_1h_bars: int = 24     # 1h 창 (24 × 1h = 24시간)
     wave_mark_4h_bars: int = 6      # 4h 창 (6 × 4h = 24시간)
+    # 3️⃣ 3파 눌림목 — 4h 종가가 MA960 위(큰 추세는 위) · 1h 종가가 MA20 아래
+    # (짧게 눌렸다). ⚡ 칸 맨 위에 모은다(third_wave()).
+    wave3_enabled: bool = True
+    wave3_ma_4h: int = 960
+    wave3_ma_1h: int = 20
 
 
 def leaders(ticker: dict[str, dict], symbols: set[str],
@@ -373,6 +381,46 @@ WAVE_SLOW_BREAK = "장기선 돌파"
 WAVE_SLOW_TOUCH = "장기선 터치"
 WAVE_FAST_BREAK = "단기선 돌파"
 WAVE_FAST_TOUCH = "단기선 터치"
+
+
+def below_1h_ma(df1h: pd.DataFrame | None, params: Params = Params()) -> float | None:
+    """1h 종가가 MA(wave3_ma_1h, 기본 20) **아래**면 그 거리(음수), 아니면 None.
+
+    3파 눌림목의 두 조건 중 싼 쪽이다 — 1h 프레임은 구조 판정에서 이미 받아
+    두므로, 스캐너는 이걸 먼저 보고 통과한 종목만 4h 1,000봉을 따로 받는다.
+    """
+    k = params.wave3_ma_1h
+    if not params.wave3_enabled or df1h is None or len(df1h) < k:
+        return None
+    c = df1h["Close"]
+    m = c.iloc[-k:].mean()
+    last = float(c.iloc[-1])
+    return last / m - 1 if last < m else None
+
+
+def third_wave(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
+               params: Params = Params()) -> dict | None:
+    """3️⃣ 3파 눌림목 — ⚡ 종목 중 **4h 종가가 MA960 위**이고 **1h 종가가 MA20
+    아래**인 자리. 해당하면 거리 둘을 담은 dict, 아니면 None.
+
+    4h MA960(160일)은 큰 흐름이 아직 위라는 확인이고, 1h 20선 하회는 그 안에서
+    짧게 눌린 자리다 — 파동으로 치면 1파(상위권 급등) 뒤 2파 조정을 지나 3파를
+    노리는 눌림이라는 뜻으로 붙인 이름이다. 판정은 둘 다 **지금 봉**(인트라바면
+    진행 중인 봉) 종가로 한다.
+
+    4h 이력이 960봉(160일)이 안 되는 종목은 MA960을 못 구해 None이다 — 신규
+    상장은 이 표시가 안 붙는다.
+    """
+    d1 = below_1h_ma(df1h, params)
+    k = params.wave3_ma_4h
+    if d1 is None or df4h is None or len(df4h) < k:
+        return None
+    c = df4h["Close"]
+    m = c.iloc[-k:].mean()
+    last = float(c.iloc[-1])
+    if not last > m:
+        return None
+    return {"d1h": d1, "d4h": last / m - 1}
 
 
 def wave_mark(df: pd.DataFrame | None, params: Params = Params(),

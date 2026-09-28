@@ -216,6 +216,9 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         wave_mark_enabled=bool(s.get("wave_mark_enabled", True)),
         wave_mark_1h_bars=int(s.get("wave_mark_1h_bars", 24)),
         wave_mark_4h_bars=int(s.get("wave_mark_4h_bars", 6)),
+        wave3_enabled=bool(s.get("wave3_enabled", True)),
+        wave3_ma_4h=int(s.get("wave3_ma_4h", 960)),
+        wave3_ma_1h=int(s.get("wave3_ma_1h", 20)),
     )
     if ticker is None:              # 호출 측이 미리 받아두지 않았을 때만 직접 조회
         ticker = _crypto_ticker(session, source, log)
@@ -252,6 +255,8 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
 
     trend_cache: dict[str, "pd.DataFrame | None"] = {}
     hour_cache: dict[str, "pd.DataFrame | None"] = {}
+    wave3_cache: dict[str, "dict | None"] = {}
+    wave3_fetched = 0           # 4h 1,000봉을 따로 받은 종목 수(로그용)
 
     def trend_frame(sym: str):
         """이 종목의 4h 프레임 — 🍃조용과 🔼단기전환이 쓴다.
@@ -297,6 +302,29 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             df = None
         hour_cache[sym] = df
         return df
+
+    def wave3(sym: str) -> "dict | None":
+        """3️⃣3파 눌림목 — 1h 20선 아래인 종목만 4h 1,000봉을 따로 받아 본다.
+
+        스캔 4h는 750봉이라 MA960이 안 선다. 1h 조건을 먼저 보므로 따로 받는
+        건 감시 종목 중 1h가 눌린 것뿐이다. 조회 실패는 None(표시 안 함).
+        """
+        nonlocal wave3_fetched
+        if sym in wave3_cache:
+            return wave3_cache[sym]
+        got = None
+        if leader_break.below_1h_ma(hour_frame(sym), params) is not None:
+            try:
+                df4l = data_binance.klines(session, sym, source,
+                                           leader_break.TREND_INTERVAL,
+                                           limit=leader_break.WAVE3_LIMIT,
+                                           include_live=intrabar)
+                wave3_fetched += 1
+                got = leader_break.third_wave(hour_frame(sym), df4l, params)
+            except Exception as e:              # noqa: BLE001
+                log(f"[binance] {sym} 4h(3파) 수집 실패: {data_binance._safe(e)}")
+        wave3_cache[sym] = got
+        return got
 
     def is_blocked(sym: str) -> bool:
         """1h 구조로 걸러낼 종목인지 — 정배열이 아니거나, 정배열인데 480선 아래.
@@ -361,6 +389,10 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                 detail["resist_1h"] = resist
             if resist15:
                 detail["resist_15m"] = resist15
+            # 3️⃣ 3파 눌림목 — 4h 960선 위 · 1h 20선 아래. ⚡ 칸 맨 위에 모인다.
+            w3 = wave3(sym)
+            if w3:
+                detail["wave3"] = w3
             # 🪜회복구간 — 4h 240선<480선인데 캔들이 그 사이. 표시만 한다.
             if leader_break.recovery_band(df4, params):
                 detail["band"] = True
@@ -407,6 +439,10 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                     symbol=sym, signal=leader_break.NAME,
                     bar_time=pd.Timestamp(since) if since is not None else now,
                     price=snap["last_price"], detail=detail))
+    if wave3_fetched:
+        n3 = sum(1 for v in wave3_cache.values() if v)
+        log(f"[binance] 3파 눌림목 {n3}종 (1h {params.wave3_ma_1h}선 아래 "
+            f"{wave3_fetched}종 중 4h {params.wave3_ma_4h}선 위)")
     if muted:
         log(f"[binance] 크립토 모멘텀 눌림목/이탈 ↗️ 없어 제외 {muted}줄 "
             f"(require_resist — 1h·15m 단기선을 건드린 줄만 남긴다)")

@@ -743,3 +743,36 @@ def test_wave_mark_off_or_short_is_none():
     assert wave_mark(df, Params(wave_mark_enabled=False)) is None
     assert wave_mark(df.iloc[:10], Params()) is None
     assert wave_mark(None, Params()) is None
+
+
+def _flat(closes, freq):
+    idx = pd.date_range("2026-01-01", periods=len(closes), freq=freq, tz="UTC")
+    c = pd.Series(closes, index=idx, dtype=float)
+    return pd.DataFrame({"Open": c, "High": c * 1.01, "Low": c * 0.99,
+                         "Close": c, "Volume": 1.0}, index=idx)
+
+
+def test_third_wave_needs_4h_above_ma960_and_1h_below_ma20():
+    """3️⃣ 4h 종가가 MA960 위 · 1h 종가가 MA20 아래."""
+    import numpy as np
+    from invest_signal.signals.leader_break import Params, third_wave, below_1h_ma
+    up4 = _flat(np.linspace(50.0, 150.0, 1000), "4h")       # 끝이 MA960(≈100) 위
+    down4 = _flat(np.linspace(150.0, 50.0, 1000), "4h")     # 끝이 MA960 아래
+    dip1 = _flat(np.r_[np.full(40, 100.0), 95.0], "1h")     # 마지막 봉이 20선 아래
+    firm1 = _flat(np.r_[np.full(40, 100.0), 105.0], "1h")   # 20선 위
+    got = third_wave(dip1, up4, Params())
+    assert got is not None and got["d1h"] < 0 and got["d4h"] > 0
+    assert third_wave(firm1, up4, Params()) is None
+    assert third_wave(dip1, down4, Params()) is None
+    assert below_1h_ma(firm1, Params()) is None and below_1h_ma(dip1, Params()) < 0
+
+
+def test_third_wave_short_history_or_off_is_none():
+    import numpy as np
+    from invest_signal.signals.leader_break import Params, third_wave
+    dip1 = _flat(np.r_[np.full(40, 100.0), 95.0], "1h")
+    short4 = _flat(np.linspace(50.0, 150.0, 700), "4h")     # MA960 못 구함
+    assert third_wave(dip1, short4, Params()) is None
+    up4 = _flat(np.linspace(50.0, 150.0, 1000), "4h")
+    assert third_wave(dip1, up4, Params(wave3_enabled=False)) is None
+    assert third_wave(None, up4, Params()) is None
