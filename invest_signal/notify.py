@@ -38,11 +38,12 @@ def chart_url(symbol: str, kind: str, market: str = "US") -> str:
 
 
 SIGNAL_EMOJI = {"급등봉": "🚀", "상승초입": "🟢", "눌림목": "🔵", "펌핑초기": "🌱",
-                "파동": "🌊", "크립토 모멘텀 눌림목/이탈": "⚡", "하락전환": "🔻"}
+                "파동": "🌊", "크립토 모멘텀 눌림목/이탈": "⚡", "하락 CHoCH": "🔻",
+                "하락전환": "🔻"}
 # 🚀급등봉이 맨 위다 — 방금 터진 봉이라 시의성이 제일 짧다. 나머지는
 # 자리(셋업)라 한두 시간 늦게 읽어도 뜻이 안 변하지만 이건 변한다.
 SIGNAL_ORDER = ["급등봉", "상승초입", "눌림목", "펌핑초기", "파동",
-                "크립토 모멘텀 눌림목/이탈", "하락전환"]
+                "크립토 모멘텀 눌림목/이탈", "하락 CHoCH", "하락전환"]
 PULLBACK_STAGES = ("타점", "대기")   # 그 외 stage는 시그널별로 따로 표기한다
 DISPLAY_GROUP = {"MSS": "눌림목", "풀백": "눌림목"}   # MSS는 눌림목 칸에 태그로 표시
 MARKET_EMOJI = {"크립토": "🪙", "ETF": "📊", "주식": "🏛"}
@@ -153,6 +154,21 @@ FIRE_TAG = "🔥"
 FIRE_SIGNALS = ("wave_setup", "vwap_onset", "leader_break")
 # ⚠️ 급락 주의 — ⚡ 줄 중 지금 상위권이거나 4h 장기선(💥·🧱)에 와 있는 줄
 WARN_TAG = "⚠️"
+# fire_only 모드(설정 notify.fire_only)에서도 🔥 없이 항상 싣는 칸 — 🔻하락 CHoCH
+ALWAYS_SIGNALS = ("choch_warn",)
+
+
+def is_fire(e) -> bool:
+    """🔥 줄인가 — 파동·상승초입·⚡ 이벤트에 떡상 조짐(fire)이 붙었다."""
+    if e.signal not in FIRE_SIGNALS:
+        return False
+    d = e.detail
+    return bool(d.get("fire")) or "🔥진입" in (d.get("triggers") or ())
+
+
+def fire_only(events) -> list:
+    """🔥 줄과 🔻하락 CHoCH만 남긴다 — 나머지 칸·줄은 알림에서 뺀다."""
+    return [e for e in events if e.signal in ALWAYS_SIGNALS or is_fire(e)]
 
 
 def _wave_mark(e) -> str | None:
@@ -476,6 +492,24 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tags.append(ft)
     if e.signal == "vwap_onset":
         tags += _band_tags(d)
+    if e.signal == "choch_warn":
+        # 🔻 하락 CHoCH — 익절·청산 경고. 언제(15m 봉) · 어느 저점을 깼는지 ·
+        # 직전 스윙 고점에서 얼마나 내려왔는지 · 큰 흐름(4h 960선) 위 거리.
+        tags.append(f"🕒{_kst(e.bar_time)}")
+        tags.append(f"저점 {_fmt_price(d['broken_low'])} 이탈")
+        if d.get("from_high") is not None:
+            tags.append(f"고점대비 {_pct(d['from_high'])}")
+        if d.get("ma_long_gap") is not None:
+            tags.append(f"4h{d.get('ma_long', 960)}선 {_pct(d['ma_long_gap'])}")
+        rk = _rank_tag(d)
+        if rk:
+            tags.append(rk)
+        day = _daily_gain(d)
+        if day is not None:
+            tags.append(f"24h {_pct(day)}")
+        tv = _turnover_tag(d)
+        if tv:
+            tags.append(tv)
     if e.signal == "spike_bar":
         # **봉이 언제 터졌는지를 맨 앞에 적는다.** 스캔이 매시 한 번이라 이
         # 줄은 최대 한 시간 묵은 소식이고, 15분봉이라 네 봉 중 어느 봉인지에
@@ -772,6 +806,8 @@ def format_events(events_crypto: list, events_etf: list,
                     + (f"  {_fmt_price(d['last_price'])}" if d.get("last_price") else "")
                     + " · " + " · ".join(tags))
         tags = [f"{_age_days(e.bar_time)}d"]
+        if e.signal == "wave_setup" and d.get("fire"):
+            tags.insert(0, FIRE_TAG)
         wm = _wave_mark(e)
         if wm:
             tags.append(wm)

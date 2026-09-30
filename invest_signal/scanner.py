@@ -19,7 +19,7 @@ import requests
 
 from . import config as cfg_mod
 from . import data_binance, data_community, data_etf, data_qp, indicators, notify
-from .signals import SignalEvent, leader_break, spike_bar, vwap_onset
+from .signals import SignalEvent, choch_warn, leader_break, spike_bar, vwap_onset
 from . import sent_log
 from .state import AlertState
 
@@ -372,6 +372,14 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     now = pd.Timestamp.now(tz="UTC")
     rank = {sym: i + 1 for i, (sym, _) in enumerate(top)}
     events, ongoing, spent = [], [], []
+    # 🔻 하락 CHoCH 경고 — ⚡ 감시 종목의 15m 구조 붕괴(익절·청산 경고). 같은 루프에서 본다.
+    cs = (cfg.get("signal") or {}).get("choch_warn") or {}
+    cw = choch_warn.Params(enabled=bool(cs.get("enabled", False)),
+                           pivot_bars=int(cs.get("pivot_bars", 5)),
+                           ma_long=int(cs.get("ma_long", 960)),
+                           grace_bars=int(cs.get("grace_bars", 4)),
+                           rearm_hours=int(cs.get("rearm_hours", 24)))
+    choch_n, choch_rearmed, choch_below = 0, 0, 0
     muted = 0                   # require_resist로 걸러낸 신규·추적 줄 수
     rearmed = 0                 # rearm_hours 안에 이미 • 로 보낸 종목이라 ↳ 로 둔 수
     for sym, since in watch:
@@ -460,6 +468,28 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                     detail["best_rank"] = best
             return detail
 
+        # 🔻 하락 CHoCH — 마감 15m봉 구조 붕괴 + 4h 종가가 MA960 위(3파 전제). 24h에 한 번.
+        for ce in choch_warn.detect(df, sym, now, cw):
+            if (state is not None and cw.rearm_hours > 0
+                    and state.alerted_within(sym, choch_warn.NAME, cw.rearm_hours)):
+                choch_rearmed += 1
+                break
+            gap = choch_warn.above_long_ma(long4h(sym), ce.bar_time + pd.Timedelta(minutes=15), cw)
+            if gap is None:
+                choch_below += 1
+                break
+            ce.detail.update({"ma_long_gap": gap, "ma_long": cw.ma_long,
+                              "gain_24h": stat.get("change_pct"),
+                              "turnover_24h": stat.get("quote_volume")})
+            if sym in rank:
+                ce.detail["rank"] = rank[sym]
+            if since is not None:
+                ce.detail["watch_days"] = max(0, (now - pd.Timestamp(since)).days)
+                best = state.best_rank(sym) if state is not None else None
+                if best:
+                    ce.detail["best_rank"] = best
+            events.append(ce)
+            choch_n += 1
         if params.entry_mode == "15m":
             cands = leader_break.detect(df, sym, params)
         else:
@@ -491,6 +521,9 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                     symbol=sym, signal=leader_break.NAME,
                     bar_time=pd.Timestamp(since) if since is not None else now,
                     price=snap["last_price"], detail=detail))
+    if cw.enabled and (choch_n or choch_rearmed or choch_below):
+        log(f"[binance] 하락 CHoCH {choch_n}건 (15m 피벗 {cw.pivot_bars} · 4h {cw.ma_long}선 위) · "
+            f"{cw.rearm_hours}h 안 재알림 제외 {choch_rearmed} · {cw.ma_long}선 아래 제외 {choch_below}")
     if rearmed:
         log(f"[binance] 크립토 모멘텀 {params.rearm_hours}h 안에 이미 알린 {rearmed}종은 "
             f"↳ 로만 둠")
@@ -1275,17 +1308,34 @@ def run(config_path: str, state_path: str, only: str | None = None,
 
     fresh_crypto = [e for e in crypto_events if state.is_new(e.dedup_key)]
     fresh_yf = [e for e in yf_events if state.is_new(e.dedup_key)]
+    skipped = (len(crypto_events) - len(fresh_crypto)) + (len(yf_events) - len(fresh_yf))
+    if skipped:
+        log(f"[state] 이미 알림 보낸 {skipped}건 제외")
+    # 🔥만 보기(notify.fire_only) — 파동·상승초입·⚡의 🔥 줄과 🔻하락 CHoCH만 알린다.
+    # 뺀 줄은 상태에 안 남긴다: ⚡ 24h 재알림 금지가 🔥 없는 진입에 소모되면 그 뒤
+    # 🔥가 붙은 진입이 하루 동안 막힌다. 대신 요약을 sent_log에 남겨 나중에 🔥 줄과
+    # 성적을 비교할 수 있게 한다.
+    hidden = []
+    if (cfg.get("notify") or {}).get("fire_only", False):
+        keep = notify.fire_only(fresh_crypto)
+        kept = {id(e) for e in keep}
+        hidden = [e for e in _collapse(fresh_crypto + fresh_yf) if id(e) not in kept]
+        fresh_crypto, fresh_yf = keep, []
+        crypto_ongoing = notify.fire_only(crypto_ongoing)
+        yf_ongoing, crypto_board, community = [], [], {}
+        if hidden:
+            log(f"[notify] 🔥만 보기 — 🔥·하락 CHoCH 아닌 새 줄 {len(hidden)}건 알림에서 뺌")
     # 같은 종목·같은 시그널이 grace 소급으로 두 봉에서 잡히면 최신 봉만 표시
     # (상태에는 둘 다 기록해 다음 실행에서 재등장하지 않게 한다)
     show_crypto = _collapse(fresh_crypto)
     show_etf = [e for e in _collapse(fresh_yf) if grp(e) == "etf"]
     show_stock = [e for e in _collapse(fresh_yf) if grp(e) == "stock"]
-    skipped = (len(crypto_events) - len(fresh_crypto)) + (len(yf_events) - len(fresh_yf))
-    if skipped:
-        log(f"[state] 이미 알림 보낸 {skipped}건 제외")
 
     if not fresh_crypto and not fresh_yf:
         log("새 시그널 없음")
+        if hidden and not dry_run:
+            sent_log.append(sent_log.default_path(state_path), "", mode="hidden",
+                            hidden=sent_log.hidden_rows(hidden), log=log)
         # 시그널이 없어도 커뮤니티 칸은 4시간마다 보낸다 — 그게 이 칸을 만든
         # 이유다. 유지 중 목록까지 딸려 나가면 조용한 스캔이 긴 알림으로
         # 바뀌므로, 여기서는 **커뮤니티 칸만** 따로 만들어 보낸다.
@@ -1329,7 +1379,7 @@ def run(config_path: str, state_path: str, only: str | None = None,
             counts={"crypto": len(show_crypto), "etf": len(show_etf),
                     "stock": len(show_stock),
                     "hold": len(hold_crypto) + len(hold_yf)},
-            log=log)
+            log=log, hidden=sent_log.hidden_rows(hidden))
     else:
         errors.append("telegram: 발송 실패 또는 토큰/챗ID 미설정 — 상태 미저장, 다음 스캔에서 재시도")
         log("[telegram] 발송 실패/미설정 — 상태를 저장하지 않음(다음 4h 스캔에서 재시도)")

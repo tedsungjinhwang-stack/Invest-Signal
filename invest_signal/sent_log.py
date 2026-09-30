@@ -55,16 +55,21 @@ def _fresh(rows: list[dict], now: datetime) -> list[dict]:
 
 
 def append(path: str, text: str, mode: str = "close", counts: dict | None = None,
-           now: datetime | None = None, log=print) -> None:
+           now: datetime | None = None, log=print, hidden: list | None = None) -> None:
     """발송된 메시지 한 건을 덧붙이고 오래된 기록을 정리한다.
 
     기록 실패가 스캔을 실패시키면 안 되므로 예외는 로그만 남기고 삼킨다 —
     알림은 이미 나갔고, 남는 건 사후 조회용 사본일 뿐이다.
+
+    hidden은 fire_only 모드가 알림에서 뺀 줄의 요약(`hidden_rows`)이다 — 🔥 없는
+    줄이 그 뒤 어떻게 됐는지 🔥 줄과 비교하려면 뺀 쪽도 남아 있어야 한다.
     """
     now = now or datetime.now(timezone.utc)
     row = {"ts": now.isoformat(), "mode": mode, "text": text}
     if counts:
         row["counts"] = counts
+    if hidden:
+        row["hidden"] = hidden
     try:
         rows = _fresh(_rows(path) + [row], now)   # 새 줄까지 넣고 잘라야 상한이 정확
         d = os.path.dirname(path)
@@ -82,3 +87,18 @@ def append(path: str, text: str, mode: str = "close", counts: dict | None = None
 def recent(path: str, limit: int = 10) -> list[dict]:
     """최근 발송분을 최신순으로. 조회용 헬퍼."""
     return list(reversed(_rows(path)))[:limit]
+
+
+def hidden_rows(events: list) -> list[dict]:
+    """알림에서 뺀 이벤트 요약 — 종목·시그널·봉 시각·가격·표시(🔥·트리거)만."""
+    out = []
+    for e in events:
+        d = e.detail or {}
+        r = {"symbol": e.symbol, "signal": e.signal,
+             "bar_time": e.bar_time.isoformat(), "price": float(e.price)}
+        for k in ("label", "stage", "triggers", "fire", "warn", "rank"):
+            v = d.get(k)
+            if v not in (None, False, [], ()):
+                r[k] = list(v) if isinstance(v, tuple) else v
+        out.append(r)
+    return out
