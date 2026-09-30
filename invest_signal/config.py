@@ -136,6 +136,12 @@ def wave_params(cfg: dict) -> wave_setup.Params:
         quiet_turnover_usd=float(s.get("quiet_turnover_usd", 5_000_000)),
         quiet_atr_min=float(s.get("quiet_atr_min", 0.019)),
         quiet_atr_max=float(s.get("quiet_atr_max", 0.044)),
+        fire_enabled=bool(s.get("fire_enabled", True)),
+        fire_window_bars=int(s.get("fire_window_bars", 42)),
+        fire_from_low_max=float(s.get("fire_from_low_max", 0.25)),
+        fire_ma=int(s.get("fire_ma", 60)),
+        fire_ma_min=float(s.get("fire_ma_min", 0.03)),
+        fire_to_high_max=float(s.get("fire_to_high_max", -0.04)),
     )
 
 

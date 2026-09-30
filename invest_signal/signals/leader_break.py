@@ -118,6 +118,18 @@ class Params:
     entry_1h_bars: int = 2          # 마감된 1h봉 중 최근 몇 개까지 볼지 (스캔 한 번 놓쳐도 잡게)
     entry_4h_bars: int = 1          # 마감된 4h봉 중 최근 몇 개 (4h봉 하나를 매시 스캔 넷이 본다)
     rearm_hours: int = 24           # 같은 종목은 이 시간 안에 • 로 다시 안 알린다
+    # 🔥 재떡상 조짐 — 장기 강세 코인(4h MA480 +40% 위)이 단기 과열이 식고(4h MA120
+    # 대비 +20% 이하) 3일 저점 근처(+10% 이내)까지 눌린 자리(fire_mark()).
+    fire_enabled: bool = True
+    fire_low_bars: int = 18             # 3일 = 4h × 18
+    fire_from_low_max: float = 0.10
+    fire_ma_long: int = 480
+    fire_ma_long_min: float = 0.40
+    fire_ma_mid: int = 120
+    fire_ma_mid_max: float = 0.20
+    fire_trigger: bool = True           # 🔥 조건이 마감된 4h봉에서 새로 서면 • 로 알린다
+    # ⚠️ 급락 주의 — 지금 24h 상승률 상위권이거나 4h 장기선(💥돌파·🧱터치)에 와 있는 줄
+    warn_enabled: bool = True
 
 
 def leaders(ticker: dict[str, dict], symbols: set[str],
@@ -435,6 +447,38 @@ def third_wave(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
 
 
 ENTRY_W3 = "3파진입"
+ENTRY_FIRE = "🔥진입"
+
+
+def fire_series(df4h: pd.DataFrame | None, params: Params = Params()) -> np.ndarray | None:
+    """4h 봉마다 🔥 조건(True/False). 못 재는 봉은 False. 프레임이 짧으면 None."""
+    if not params.fire_enabled or df4h is None or len(df4h) < params.fire_ma_long:
+        return None
+    c, lo = df4h["Close"], df4h["Low"]
+    from_low = c / lo.rolling(params.fire_low_bars).min() - 1
+    long_ = c / c.rolling(params.fire_ma_long).mean() - 1
+    mid = c / c.rolling(params.fire_ma_mid).mean() - 1
+    ok = (from_low <= params.fire_from_low_max) & (long_ >= params.fire_ma_long_min) \
+        & (mid <= params.fire_ma_mid_max)
+    return ok.fillna(False).to_numpy(bool)
+
+
+def fire_mark(df4h: pd.DataFrame | None, params: Params = Params()) -> bool | None:
+    """🔥 재떡상 조짐 — 넘겨받은 4h 프레임 마지막 봉에서 세 조건이 다 서는지.
+
+      ① 3일(18봉) 저점 대비 +10% 이내 — 눌림 바닥 근처
+      ② 종가가 4h MA480(≈80일)보다 +40% 이상 위 — 장기 대세 상승 코인
+      ③ 4h MA120(≈20일) 대비로는 +20% 이하 — 단기 과열은 식었다
+
+    퍼프 백테스트(08-01~09-21, ⚡ 매시 재현)·실제 ⚡ 알림에서 같은 날 뜬 ⚡끼리
+    비교해 '−15%보다 +30% 먼저' 비율이 세 구간 모두 크게 높았다(+20·+22·+32%p,
+    표시 비율 6~7%). 표시된 줄은 3일 저점에서 ≈5% 위였고 이후 상승의 80%대가
+    알림 뒤에 남아 있었다(초입). 스캐너는 **마감된 4h봉**만 넘긴다(분석과 같은 기준).
+    """
+    ok = fire_series(df4h, params)
+    if ok is None:
+        return None
+    return bool(ok[-1])
 
 
 def _closed(df: pd.DataFrame | None, hours: int, now: pd.Timestamp):
@@ -492,6 +536,7 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
                      4h봉으로 본다)
       1h단기선터치/돌파  마감된 1h봉이 단기선(22×3)을 걸쳤거나 단기가 뒤집혔다
       4h단기선터치/돌파  마감된 4h봉에서 같은 사건
+      🔥진입          마감된 4h봉에서 🔥 조건(fire_mark)이 새로 섰다(직전 봉은 아님)
 
     1h는 최근 entry_1h_bars개(기본 2 — 스캔 한 번을 놓쳐도 잡게), 4h는 최근
     entry_4h_bars개(기본 1 — 4h봉 하나를 매시 스캔 넷이 본다)를 본다. 같은 봉이
@@ -522,10 +567,15 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
     if h4 is not None and len(h4) > 2:
         for t, kind in _fast_events(h4, params, params.entry_4h_bars):
             out.append((f"4h단기선{kind}", h4.index[t] + four))
+        # 🔥 조건이 마감된 4h봉에서 **새로** 섰다 — 직전 봉은 아니었는데 이번 봉에서 참
+        if params.fire_trigger:
+            ok = fire_series(h4, params)
+            if ok is not None and len(ok) >= 2 and ok[-1] and not ok[-2]:
+                out.append((ENTRY_FIRE, h4.index[-1] + four))
     return out
 
 
-ENTRY_ORDER = (ENTRY_W3, "1h단기선돌파", "1h단기선터치", "4h단기선돌파", "4h단기선터치")
+ENTRY_ORDER = (ENTRY_FIRE, ENTRY_W3, "1h단기선돌파", "1h단기선터치", "4h단기선돌파", "4h단기선터치")
 
 
 def entry_event(symbol: str, triggers: list, df15: pd.DataFrame,

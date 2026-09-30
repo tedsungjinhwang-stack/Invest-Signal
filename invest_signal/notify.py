@@ -148,6 +148,11 @@ LEADER_WAVE_TAGS = {"장기선 돌파": SLOW_BREAK_TAG, "장기선 터치": SLOW
 LEADER_MARK_TFS = ("1h", "4h")      # 줄에 싣는 순서
 # ⚡ 줄 중 4h 960선 위 · 1h 20선 아래 — 칸 맨 위에 모은다(leader_break.third_wave).
 WAVE3_TAG = "3️⃣3파눌림목"
+# 🔥 떡상 조짐 — 파동·상승초입·⚡ 각각의 fire 판정(signals/*.fire·fire_mark). 먼저 볼 줄.
+FIRE_TAG = "🔥"
+FIRE_SIGNALS = ("wave_setup", "vwap_onset", "leader_break")
+# ⚠️ 급락 주의 — ⚡ 줄 중 지금 상위권이거나 4h 장기선(💥·🧱)에 와 있는 줄
+WARN_TAG = "⚠️"
 
 
 def _wave_mark(e) -> str | None:
@@ -294,12 +299,12 @@ LEADER_FAST_MARKS = ("단기선 돌파", "단기선 터치")
 
 
 def _leader_fast_first(e) -> int:
-    """⚡ 줄의 층 — 0: 3️⃣3파 눌림목 · 1: 1h 단기선 · 2: 4h 단기선 · 3: 나머지.
+    """⚡ 줄의 층 — 0: 🔥 재떡상 조짐 · 1: 3️⃣3파 눌림목 · 2: 1h 단기선 · 3: 4h 단기선 · 4: 나머지.
 
-    **3파 눌림목(4h 960선 위 · 1h 20선 아래)이 맨 위**, 그다음 **1h 단기선
-    터치·돌파(🔓·🔁) 줄**, 그다음 **4h 단기선 줄**이다(앞 층에 들면 뒤 층
-    마크와 무관하게 거기 선다). 신규(•)·추적(↳) 둘 다 같고, 칸을 조립할 때
-    층마다 • → ↳ 순으로 싣는다. 층 안은 거래대금 순이다.
+    **🔥(장기 강세 코인의 식은 눌림 바닥)가 맨 위**, 그다음 3파 눌림목(4h 960선 위 ·
+    1h 20선 아래), 그다음 **1h 단기선 터치·돌파(🔓·🔁) 줄**, 그다음 **4h 단기선 줄**이다
+    (앞 층에 들면 뒤 층 마크와 무관하게 거기 선다). 신규(•)·추적(↳) 둘 다 같고, 칸을
+    조립할 때 층마다 • → ↳ 순으로 싣는다. 층 안은 거래대금 순이다.
 
     장기선 마크(🧱·💥)는 끌어올리지 않는다 — 요청이 단기선이었다. 마크는
     프레임마다 하나(장기선 돌파 > 장기선 터치 > 단기선 돌파 > 단기선 터치)라서,
@@ -308,12 +313,24 @@ def _leader_fast_first(e) -> int:
     """
     if e.signal != "leader_break":
         return 0
-    if e.detail.get("wave3"):
+    if e.detail.get("fire"):
         return 0
+    if e.detail.get("wave3"):
+        return 1
     for i, tf in enumerate(LEADER_MARK_TFS):
         if e.detail.get(f"wave_mark_{tf}") in LEADER_FAST_MARKS:
-            return i + 1
-    return len(LEADER_MARK_TFS) + 1
+            return i + 2
+    return len(LEADER_MARK_TFS) + 2
+
+
+LEADER_TIERS = len(LEADER_MARK_TFS) + 2     # 🔥 · 3파 · 1h · 4h — 이 층들은 ↳까지 끌어올린다
+
+
+def _fire_first(e) -> int:
+    """🌊·🟢 칸에서 🔥 줄을 칸 맨 위로. ⚡는 층(_leader_fast_first)이 맡고, 다른 칸은 0."""
+    if e.signal not in ("wave_setup", "vwap_onset"):
+        return 0
+    return 0 if e.detail.get("fire") else 1
 
 
 def _spike_desc(e):
@@ -346,14 +363,14 @@ def _quiet_first(e):
 def _new_order(e):
     """신규 줄 — 변형·🍃로 묶고, ⚡는 단기선 마크 먼저·거래대금 순,
     나머지는 24h 수익률 순."""
-    return (_variant(e), *_abc_first(e), *_spike_desc(e), _leader_fast_first(e),
+    return (_variant(e), _fire_first(e), *_abc_first(e), *_spike_desc(e), _leader_fast_first(e),
             *_turnover_desc(e), _quiet_first(e), *_by_gain_desc(e), e.symbol)
 
 
 def _hold_order(e):
     """추적 줄 — 신규 줄과 같은 축(⚡는 단기선 마크 먼저·거래대금 순),
     동률이면 최신 발생 순."""
-    return (_variant(e), *_abc_first(e), *_spike_desc(e), _leader_fast_first(e),
+    return (_variant(e), _fire_first(e), *_abc_first(e), *_spike_desc(e), _leader_fast_first(e),
             *_turnover_desc(e), _quiet_first(e), *_by_gain_desc(e),
             -e.bar_time.timestamp())
 
@@ -439,6 +456,10 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     if e.signal == "leader_break" and d.get("triggers"):
         # 이 줄이 **왜 지금 • 로 났는지** — 마감된 봉에서 새로 생긴 사건
         tags.insert(0, "🆕" + "·".join(d["triggers"]))
+    if e.signal == "leader_break" and d.get("warn"):
+        tags.insert(0, WARN_TAG)
+    if e.signal in FIRE_SIGNALS and d.get("fire"):
+        tags.insert(0, FIRE_TAG)        # 먼저 볼 줄 — 칸 맨 위에 모이고 줄 맨 앞에 선다
     wm = _wave_mark(e)
     if wm:
         tags.append(wm)
@@ -698,6 +719,10 @@ def format_events(events_crypto: list, events_etf: list,
                 tags.insert(0, QUIET_TAG)
             if d.get("wave3"):
                 tags.insert(0, WAVE3_TAG)
+            if d.get("warn"):
+                tags.insert(0, WARN_TAG)
+            if d.get("fire"):
+                tags.insert(0, FIRE_TAG)
             day = _daily_gain(d)
             if day is not None:
                 tags.append(f"24h {_pct(day)}")
@@ -717,6 +742,8 @@ def format_events(events_crypto: list, events_etf: list,
             # 조건에 얼마나 머물렀는지를 같이 적는다 — 방금 들어온 자리와
             # 하루째 눌러앉은 자리는 같은 줄이라도 뜻이 다르다.
             tags = list(_band_tags(d))
+            if d.get("fire"):
+                tags.insert(0, FIRE_TAG)
             if d.get("in_bars"):
                 tags.append(_dwell_tag(d))
             day = _daily_gain(d)
@@ -821,13 +848,13 @@ def format_events(events_crypto: list, events_etf: list,
                 market = "KR" if (kind != "crypto" and e.symbol[:1].isdigit()) else "US"
                 return _event_line(e, chart_url(e.symbol, kind, market), name, kind)
 
-            # ⚡ — 3파 눌림목·단기선 터치·돌파 줄은 **추적(↳) 줄까지 칸 맨
+            # ⚡ — 🔥·3파 눌림목·단기선 터치·돌파 줄은 **추적(↳) 줄까지 칸 맨
             # 위로** 올린다. 신규 뒤에 추적을 붙이는 순서 그대로면 추적 줄이
-            # 신규 스무 줄 아래에 묻힌다. 층(3파 → 1h 단기선 → 4h 단기선)마다
+            # 신규 스무 줄 아래에 묻힌다. 층(🔥 → 3파 → 1h 단기선 → 4h 단기선)마다
             # • → ↳ 순이고 나머지는 그 아래 • → ↳. 다른 칸은 층이 없어 예전
             # 순서 그대로다.
             lifted = set()
-            for tier in range(len(LEADER_MARK_TFS) + 1):
+            for tier in range(LEADER_TIERS):
                 for sel, render in ((new_sel, new_line),
                                     (hold_sel, lambda e: hold_line(e, kind))):
                     for e in sel:

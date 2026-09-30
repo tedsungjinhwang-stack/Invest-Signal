@@ -1147,3 +1147,43 @@ def test_trigger_line_shows_why_it_fired_instead_of_15m_break():
     assert tags[1] == "🆕3파진입·1h단기선터치"
     assert tags[2] == "3️⃣3파눌림목"
     assert "🔻20선 아래" in line and "SMA" not in line
+
+
+def test_fire_and_warn_marks_on_leader_rows():
+    """⚡ 🔥는 줄 맨 앞 · 칸 맨 위(3파보다 위), ⚠️는 급락 주의 표시."""
+    w3 = {"d1h": -0.02, "d4h": 0.4}
+    new = [_lb("W3USDT", 9e8, 0.1, rank=3, wave3=w3),
+           _lb("HOTUSDT", 5e8, 0.3, rank=1, warn=True),
+           _lb("FIREUSDT", 1e6, 0.1, rank=4, fire=True)]
+    hold = [_lb("HFIREUSDT", 2e6, 0.05, watch_days=2, above_ma=False, fire=True),
+            _lb("HW3USDT", 9e9, 0.05, watch_days=1, above_ma=True, wave3=w3)]
+    out = format_events(new, [], {}, ongoing_crypto=hold)
+    order = [">FIRE<", "↳ HFIRE", ">W3<", "↳ HW3"]
+    pos = [out.index(k) for k in order]
+    assert pos == sorted(pos), out
+    fire_line = [ln for ln in out.splitlines() if ">FIRE<" in ln][0]
+    assert fire_line.split(" · ")[1] == "🔥"
+    hold_fire = [ln for ln in out.splitlines() if ln.startswith("↳ HFIRE")][0]
+    assert hold_fire.split(" · ")[1] == "🔥"
+    hot = [ln for ln in out.splitlines() if ">HOT<" in ln][0]
+    assert hot.split(" · ")[1] == "⚠️"
+
+
+def test_fire_rows_come_first_in_wave_and_onset_sections():
+    def wave(sym, fire):
+        return SignalEvent(symbol=sym, signal="wave_setup",
+                           bar_time=pd.Timestamp("2026-09-13T08:00:00Z"), price=1.0,
+                           detail={"label": "파동", "stage": "ABC", "touched": "단기선",
+                                   "kind": "돌파", "gain_24h": 0.9 if not fire else 0.01,
+                                   "fire": fire})
+    def onset(sym, fire):
+        return SignalEvent(symbol=sym, signal="vwap_onset",
+                           bar_time=pd.Timestamp("2026-09-13T08:00:00Z"), price=1.0,
+                           detail={"label": "상승초입", "trend": "정배열", "near_band": "M",
+                                   "band_dist": 0.01, "gain_24h": 0.9 if not fire else 0.01,
+                                   "fire": fire})
+    out = format_events([wave("WPLAINUSDT", False), wave("WFIREUSDT", True),
+                         onset("OPLAINUSDT", False), onset("OFIREUSDT", True)], [], {})
+    assert out.index(">WFIRE<") < out.index(">WPLAIN<")
+    assert out.index(">OFIRE<") < out.index(">OPLAIN<")
+    assert [ln for ln in out.splitlines() if ">OFIRE<" in ln][0].split(" · ")[1] == "🔥"

@@ -168,6 +168,15 @@ class Params:
     quiet_atr_min: float = 0.019            # 너무 조용해도 안 간다 — 아래 하한
     quiet_atr_max: float = 0.044            # 이 위는 위아래로 다 크게 움직인다
     quiet_atr_period: int = 14
+    # 🔥 떡상 조짐 — 7일 저점 근처(아직 덜 오름)인데 4h 60선 위로 올라섰고 7일 고점까진
+    # 여유가 있는 자리. 퍼프 백테스트(07-20~09-21)·실제 알림에서 같은 날 뜬 파동끼리
+    # 비교해 +30%를 −15%보다 먼저 찍는 비율이 세 구간 모두 높았다(fire()).
+    fire_enabled: bool = True
+    fire_window_bars: int = 42          # 7일 = 4h × 42
+    fire_from_low_max: float = 0.25     # 7일 저점 대비 +25% 이내
+    fire_ma: int = 60                   # 4h MA60
+    fire_ma_min: float = 0.03           # 그 선보다 +3% 이상 위
+    fire_to_high_max: float = -0.04     # 7일 고점보다 4% 이상 아래
 
 
 def _daily(df: pd.DataFrame, keep_partial: bool = False) -> pd.DataFrame:
@@ -339,7 +348,40 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
         q = quiet(df, params, i)
         if q is not None:
             ev.detail["quiet"] = q
+        if ev.detail.get("stage") != IMPULSE:
+            f = fire(df, params, i)
+            if f is not None:
+                ev.detail["fire"] = f
     return events
+
+
+def fire(df: pd.DataFrame, params: Params = Params(), at: int = -1) -> bool | None:
+    """🔥 떡상 조짐 — 봉 `at`에서 세 조건이 다 서는지. 못 재면 None.
+
+      ① 7일(42봉) 저점 대비 +25% 이내 — 주간으로는 아직 덜 올랐다(초입)
+      ② 종가가 4h MA60보다 +3% 이상 위 — 짧은 추세 위로 막 올라섰다
+      ③ 7일 고점보다 4% 이상 아래 — 위로 갈 자리가 남아 있다
+
+    분석(퍼프 백테스트 07-20~09-21 + 실제 알림 09-13~21)에서 같은 날 뜬 파동끼리
+    비교하면 🔥 쪽의 '−15%보다 +30% 먼저' 비율이 세 구간 모두 높았다(뒤 기간 28% vs
+    14%, 실제 34% vs 23%, 표시 비율 ≈11%). 파동만의 효과라기보다 '저점권에서 막
+    튀는 코인'을 고르는 표시라, 진입 신호가 아니라 먼저 볼 줄을 고르는 데 쓴다.
+    """
+    if not params.fire_enabled:
+        return None
+    n = len(df)
+    i = at if at >= 0 else n + at
+    w = params.fire_window_bars
+    if i < 0 or i >= n or i + 1 < max(w, params.fire_ma):
+        return None
+    c = float(df["Close"].iloc[i])
+    lo = float(df["Low"].iloc[i - w + 1:i + 1].min())
+    hi = float(df["High"].iloc[i - w + 1:i + 1].max())
+    ma = float(df["Close"].iloc[i - params.fire_ma + 1:i + 1].mean())
+    if lo <= 0 or hi <= 0 or ma <= 0:
+        return None
+    return bool(c / lo - 1 <= params.fire_from_low_max and c / ma - 1 >= params.fire_ma_min
+                and c / hi - 1 <= params.fire_to_high_max)
 
 
 def _at_4h(df: pd.DataFrame, day) -> int:

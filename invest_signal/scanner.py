@@ -223,6 +223,15 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         entry_1h_bars=int(s.get("entry_1h_bars", 2)),
         entry_4h_bars=int(s.get("entry_4h_bars", 1)),
         rearm_hours=int(s.get("rearm_hours", 24)),
+        fire_enabled=bool(s.get("fire_enabled", True)),
+        fire_low_bars=int(s.get("fire_low_bars", 18)),
+        fire_from_low_max=float(s.get("fire_from_low_max", 0.10)),
+        fire_ma_long=int(s.get("fire_ma_long", 480)),
+        fire_ma_long_min=float(s.get("fire_ma_long_min", 0.40)),
+        fire_ma_mid=int(s.get("fire_ma_mid", 120)),
+        fire_ma_mid_max=float(s.get("fire_ma_mid_max", 0.20)),
+        fire_trigger=bool(s.get("fire_trigger", True)),
+        warn_enabled=bool(s.get("warn_enabled", True)),
     )
     if ticker is None:              # 호출 측이 미리 받아두지 않았을 때만 직접 조회
         ticker = _crypto_ticker(session, source, log)
@@ -408,7 +417,18 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                 detail["resist_1h"] = resist
             if resist15:
                 detail["resist_15m"] = resist15
-            # 3️⃣ 3파 눌림목 — 4h 960선 위 · 1h 20선 아래. ⚡ 칸 맨 위에 모인다.
+            # 🔥 재떡상 조짐 — 마감된 4h봉 기준(분석과 같은 기준). ⚡ 칸 맨 위에 모인다.
+            f = leader_break.fire_mark(leader_break._closed(df4, 4, now), params)
+            if f:
+                detail["fire"] = True
+            # ⚠️ 급락 주의 — 지금 상위권이거나 4h 장기선(💥돌파·🧱터치)에 와 있다.
+            # 실제 ⚡ 알림에서 이 줄들은 7일 안에 −15%를 먼저 맞은 비율이 60~68%(상위권)·
+            # 39~54%(4h 장기선)로 나머지(19~37%)보다 확실히 높았다.
+            if params.warn_enabled and (sym in rank or detail.get("wave_mark_4h")
+                                        in (leader_break.WAVE_SLOW_BREAK,
+                                            leader_break.WAVE_SLOW_TOUCH)):
+                detail["warn"] = True
+            # 3️⃣ 3파 눌림목 — 4h 960선 위 · 1h 20선 아래.
             w3 = wave3(sym)
             if w3:
                 detail["wave3"] = w3
@@ -608,6 +628,9 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         band_mult=float(s.get("band_mult", 1.0)),
         near_pct=float(s.get("near_pct", 0.02)),
         band_gap=bool(s.get("band_gap", True)),
+        fire_enabled=bool(s.get("fire_enabled", True)),
+        fire_ma1h20_min=float(s.get("fire_ma1h20_min", 0.04)),
+        fire_from_low_max=float(s.get("fire_from_low_max", 0.25)),
         min_ret_24h=(None if s.get("min_ret_24h", 0.0) is None
                      else float(s.get("min_ret_24h", 0.0))),
         rearm_bars=int(s.get("rearm_bars", 96)),

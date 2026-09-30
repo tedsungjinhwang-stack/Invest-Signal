@@ -270,3 +270,20 @@ def test_dwell_tag():
     assert notify._dwell_tag({"in_bars": 16}) == "4h째"
     assert notify._dwell_tag({"in_bars": 144}) == "1.5일째"
     assert notify._dwell_tag({"in_bars": 41, "in_capped": True}) == "10h+째"
+
+
+def test_fire_needs_1h_ignition_and_not_extended():
+    """🔥 1h MA20 대비 +4% 이상 · 7일 저점 대비 +25% 이내."""
+    from types import SimpleNamespace as NS
+    assert vo.fire(NS(ma1h20=0.05, from_7d_low=0.10)) is True
+    assert vo.fire(NS(ma1h20=0.03, from_7d_low=0.10)) is False
+    assert vo.fire(NS(ma1h20=0.05, from_7d_low=0.40)) is False      # 이미 달린 종목
+    assert vo.fire(NS(ma1h20=float("nan"), from_7d_low=0.1)) is None
+    assert vo.fire(NS(ma1h20=0.05, from_7d_low=0.1), Params(fire_enabled=False)) is None
+
+
+def test_detail_carries_fire_flag():
+    df4h = _f4h()
+    up = _upper(_bear(), df4h)
+    got = detect(_tail(_bear(), up), df4h, "XUSDT")
+    assert len(got) == 1 and "fire" in got[0].detail

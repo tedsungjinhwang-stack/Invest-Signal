@@ -870,3 +870,36 @@ def test_state_alerted_within(tmp_path):
     assert not st.alerted_within("BUSDT", "leader_break", 24, now=now)
     assert not st.alerted_within("AUSDT", "wave_setup", 24, now=now)
     assert not st.alerted_within("AUS", "leader_break", 24, now=now)   # 접두어만 같은 종목
+
+
+def _uptrend_4h(n=520, last=None):
+    idx = pd.date_range("2026-03-01", periods=n, freq="4h", tz="UTC")
+    c = np.geomspace(30.0, 100.0, n)                    # 장기 대세 상승(480선 +40% 이상)
+    c[-12:] = np.linspace(104.0, 99.0, 12)              # 최근 이틀 식어서 눌림
+    if last is not None:
+        c[-1] = last
+    return pd.DataFrame({"Open": c, "High": c * 1.01, "Low": c * 0.99, "Close": c,
+                         "Volume": 1.0}, index=idx)
+
+
+def test_fire_mark_long_uptrend_cooled_pullback():
+    """🔥 3일 저점 +10% 이내 · 4h MA480 +40% 이상 위 · 4h MA120 +20% 이하."""
+    df = _uptrend_4h()
+    assert leader_break.fire_mark(df, P) is True
+    assert leader_break.fire_mark(_uptrend_4h(last=125.0), P) is False   # 저점에서 튀어 버림
+    assert leader_break.fire_mark(df.iloc[:400], P) is None             # 480봉이 안 된다
+    assert leader_break.fire_mark(df, dataclasses_replace(P, fire_enabled=False)) is None
+
+
+def test_entry_trigger_fires_when_fire_condition_turns_on():
+    """마감된 4h봉에서 🔥 조건이 새로 서면 🔥진입 사건."""
+    df = _uptrend_4h()
+    df.iloc[-2, df.columns.get_loc("Close")] = 125.0    # 직전 봉은 튀어 있어 조건 밖
+    df.iloc[-2, df.columns.get_loc("High")] = 126.0
+    now = df.index[-1] + pd.Timedelta(hours=4)
+    ok = leader_break.fire_series(df, P)
+    assert ok[-1] and not ok[-2]
+    trig = leader_break.entry_triggers(None, df, None, P, now)
+    assert (leader_break.ENTRY_FIRE, now) in trig
+    off = dataclasses_replace(P, fire_trigger=False)
+    assert all(n != leader_break.ENTRY_FIRE for n, _ in leader_break.entry_triggers(None, df, None, off, now))

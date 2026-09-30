@@ -909,3 +909,23 @@ def test_slow_break_track_days_caps_the_lookback():
                        for k in range(1, 9)])
     assert supertrend_full(far, p.slow_period, p.slow_mult)["dir"].iloc[-1] > 0
     assert detect(far, "XUSDT", p) == []
+
+
+def _fire_frame(spike_high=True, n=100):
+    import numpy as np
+    idx = pd.date_range("2026-08-01", periods=n, freq="4h", tz="UTC")
+    c = np.full(n, 100.0)
+    c[-3:] = [103.0, 105.0, 106.0]                     # 막 60선 위로 올라선다
+    h, l = c * 1.01, c * 0.99
+    if spike_high:
+        h[-20] = 115.0                                 # 7일 안에 더 높은 고점이 있다
+    return pd.DataFrame({"Open": c, "High": h, "Low": l, "Close": c, "Volume": 1.0}, index=idx)
+
+
+def test_fire_marks_early_bounce_below_weekly_high():
+    """🔥 7일 저점 +25% 이내 · 4h MA60 +3% 이상 위 · 7일 고점보다 4% 이상 아래."""
+    from invest_signal.signals.wave_setup import Params, fire
+    assert fire(_fire_frame(), Params()) is True
+    assert fire(_fire_frame(spike_high=False), Params()) is False   # 고점 바로 밑이면 아님
+    assert fire(_fire_frame(), Params(fire_enabled=False)) is None
+    assert fire(_fire_frame(n=50), Params()) is None                 # 60봉이 안 되면 못 잰다

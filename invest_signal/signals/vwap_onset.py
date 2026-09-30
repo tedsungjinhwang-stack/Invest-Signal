@@ -63,6 +63,11 @@ class Params:
     grace_bars: int = 4                 # 15m × 4 = 1시간(스캔 주기)
     min_turnover_usd: float = 1_000_000
     track_bars: int = 96                # 추적 상한 — 96봉 = 하루
+    # 🔥 떡상 조짐 — 알림 순간 1h 단위로 막 점화됐는데(1h MA20 대비 +4% 이상, 15m 80봉
+    # 평균으로 잰다) 주간으로는 아직 덜 오른(4h 7일 저점 대비 +25% 이내) 자리.
+    fire_enabled: bool = True
+    fire_ma1h20_min: float = 0.04
+    fire_from_low_max: float = 0.25
 
 
 def _band_on_15m(df15: pd.DataFrame, df4h: pd.DataFrame, anchor: str,
@@ -122,10 +127,16 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
         rest &= d1 >= params.min_ret_24h
     # 7d = 15m 672봉. 1,000봉을 받으므로 마지막 구간에서는 늘 구할 수 있다.
     d7 = c / c.shift(7 * 96) - 1
+    # 🔥 재료 — 1h MA20 이격(15m 80봉 평균)과 4h 7일 저점 대비(마감된 4h봉까지)
+    ma1h20 = c / c.rolling(80).mean() - 1
+    low7 = df4h["Close"] / df4h["Low"].rolling(42).min() - 1
+    low7 = pd.Series(low7.to_numpy(), index=df4h.index + pd.Timedelta(hours=4))
+    f7l = low7.reindex(df15.index + pd.Timedelta(minutes=15), method="ffill").to_numpy()
     return pd.DataFrame({"close": c, "bear": bear, "bull": bull,
                          "bear_known": bear_known, "upper": band.upper,
                          "vwap": band.vwap, "dist": dist,
                          "ret_24h": d1, "ret_7d": d7, "rest": rest,
+                         "ma1h20": ma1h20, "from_7d_low": f7l,
                          "ok": (bear | bull) & rest})
 
 
@@ -140,7 +151,26 @@ def _detail(row, params: Params) -> dict:
         d["ret_24h"] = float(row.ret_24h)   # 티커 값(gain_24h)이 있으면 그게 우선
     if pd.notna(row.ret_7d):
         d["ret_7d"] = float(row.ret_7d)
+    f = fire(row, params)
+    if f is not None:
+        d["fire"] = f
     return d
+
+
+def fire(row, params: Params = Params()) -> bool | None:
+    """🔥 떡상 조짐 — 1h MA20보다 +4% 이상 위 **그리고** 7일 저점 대비 +25% 이내.
+
+    퍼프 백테스트(07-20~09-21)에서 같은 날 뜬 상승초입끼리 비교해, 초입 자격이 있는
+    알림(7일 저점 +25% 이내) 중 🔥 쪽이 '−15%보다 +30% 먼저' 비율이 앞·뒤 기간 모두
+    높았다(+8.1·+8.8%p). 실제 알림 3일 결과도 같은 방향(+20% 먼저 33% vs 7%, 1h MA20
+    조건). 이미 달린 종목(🚀 겹침·⚡ 상위권)은 추격형이라 저점 조건으로 뺀다.
+    """
+    if not params.fire_enabled:
+        return None
+    m, lo = getattr(row, "ma1h20", None), getattr(row, "from_7d_low", None)
+    if m is None or lo is None or pd.isna(m) or pd.isna(lo):
+        return None
+    return bool(m >= params.fire_ma1h20_min and lo <= params.fire_from_low_max)
 
 
 def _entries(ok: np.ndarray, rearm: int) -> np.ndarray:
