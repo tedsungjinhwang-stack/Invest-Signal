@@ -171,6 +171,19 @@ def fire_only(events) -> list:
     return [e for e in events if e.signal in ALWAYS_SIGNALS or is_fire(e)]
 
 
+FIRE_TITLE = "🔥 <b>떡상조짐</b>"
+
+
+def fire_only_title(events) -> str:
+    """🔥만 보기 메시지 머리 — 실린 줄 종류대로 '🔥 떡상조짐 · 🔻 하락 CHoCH'."""
+    parts = []
+    if any(is_fire(e) for e in events):
+        parts.append(FIRE_TITLE)
+    if any(e.signal in ALWAYS_SIGNALS for e in events):
+        parts.append("🔻 <b>하락 CHoCH</b>")
+    return " · ".join(parts) or FIRE_TITLE
+
+
 def _wave_mark(e) -> str | None:
     """🌊·⚡ 줄 앞에 붙일 마크 — 네 자리 중 하나. 아니면 None.
 
@@ -695,7 +708,8 @@ def format_events(events_crypto: list, events_etf: list,
                   etf_names: dict[str, str],
                   ongoing_crypto: list = (), ongoing_etf: list = (),
                   events_stocks: list = (), ongoing_stocks: list = (),
-                  crypto_board: list = (), community: dict | None = None) -> str:
+                  crypto_board: list = (), community: dict | None = None,
+                  title: str | None = None) -> str:
     """텔레그램 메시지 — 시그널별 → 시장별. 신규는 상세 줄, 추적 중 종목은
     같은 칸 아래 ↳ 한 줄로 붙는다.
 
@@ -704,6 +718,8 @@ def format_events(events_crypto: list, events_etf: list,
 
     community가 있으면 맨 아래 📣칸에 커뮤니티 언급 요약을 붙인다. 시그널이
     아니라 참고용 요약이라, 칸 순서에서도 맨 뒤다.
+
+    title을 주면 머리('🚨 4h 시그널')를 그걸로 바꾼다 — 🔥만 보기 모드용.
     """
     now_kst = pd.Timestamp.now(tz=KST).strftime("%m-%d %H:%M")
     # 시그널이 하나도 없는데 커뮤니티 칸만 있는 메시지도 나간다(4시간마다).
@@ -711,7 +727,7 @@ def format_events(events_crypto: list, events_etf: list,
     has_signal = bool(events_crypto or events_etf or events_stocks
                       or ongoing_crypto or ongoing_etf or ongoing_stocks
                       or crypto_board)
-    head = "🚨 <b>4h 시그널</b>" if has_signal else "📣 <b>커뮤니티 반응</b>"
+    head = title or ("🚨 <b>4h 시그널</b>" if has_signal else "📣 <b>커뮤니티 반응</b>")
     lines = [f"{head} · {now_kst} KST"]
 
     markets = [("크립토", events_crypto, ongoing_crypto, "crypto"),

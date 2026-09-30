@@ -80,8 +80,9 @@ def test_run_sends_only_fire_and_choch(monkeypatch, tmp_path):
     msg = sent[0]
     assert ">A<" in msg and ">F<" in msg and "\n↳ H " in msg
     assert ">B<" not in msg and "\n↳ I " not in msg and "SOXL" not in msg
-    assert "📣" not in msg and "24h 상승률 TOP" not in msg
-    assert "하락 CHoCH" in msg
+    assert "📣" not in msg and "4h 시그널" not in msg
+    assert msg.startswith("🔥 <b>떡상조짐</b> · 🔻 <b>하락 CHoCH</b> · ")
+    assert "24h 상승률 TOP" in msg and ">Z<" in msg      # 5위까지 순위표는 그대로
     # 뺀 줄은 상태에 안 남는다 — 🔥가 나중에 붙으면 그때 나가야 한다
     assert not state.is_new(fire_w.dedup_key) and not state.is_new(choch.dedup_key)
     assert state.is_new(plain_w.dedup_key)
@@ -101,3 +102,11 @@ def test_run_fire_only_off_sends_everything(monkeypatch, tmp_path):
                       fire_only=False)
     msg = sent[0] if len(sent) == 1 else ""
     assert ">B<" in msg and "SOXL" in msg and "📣" in msg and "24h 상승률 TOP" in msg
+
+
+def test_fire_only_title_names_what_is_inside():
+    fire = _ev("AUSDT", "wave_setup", fire=True)
+    choch = _ev("FUSDT", "choch_warn")
+    assert notify.fire_only_title([fire]) == "🔥 <b>떡상조짐</b>"
+    assert notify.fire_only_title([choch]) == "🔻 <b>하락 CHoCH</b>"
+    assert notify.fire_only_title([choch, fire]) == "🔥 <b>떡상조짐</b> · 🔻 <b>하락 CHoCH</b>"
