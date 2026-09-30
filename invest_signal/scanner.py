@@ -372,13 +372,28 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     now = pd.Timestamp.now(tz="UTC")
     rank = {sym: i + 1 for i, (sym, _) in enumerate(top)}
     events, ongoing, spent = [], [], []
-    # 🔻 하락 CHoCH 경고 — ⚡ 감시 종목의 15m 구조 붕괴(익절·청산 경고). 같은 루프에서 본다.
+    # 🔻 하락 CHoCH 경고 — ⚡ 감시 종목의 5m 구조 붕괴(익절·청산 경고). 같은 루프에서 본다.
     cs = (cfg.get("signal") or {}).get("choch_warn") or {}
+    cd = choch_warn.Params()
     cw = choch_warn.Params(enabled=bool(cs.get("enabled", False)),
-                           pivot_bars=int(cs.get("pivot_bars", 5)),
-                           ma_long=int(cs.get("ma_long", 960)),
-                           grace_bars=int(cs.get("grace_bars", 4)),
-                           rearm_hours=int(cs.get("rearm_hours", 24)))
+                           interval=str(cs.get("interval", cd.interval)),
+                           limit=int(cs.get("limit", cd.limit)),
+                           pivot_bars=int(cs.get("pivot_bars", cd.pivot_bars)),
+                           ma_long=int(cs.get("ma_long", cd.ma_long)),
+                           grace_bars=int(cs.get("grace_bars", cd.grace_bars)),
+                           rearm_hours=int(cs.get("rearm_hours", cd.rearm_hours)))
+    cw_step = pd.Timedelta(minutes=choch_warn.bar_minutes(cw.interval))
+
+    def choch_frame(sym: str, df15):
+        """CHoCH를 볼 봉 — 15m면 이미 받은 프레임, 아니면(5m) 이 종목만 따로 받는다."""
+        if cw.interval == "15m":
+            return df15
+        try:
+            return data_binance.klines(session, sym, source, cw.interval,
+                                       limit=cw.limit, include_live=False)
+        except Exception as e:                  # noqa: BLE001
+            log(f"[binance] {sym} {cw.interval} 수집 실패: {data_binance._safe(e)}")
+            return None
     choch_n, choch_rearmed, choch_below = 0, 0, 0
     muted = 0                   # require_resist로 걸러낸 신규·추적 줄 수
     rearmed = 0                 # rearm_hours 안에 이미 • 로 보낸 종목이라 ↳ 로 둔 수
@@ -468,13 +483,16 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                     detail["best_rank"] = best
             return detail
 
-        # 🔻 하락 CHoCH — 마감 15m봉 구조 붕괴 + 4h 종가가 MA960 위(3파 전제). 24h에 한 번.
-        for ce in choch_warn.detect(df, sym, now, cw):
-            if (state is not None and cw.rearm_hours > 0
-                    and state.alerted_within(sym, choch_warn.NAME, cw.rearm_hours)):
-                choch_rearmed += 1
-                break
-            gap = choch_warn.above_long_ma(long4h(sym), ce.bar_time + pd.Timedelta(minutes=15), cw)
+        # 🔻 하락 CHoCH — 마감 5m봉 구조 붕괴 + 4h 종가가 MA960 위(3파 전제). 24h에 한 번.
+        # 24h 안에 이미 알린 종목은 5m를 받지도 않는다.
+        if (cw.enabled and state is not None and cw.rearm_hours > 0
+                and state.alerted_within(sym, choch_warn.NAME, cw.rearm_hours)):
+            choch_rearmed += 1
+            ces = []
+        else:
+            ces = choch_warn.detect(choch_frame(sym, df), sym, now, cw) if cw.enabled else []
+        for ce in ces:
+            gap = choch_warn.above_long_ma(long4h(sym), ce.bar_time + cw_step, cw)
             if gap is None:
                 choch_below += 1
                 break
@@ -522,7 +540,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                     bar_time=pd.Timestamp(since) if since is not None else now,
                     price=snap["last_price"], detail=detail))
     if cw.enabled and (choch_n or choch_rearmed or choch_below):
-        log(f"[binance] 하락 CHoCH {choch_n}건 (15m 피벗 {cw.pivot_bars} · 4h {cw.ma_long}선 위) · "
+        log(f"[binance] 하락 CHoCH {choch_n}건 ({cw.interval} 피벗 {cw.pivot_bars} · 4h {cw.ma_long}선 위) · "
             f"{cw.rearm_hours}h 안 재알림 제외 {choch_rearmed} · {cw.ma_long}선 아래 제외 {choch_below}")
     if rearmed:
         log(f"[binance] 크립토 모멘텀 {params.rearm_hours}h 안에 이미 알린 {rearmed}종은 "

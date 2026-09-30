@@ -506,9 +506,9 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     if e.signal == "vwap_onset":
         tags += _band_tags(d)
     if e.signal == "choch_warn":
-        # 🔻 하락 CHoCH — 익절·청산 경고. 언제(15m 봉) · 어느 저점을 깼는지 ·
-        # 직전 스윙 고점에서 얼마나 내려왔는지 · 큰 흐름(4h 960선) 위 거리.
-        tags.append(f"🕒{_kst(e.bar_time)}")
+        # 🔻 하락 CHoCH — 익절·청산 경고. 언제(5m 봉, 차트처럼 봉 시작 시각) · 어느
+        # 저점을 깼는지 · 직전 스윙 고점에서 얼마나 내려왔는지 · 큰 흐름(4h 960선) 위 거리.
+        tags.append(f"🕒{_kst(e.bar_time)} {d.get('interval', '5m')}봉")
         tags.append(f"저점 {_fmt_price(d['broken_low'])} 이탈")
         if d.get("from_high") is not None:
             tags.append(f"고점대비 {_pct(d['from_high'])}")
