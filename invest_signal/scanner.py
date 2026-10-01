@@ -1329,22 +1329,25 @@ def run(config_path: str, state_path: str, only: str | None = None,
     skipped = (len(crypto_events) - len(fresh_crypto)) + (len(yf_events) - len(fresh_yf))
     if skipped:
         log(f"[state] 이미 알림 보낸 {skipped}건 제외")
-    # 🔥만 보기(notify.fire_only) — 파동·상승초입·⚡의 🔥 줄과 🔻하락 CHoCH만 알린다.
+    # 🔥만 보기(notify.fire_only) — 파동·상승초입·⚡의 🔥 줄과 항상 싣는 칸
+    # (notify.always_show — 🚀급등봉·🔻하락 CHoCH)만 알린다.
     # ⚡ 24h 상승률 TOP(board_top=5) 순위표는 그대로 싣는다.
     # 뺀 줄은 상태에 안 남긴다: ⚡ 24h 재알림 금지가 🔥 없는 진입에 소모되면 그 뒤
     # 🔥가 붙은 진입이 하루 동안 막힌다. 대신 요약을 sent_log에 남겨 나중에 🔥 줄과
     # 성적을 비교할 수 있게 한다.
     hidden, title = [], None
-    fire_mode = bool((cfg.get("notify") or {}).get("fire_only", False))
+    ncfg = cfg.get("notify") or {}
+    fire_mode = bool(ncfg.get("fire_only", False))
+    always = tuple(ncfg.get("always_show", notify.ALWAYS_SIGNALS))
     if fire_mode:
-        keep = notify.fire_only(fresh_crypto)
+        keep = notify.fire_only(fresh_crypto, always)
         kept = {id(e) for e in keep}
         hidden = [e for e in _collapse(fresh_crypto + fresh_yf) if id(e) not in kept]
         fresh_crypto, fresh_yf = keep, []
-        crypto_ongoing = notify.fire_only(crypto_ongoing)
+        crypto_ongoing = notify.fire_only(crypto_ongoing, always)
         yf_ongoing, community = [], {}
         if hidden:
-            log(f"[notify] 🔥만 보기 — 🔥·하락 CHoCH 아닌 새 줄 {len(hidden)}건 알림에서 뺌")
+            log(f"[notify] 🔥만 보기 — 🔥·{'·'.join(always)} 아닌 새 줄 {len(hidden)}건 알림에서 뺌")
     # 같은 종목·같은 시그널이 grace 소급으로 두 봉에서 잡히면 최신 봉만 표시
     # (상태에는 둘 다 기록해 다음 실행에서 재등장하지 않게 한다)
     show_crypto = _collapse(fresh_crypto)
@@ -1377,7 +1380,7 @@ def run(config_path: str, state_path: str, only: str | None = None,
     hold_stock = [e for e in hold_yf if grp(e) == "stock"]
 
     if fire_mode:
-        title = notify.fire_only_title(show_crypto + hold_crypto)
+        title = notify.fire_only_title(show_crypto + hold_crypto, always)
     msg = notify.format_events(show_crypto, show_etf, yf_names, hold_crypto, hold_etf,
                                events_stocks=show_stock, ongoing_stocks=hold_stock,
                                crypto_board=crypto_board, community=community,

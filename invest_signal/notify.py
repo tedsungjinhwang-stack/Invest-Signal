@@ -154,8 +154,10 @@ FIRE_TAG = "🔥"
 FIRE_SIGNALS = ("wave_setup", "vwap_onset", "leader_break")
 # ⚠️ 급락 주의 — ⚡ 줄 중 지금 상위권이거나 4h 장기선(💥·🧱)에 와 있는 줄
 WARN_TAG = "⚠️"
-# fire_only 모드(설정 notify.fire_only)에서도 🔥 없이 항상 싣는 칸 — 🔻하락 CHoCH
-ALWAYS_SIGNALS = ("choch_warn",)
+# fire_only 모드(설정 notify.fire_only)에서도 🔥 없이 항상 싣는 칸 — 🚀급등봉 · 🔻하락 CHoCH.
+# 설정 notify.always_show로 바꿀 수 있다. 값은 머리에 적을 이름.
+ALWAYS_TITLES = {"spike_bar": "🚀 <b>급등봉</b>", "choch_warn": "🔻 <b>하락 CHoCH</b>"}
+ALWAYS_SIGNALS = tuple(ALWAYS_TITLES)
 
 
 def is_fire(e) -> bool:
@@ -166,21 +168,23 @@ def is_fire(e) -> bool:
     return bool(d.get("fire")) or "🔥진입" in (d.get("triggers") or ())
 
 
-def fire_only(events) -> list:
-    """🔥 줄과 🔻하락 CHoCH만 남긴다 — 나머지 칸·줄은 알림에서 뺀다."""
-    return [e for e in events if e.signal in ALWAYS_SIGNALS or is_fire(e)]
+def fire_only(events, always=ALWAYS_SIGNALS) -> list:
+    """🔥 줄과 항상 싣는 칸(🚀급등봉·🔻하락 CHoCH)만 남긴다 — 나머지는 알림에서 뺀다."""
+    return [e for e in events if e.signal in always or is_fire(e)]
 
 
 FIRE_TITLE = "🔥 <b>떡상조짐</b>"
 
 
-def fire_only_title(events) -> str:
-    """🔥만 보기 메시지 머리 — 실린 줄 종류대로 '🔥 떡상조짐 · 🔻 하락 CHoCH'."""
+def fire_only_title(events, always=ALWAYS_SIGNALS) -> str:
+    """🔥만 보기 메시지 머리 — 실린 줄 종류대로 '🔥 떡상조짐 · 🚀 급등봉 · 🔻 하락 CHoCH'."""
     parts = []
     if any(is_fire(e) for e in events):
         parts.append(FIRE_TITLE)
-    if any(e.signal in ALWAYS_SIGNALS for e in events):
-        parts.append("🔻 <b>하락 CHoCH</b>")
+    present = {e.signal for e in events}
+    for sig, name in ALWAYS_TITLES.items():
+        if sig in always and sig in present:
+            parts.append(name)
     return " · ".join(parts) or FIRE_TITLE
 
 

@@ -26,7 +26,9 @@ def test_fire_only_keeps_fire_rows_and_choch():
            _ev("EUSDT", "leader_break", triggers=["🔥진입", "1h단기선돌파"]),
            _ev("FUSDT", "choch_warn"), _ev("GUSDT", "spike_bar", fire=True)]
     got = [e.symbol for e in notify.fire_only(evs)]
-    assert got == ["AUSDT", "CUSDT", "EUSDT", "FUSDT"]
+    assert got == ["AUSDT", "CUSDT", "EUSDT", "FUSDT", "GUSDT"]      # 🚀급등봉은 항상
+    assert [e.symbol for e in notify.fire_only(evs, ("choch_warn",))] == \
+        ["AUSDT", "CUSDT", "EUSDT", "FUSDT"]
 
 
 def test_wave_hold_line_shows_fire():
@@ -110,3 +112,21 @@ def test_fire_only_title_names_what_is_inside():
     assert notify.fire_only_title([fire]) == "🔥 <b>떡상조짐</b>"
     assert notify.fire_only_title([choch]) == "🔻 <b>하락 CHoCH</b>"
     assert notify.fire_only_title([choch, fire]) == "🔥 <b>떡상조짐</b> · 🔻 <b>하락 CHoCH</b>"
+    spike = _ev("GUSDT", "spike_bar")
+    assert notify.fire_only_title([choch, spike, fire]) == \
+        "🔥 <b>떡상조짐</b> · 🚀 <b>급등봉</b> · 🔻 <b>하락 CHoCH</b>"
+    assert notify.fire_only_title([spike], ("choch_warn",)) == "🔥 <b>떡상조짐</b>"
+
+
+def test_run_sends_spike_bar_without_fire(monkeypatch, tmp_path):
+    """🚀급등봉은 🔥 없이도 나간다 — 새 줄(•)·추적 줄(↳) 모두."""
+    spike = _ev("SUSDT", "spike_bar", body=0.09, vol_mult=12.0)
+    spike_hold = _ev("TUSDT", "spike_bar", body=0.08, vol_mult=9.0, since=0.03,
+                     last_price=1.0)
+    plain_w = _ev("BUSDT", "wave_setup")
+    sent, state, _ = _run(monkeypatch, tmp_path, [spike, plain_w], [spike_hold])
+    msg = sent[0] if len(sent) == 1 else ""
+    assert msg.startswith("🚀 <b>급등봉</b> · ")
+    assert ">S<" in msg and "몸통 +9.0%" in msg and "\n↳ T " in msg
+    assert ">B<" not in msg
+    assert not state.is_new(spike.dedup_key)
