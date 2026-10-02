@@ -399,32 +399,6 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                 choch_cache[sym] = None
         return choch_cache[sym]
 
-    # 🚨 세력 이탈 — ⚡ 감시 종목의 현선갭(퍼프 ÷ 인덱스)·OI 되돌림. 선물 소스에서만.
-    ws = (cfg.get("signal") or {}).get("whale_exit") or {}
-    wd = whale_exit.Params()
-    wp = whale_exit.Params(**{f: type(getattr(wd, f))(ws.get(f, getattr(wd, f)))
-                              for f in wd.__dataclass_fields__ if f != "enabled"},
-                           enabled=bool(ws.get("enabled", False)))   # 설정에 없으면 끈다(CHoCH와 같게)
-    whale_n, whale_rearmed = 0, 0
-
-    def whale_event(sym: str, df15) -> "SignalEvent | None":
-        """5m 퍼프(⚡·CHoCH와 같은 캐시)·5m 인덱스·1h봉·1h OI로 판정. 조회 실패는 None."""
-        if source != "fapi":
-            return None
-        px5 = choch_frame(sym, df15) if cw.interval == whale_exit.GAP_INTERVAL else None
-        try:
-            if px5 is None:
-                px5 = data_binance.klines(session, sym, source, whale_exit.GAP_INTERVAL,
-                                          limit=wp.gap_bars + 5, include_live=False)
-            idx5 = data_binance.index_klines(session, sym, source, whale_exit.GAP_INTERVAL,
-                                             limit=wp.gap_bars + 5)
-            oi = (data_binance.open_interest_hist(session, sym, source, whale_exit.OI_PERIOD,
-                                                  limit=wp.oi_window_h + 5)
-                  if wp.oi_enabled else None)
-        except Exception as e:                  # noqa: BLE001 — 경고 하나 때문에 스캔이 죽으면 안 된다
-            log(f"[binance] {sym} 현선갭·OI 수집 실패: {data_binance._safe(e)}")
-            return None
-        return whale_exit.detect(sym, now, px5, idx5, hour_frame(sym), oi, wp)
     choch_n, choch_rearmed, choch_below = 0, 0, 0
     muted = 0                   # require_resist로 걸러낸 신규·추적 줄 수
     rearmed = 0                 # rearm_hours 안에 이미 • 로 보낸 종목이라 ↳ 로 둔 수
@@ -539,24 +513,6 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                     ce.detail["best_rank"] = best
             events.append(ce)
             choch_n += 1
-        if wp.enabled:
-            if (state is not None and wp.rearm_hours > 0
-                    and state.alerted_within(sym, whale_exit.NAME, wp.rearm_hours)):
-                whale_rearmed += 1
-            else:
-                we = whale_event(sym, df)
-                if we is not None:
-                    we.detail.update({"gain_24h": stat.get("change_pct"),
-                                      "turnover_24h": stat.get("quote_volume")})
-                    if sym in rank:
-                        we.detail["rank"] = rank[sym]
-                    if since is not None:
-                        we.detail["watch_days"] = max(0, (now - pd.Timestamp(since)).days)
-                        best = state.best_rank(sym) if state is not None else None
-                        if best:
-                            we.detail["best_rank"] = best
-                    events.append(we)
-                    whale_n += 1
         if params.entry_mode == "15m":
             cands = leader_break.detect(df, sym, params)
         else:
@@ -591,9 +547,6 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     if cw.enabled and (choch_n or choch_rearmed or choch_below):
         log(f"[binance] 하락 CHoCH {choch_n}건 ({cw.interval} 피벗 {cw.pivot_bars} · 4h {cw.ma_long}선 위) · "
             f"{cw.rearm_hours}h 안 재알림 제외 {choch_rearmed} · {cw.ma_long}선 아래 제외 {choch_below}")
-    if wp.enabled and (whale_n or whale_rearmed):
-        log(f"[binance] 세력 이탈 {whale_n}건 (현선갭 ≥{wp.gap_min:.0%} 또는 OI 되돌림) · "
-            f"{wp.rearm_hours}h 안 재알림 제외 {whale_rearmed}")
     if rearmed:
         log(f"[binance] 크립토 모멘텀 {params.rearm_hours}h 안에 이미 알린 {rearmed}종은 "
             f"↳ 로만 둠")
@@ -653,6 +606,61 @@ def _fetch_15m(session, source: str, symbols: list, limit: int,
         log(f"[binance] 15m 수집 {len(out)}/{len(symbols)}종 "
             f"({len(symbols) - len(out)}종 실패 — 건너뜀)")
     return out
+
+
+def _scan_whale_exit(cfg: dict, source: str, frames15: dict, ticker: dict | None,
+                     state=None, workers: int = 6, log=print) -> list:
+    """🚨 세력 이탈 — 전 종목 현선갭(퍼프 15m ÷ 인덱스 15m). 선물 소스에서만.
+
+    퍼프 15m은 급등봉·상승초입이 받아 둔 프레임을 그대로 쓰고, 인덱스 15m만 종목마다
+    gap_bars+2봉씩 더 받는다(가중치 1). 24h 안에 이미 알린 종목은 받지도 않는다.
+    """
+    s = (cfg.get("signal") or {}).get("whale_exit") or {}
+    if not s.get("enabled", False) or source != "fapi" or not frames15:
+        return []
+    d = whale_exit.Params()
+    params = whale_exit.Params(
+        enabled=True,
+        gap_min=float(s.get("gap_min", d.gap_min)),
+        gap_pump_min=float(s.get("gap_pump_min", d.gap_pump_min)),
+        pump_min=float(s.get("pump_min", d.pump_min)),
+        gap_bars=int(s.get("gap_bars", d.gap_bars)),
+        rearm_hours=int(s.get("rearm_hours", d.rearm_hours)))
+    syms = [sym for sym in frames15
+            if not (state is not None and params.rearm_hours > 0
+                    and state.alerted_within(sym, whale_exit.NAME, params.rearm_hours))]
+    now = pd.Timestamp.now(tz="UTC")
+    tls = threading.local()
+
+    def grab(sym):
+        if getattr(tls, "s", None) is None:
+            tls.s = requests.Session()
+        try:
+            return sym, data_binance.index_klines(tls.s, sym, source, whale_exit.INTERVAL,
+                                                  limit=params.gap_bars + 2)
+        except Exception:                       # noqa: BLE001 — 종목별 실패는 건너뛴다
+            return sym, None
+
+    events, failed = [], 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+        for sym, idx in ex.map(grab, syms):
+            if idx is None:
+                failed += 1
+                continue
+            ev = whale_exit.detect(frames15[sym], idx, sym, now, params)
+            if ev is None:
+                continue
+            stat = (ticker or {}).get(sym) or {}
+            if stat.get("change_pct") is not None:
+                ev.detail["gain_24h"] = stat["change_pct"]
+            if stat.get("quote_volume") is not None:
+                ev.detail["turnover_24h"] = stat["quote_volume"]
+            events.append(ev)
+    log(f"[binance] 세력 이탈 {len(events)}건 — 현선갭 ≥{params.gap_min:.0%} 또는 "
+        f"(≥{params.gap_pump_min:.0%} + 24h {params.pump_min:+.0%}) · {len(syms)}종 확인"
+        + (f" · 24h 안 재알림 제외 {len(frames15) - len(syms)}종" if len(syms) < len(frames15) else "")
+        + (f" · 인덱스 수집 실패 {failed}종" if failed else ""))
+    return events
 
 
 def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
@@ -906,9 +914,12 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
             # 상승초입은 MA960을 봐야 해서 훨씬 길다 — 둘 중 긴 쪽에 맞춰
             # 한 번만 받는다(요청 수는 그대로, 페이로드만 커진다).
             need15 = max(need15, vwap_onset.KLINE_LIMIT)
+        if (scfg.get("whale_exit") or {}).get("enabled", False) and source == "fapi":
+            need15 = max(need15, whale_exit.DAY_BARS + 20)    # 24h 전 종가까지
         if need15:
             frames15 = _fetch_15m(s, source, symbols, need15, workers, log)
         spike_events, spike_ongoing = _scan_spike(cfg, frames15, ticker, log)
+        spike_events += _scan_whale_exit(cfg, source, frames15, ticker, state, workers, log)
         vo_events, vo_ongoing = _scan_vwap_onset(cfg, frames15, frames, ticker, log)
         # 15m 판정이라 마감·인트라바 양쪽에서 매번 돈다. 4h 프레임은 제외 조건
         # (정배열 + 480선 아래) 판정에만 쓰고, 없으면 대상 종목만 따로 받는다.

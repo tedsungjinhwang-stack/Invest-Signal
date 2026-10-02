@@ -530,21 +530,13 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         if tv:
             tags.append(tv)
     if e.signal == "whale_exit":
-        # 🚨 세력 이탈 — 익절·청산 경고. 현선갭(퍼프 ÷ 인덱스)이 언제 얼마나 벌어졌는지,
-        # OI가 펌핑 전 수준으로 돌아왔는지. 숏 신호가 아니다(42%는 그 전에 +20% 더 쏨).
-        if d.get("gap") is not None:
-            side = "선물<현물" if d["gap"] < 0 else "선물>현물"
-            tags.append(f"🕒{_kst(e.bar_time)} {d.get('interval', '5m')}봉")
-            tags.append(f"현선갭 {_pct(d['gap'])}({side})")
-        if d.get("oi_now") is not None:
-            tags.append(f"OI되돌림 {d['oi_peak']:.2f}x→{d['oi_now']:.2f}x"
-                        f"(펌핑 {_pct(d['oi_pump'])} · 유지 {d['oi_keep'] * 100:.0f}%)")
-        rk = _rank_tag(d)
-        if rk:
-            tags.append(rk)
-        day = _daily_gain(d)
-        if day is not None:
-            tags.append(f"24h {_pct(day)}")
+        # 🚨 세력 이탈 — 익절·청산 경고. 현선갭(퍼프 ÷ 인덱스)이 언제 얼마나 벌어졌는지와
+        # 그 봉의 24h 상승률. 숏 신호가 아니다(절반은 그 전에 +20% 더 쏨).
+        side = "선물<현물" if d["gap"] < 0 else "선물>현물"
+        tags.append(f"🕒{_kst(e.bar_time)} {d.get('interval', '15m')}봉")
+        tags.append(f"현선갭 {_pct(d['gap'])}({side})")
+        if d.get("pump_24h") is not None:
+            tags.append(f"그때 24h {_pct(d['pump_24h'])}")
         tv = _turnover_tag(d)
         if tv:
             tags.append(tv)
