@@ -249,6 +249,23 @@ def index_klines(session: requests.Session, symbol: str, source: str,
     return parse_klines(rows)
 
 
+def open_interest_hist(session: requests.Session, symbol: str, source: str,
+                       period: str = "5m", limit: int = 60) -> pd.Series | None:
+    """미결제약정(OI, 계약 수) 이력 — 시각(UTC) → OI. 선물(fapi)에만 있어 아니면 None.
+
+    시각은 그 시점의 스냅샷이다(5m면 5분마다).
+    """
+    if source != "fapi":
+        return None
+    rows = _get(session, fapi_base(), "/futures/data/openInterestHist",
+                {"symbol": symbol, "period": period, "limit": limit}).json()
+    if not rows:
+        return None
+    return pd.Series([float(r["sumOpenInterest"]) for r in rows],
+                     index=pd.to_datetime([int(r["timestamp"]) for r in rows], unit="ms",
+                                          utc=True)).sort_index()
+
+
 def klines_4h(session: requests.Session, symbol: str, source: str,
               limit: int = 600, include_live: bool = False) -> pd.DataFrame:
     return klines(session, symbol, source, KLINE_INTERVAL, limit, include_live)

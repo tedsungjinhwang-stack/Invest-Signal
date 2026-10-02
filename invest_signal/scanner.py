@@ -19,7 +19,8 @@ import requests
 
 from . import config as cfg_mod
 from . import data_binance, data_community, data_etf, data_qp, indicators, notify
-from .signals import SignalEvent, choch_warn, leader_break, spike_bar, vwap_onset, whale_exit
+from .signals import (SignalEvent, choch_warn, fire2, leader_break, spike_bar, vwap_onset,
+                      whale_exit)
 from . import sent_log
 from .state import AlertState
 
@@ -608,6 +609,68 @@ def _fetch_15m(session, source: str, symbols: list, limit: int,
     return out
 
 
+def _mark_fire2(cfg: dict, source: str, items: list, frames15: dict | None,
+                workers: int = 6, log=print) -> None:
+    """🔥 줄(파동·상승초입·⚡) 중 선물 수급 조건까지 맞는 줄에 detail["fire2"]를 단다.
+
+    🔥 줄의 종목만 따로 받는다 — 파동·상승초입은 인덱스 15m 100봉(퍼프 15m은 받아 둔
+    프레임), ⚡는 OI 5m 60개. 선물 소스가 아니면 아무것도 안 한다(값이 없다).
+    """
+    s = (cfg.get("signal") or {}).get("fire2") or {}
+    if not s.get("enabled", False) or source != "fapi":
+        return
+    d = fire2.Params()
+    params = fire2.Params(
+        enabled=True,
+        onset_gap_mean24_max=float(s.get("onset_gap_mean24_max", d.onset_gap_mean24_max)),
+        leader_oi4_max=float(s.get("leader_oi4_max", d.leader_oi4_max)),
+        wave_gap_now_max=float(s.get("wave_gap_now_max", d.wave_gap_now_max)))
+    hot = [e for e in items if e.detail.get("fire")
+           and e.signal in ("vwap_onset", "wave_setup", "leader_break")]
+    if not hot:
+        return
+    need_gap = sorted({e.symbol for e in hot if e.signal != "leader_break"})
+    need_oi = sorted({e.symbol for e in hot if e.signal == "leader_break"})
+    now = pd.Timestamp.now(tz="UTC")
+    tls = threading.local()
+
+    def grab(job):
+        kind, sym = job
+        if getattr(tls, "s", None) is None:
+            tls.s = requests.Session()
+        try:
+            if kind == "oi":
+                return job, fire2.oi_change(data_binance.open_interest_hist(
+                    tls.s, sym, source, fire2.OI_PERIOD, limit=60), now)
+            px = (frames15 or {}).get(sym)
+            if px is None or len(px) < fire2.DAY_BARS:
+                px = data_binance.klines(tls.s, sym, source, fire2.GAP_INTERVAL,
+                                         limit=fire2.DAY_BARS + 4)
+            idx = data_binance.index_klines(tls.s, sym, source, fire2.GAP_INTERVAL,
+                                            limit=fire2.DAY_BARS + 4)
+            return job, fire2.gap_stats(px, idx, now)
+        except Exception:                       # noqa: BLE001 — 표시 하나 때문에 스캔이 죽으면 안 된다
+            return job, None
+
+    jobs = [("gap", sym) for sym in need_gap] + [("oi", sym) for sym in need_oi]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+        got = dict(ex.map(grab, jobs))
+    n = 0
+    for e in hot:
+        gaps = got.get(("gap", e.symbol))
+        oi4 = got.get(("oi", e.symbol))
+        if gaps:
+            e.detail.update({k: v for k, v in gaps.items()})
+        if oi4 is not None:
+            e.detail["oi_4h"] = oi4
+        if fire2.mark(e.signal, gaps, oi4, params):
+            e.detail["fire2"] = True
+            n += 1
+    log(f"[binance] 🔥🔥 {n}/{len(hot)}줄 (상승초입 24h 평균 현선갭 ≤ "
+        f"{params.onset_gap_mean24_max:+.1%} · ⚡ OI 4h ≤ {params.leader_oi4_max:+.1%} · "
+        f"파동 지금 현선갭 ≤ {params.wave_gap_now_max:+.1%})")
+
+
 def _scan_whale_exit(cfg: dict, source: str, frames15: dict, ticker: dict | None,
                      state=None, workers: int = 6, log=print) -> list:
     """🚨 세력 이탈 — 전 종목 현선갭(퍼프 15m ÷ 인덱스 15m). 선물 소스에서만.
@@ -929,6 +992,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         leader_events = spike_events + vo_events + leader_events
         leader_ongoing = spike_ongoing + vo_ongoing + leader_ongoing
         if not detectors:           # 인트라바인데 4h 대상 시그널이 없을 때
+            _mark_fire2(cfg, source, leader_events + leader_ongoing, frames15, workers, log)
             return leader_events, leader_ongoing, board
     events, ongoing = _detect_all(frames, detectors, log)
     _fill_daily_return(ongoing, ticker)     # 추적 줄 정렬·표기용 24h 수익률
@@ -975,6 +1039,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
     # 크립토 모멘텀 눌림목/이탈은 자체 선정(24h 상승률 상위)이라 위 랭크 필터를 타지 않는다
     events.extend(leader_events)
     ongoing.extend(leader_ongoing)
+    _mark_fire2(cfg, source, events + ongoing, frames15, workers, log)
     log(f"[binance] 시그널 {len(events)}건 · 유지 중 {len(ongoing)}건")
     return events, ongoing, board
 
