@@ -38,12 +38,12 @@ def chart_url(symbol: str, kind: str, market: str = "US") -> str:
 
 
 SIGNAL_EMOJI = {"급등봉": "🚀", "상승초입": "🟢", "눌림목": "🔵", "펌핑초기": "🌱",
-                "파동": "🌊", "크립토 모멘텀 눌림목/이탈": "⚡", "하락 CHoCH": "🔻",
-                "하락전환": "🔻"}
+                "파동": "🌊", "크립토 모멘텀 눌림목/이탈": "⚡", "세력 이탈": "🚨",
+                "하락 CHoCH": "🔻", "하락전환": "🔻"}
 # 🚀급등봉이 맨 위다 — 방금 터진 봉이라 시의성이 제일 짧다. 나머지는
 # 자리(셋업)라 한두 시간 늦게 읽어도 뜻이 안 변하지만 이건 변한다.
 SIGNAL_ORDER = ["급등봉", "상승초입", "눌림목", "펌핑초기", "파동",
-                "크립토 모멘텀 눌림목/이탈", "하락 CHoCH", "하락전환"]
+                "크립토 모멘텀 눌림목/이탈", "세력 이탈", "하락 CHoCH", "하락전환"]
 PULLBACK_STAGES = ("타점", "대기")   # 그 외 stage는 시그널별로 따로 표기한다
 DISPLAY_GROUP = {"MSS": "눌림목", "풀백": "눌림목"}   # MSS는 눌림목 칸에 태그로 표시
 MARKET_EMOJI = {"크립토": "🪙", "ETF": "📊", "주식": "🏛"}
@@ -154,9 +154,11 @@ FIRE_TAG = "🔥"
 FIRE_SIGNALS = ("wave_setup", "vwap_onset", "leader_break")
 # ⚠️ 급락 주의 — ⚡ 줄 중 지금 상위권이거나 4h 장기선(💥·🧱)에 와 있는 줄
 WARN_TAG = "⚠️"
-# fire_only 모드(설정 notify.fire_only)에서도 🔥 없이 항상 싣는 칸 — 🚀급등봉 · 🔻하락 CHoCH.
+# fire_only 모드(설정 notify.fire_only)에서도 🔥 없이 항상 싣는 칸 — 🚀급등봉 · 🚨세력 이탈 ·
+# 🔻하락 CHoCH.
 # 설정 notify.always_show로 바꿀 수 있다. 값은 머리에 적을 이름.
-ALWAYS_TITLES = {"spike_bar": "🚀 <b>급등봉</b>", "choch_warn": "🔻 <b>하락 CHoCH</b>"}
+ALWAYS_TITLES = {"spike_bar": "🚀 <b>급등봉</b>", "whale_exit": "🚨 <b>세력 이탈</b>",
+                 "choch_warn": "🔻 <b>하락 CHoCH</b>"}
 ALWAYS_SIGNALS = tuple(ALWAYS_TITLES)
 
 
@@ -518,6 +520,25 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
             tags.append(f"고점대비 {_pct(d['from_high'])}")
         if d.get("ma_long_gap") is not None:
             tags.append(f"4h{d.get('ma_long', 960)}선 {_pct(d['ma_long_gap'])}")
+        rk = _rank_tag(d)
+        if rk:
+            tags.append(rk)
+        day = _daily_gain(d)
+        if day is not None:
+            tags.append(f"24h {_pct(day)}")
+        tv = _turnover_tag(d)
+        if tv:
+            tags.append(tv)
+    if e.signal == "whale_exit":
+        # 🚨 세력 이탈 — 익절·청산 경고. 현선갭(퍼프 ÷ 인덱스)이 언제 얼마나 벌어졌는지,
+        # OI가 펌핑 전 수준으로 돌아왔는지. 숏 신호가 아니다(42%는 그 전에 +20% 더 쏨).
+        if d.get("gap") is not None:
+            side = "선물<현물" if d["gap"] < 0 else "선물>현물"
+            tags.append(f"🕒{_kst(e.bar_time)} {d.get('interval', '5m')}봉")
+            tags.append(f"현선갭 {_pct(d['gap'])}({side})")
+        if d.get("oi_now") is not None:
+            tags.append(f"OI되돌림 {d['oi_peak']:.2f}x→{d['oi_now']:.2f}x"
+                        f"(펌핑 {_pct(d['oi_pump'])} · 유지 {d['oi_keep'] * 100:.0f}%)")
         rk = _rank_tag(d)
         if rk:
             tags.append(rk)

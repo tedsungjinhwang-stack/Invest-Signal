@@ -19,7 +19,7 @@ import requests
 
 from . import config as cfg_mod
 from . import data_binance, data_community, data_etf, data_qp, indicators, notify
-from .signals import SignalEvent, choch_warn, leader_break, spike_bar, vwap_onset
+from .signals import SignalEvent, choch_warn, leader_break, spike_bar, vwap_onset, whale_exit
 from . import sent_log
 from .state import AlertState
 
@@ -384,16 +384,47 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                            rearm_hours=int(cs.get("rearm_hours", cd.rearm_hours)))
     cw_step = pd.Timedelta(minutes=choch_warn.bar_minutes(cw.interval))
 
+    choch_cache: dict[str, "pd.DataFrame | None"] = {}
+
     def choch_frame(sym: str, df15):
-        """CHoCH를 볼 봉 — 15m면 이미 받은 프레임, 아니면(5m) 이 종목만 따로 받는다."""
+        """CHoCH를 볼 봉 — 15m면 이미 받은 프레임, 아니면(5m) 이 종목만 따로 받는다. 캐시."""
         if cw.interval == "15m":
             return df15
-        try:
-            return data_binance.klines(session, sym, source, cw.interval,
-                                       limit=cw.limit, include_live=False)
-        except Exception as e:                  # noqa: BLE001
-            log(f"[binance] {sym} {cw.interval} 수집 실패: {data_binance._safe(e)}")
+        if sym not in choch_cache:
+            try:
+                choch_cache[sym] = data_binance.klines(session, sym, source, cw.interval,
+                                                       limit=cw.limit, include_live=False)
+            except Exception as e:              # noqa: BLE001
+                log(f"[binance] {sym} {cw.interval} 수집 실패: {data_binance._safe(e)}")
+                choch_cache[sym] = None
+        return choch_cache[sym]
+
+    # 🚨 세력 이탈 — ⚡ 감시 종목의 현선갭(퍼프 ÷ 인덱스)·OI 되돌림. 선물 소스에서만.
+    ws = (cfg.get("signal") or {}).get("whale_exit") or {}
+    wd = whale_exit.Params()
+    wp = whale_exit.Params(**{f: type(getattr(wd, f))(ws.get(f, getattr(wd, f)))
+                              for f in wd.__dataclass_fields__ if f != "enabled"},
+                           enabled=bool(ws.get("enabled", False)))   # 설정에 없으면 끈다(CHoCH와 같게)
+    whale_n, whale_rearmed = 0, 0
+
+    def whale_event(sym: str, df15) -> "SignalEvent | None":
+        """5m 퍼프(⚡·CHoCH와 같은 캐시)·5m 인덱스·1h봉·1h OI로 판정. 조회 실패는 None."""
+        if source != "fapi":
             return None
+        px5 = choch_frame(sym, df15) if cw.interval == whale_exit.GAP_INTERVAL else None
+        try:
+            if px5 is None:
+                px5 = data_binance.klines(session, sym, source, whale_exit.GAP_INTERVAL,
+                                          limit=wp.gap_bars + 5, include_live=False)
+            idx5 = data_binance.index_klines(session, sym, source, whale_exit.GAP_INTERVAL,
+                                             limit=wp.gap_bars + 5)
+            oi = (data_binance.open_interest_hist(session, sym, source, whale_exit.OI_PERIOD,
+                                                  limit=wp.oi_window_h + 5)
+                  if wp.oi_enabled else None)
+        except Exception as e:                  # noqa: BLE001 — 경고 하나 때문에 스캔이 죽으면 안 된다
+            log(f"[binance] {sym} 현선갭·OI 수집 실패: {data_binance._safe(e)}")
+            return None
+        return whale_exit.detect(sym, now, px5, idx5, hour_frame(sym), oi, wp)
     choch_n, choch_rearmed, choch_below = 0, 0, 0
     muted = 0                   # require_resist로 걸러낸 신규·추적 줄 수
     rearmed = 0                 # rearm_hours 안에 이미 • 로 보낸 종목이라 ↳ 로 둔 수
@@ -508,6 +539,24 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                     ce.detail["best_rank"] = best
             events.append(ce)
             choch_n += 1
+        if wp.enabled:
+            if (state is not None and wp.rearm_hours > 0
+                    and state.alerted_within(sym, whale_exit.NAME, wp.rearm_hours)):
+                whale_rearmed += 1
+            else:
+                we = whale_event(sym, df)
+                if we is not None:
+                    we.detail.update({"gain_24h": stat.get("change_pct"),
+                                      "turnover_24h": stat.get("quote_volume")})
+                    if sym in rank:
+                        we.detail["rank"] = rank[sym]
+                    if since is not None:
+                        we.detail["watch_days"] = max(0, (now - pd.Timestamp(since)).days)
+                        best = state.best_rank(sym) if state is not None else None
+                        if best:
+                            we.detail["best_rank"] = best
+                    events.append(we)
+                    whale_n += 1
         if params.entry_mode == "15m":
             cands = leader_break.detect(df, sym, params)
         else:
@@ -542,6 +591,9 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     if cw.enabled and (choch_n or choch_rearmed or choch_below):
         log(f"[binance] 하락 CHoCH {choch_n}건 ({cw.interval} 피벗 {cw.pivot_bars} · 4h {cw.ma_long}선 위) · "
             f"{cw.rearm_hours}h 안 재알림 제외 {choch_rearmed} · {cw.ma_long}선 아래 제외 {choch_below}")
+    if wp.enabled and (whale_n or whale_rearmed):
+        log(f"[binance] 세력 이탈 {whale_n}건 (현선갭 ≥{wp.gap_min:.0%} 또는 OI 되돌림) · "
+            f"{wp.rearm_hours}h 안 재알림 제외 {whale_rearmed}")
     if rearmed:
         log(f"[binance] 크립토 모멘텀 {params.rearm_hours}h 안에 이미 알린 {rearmed}종은 "
             f"↳ 로만 둠")
