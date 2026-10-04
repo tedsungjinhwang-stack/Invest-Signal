@@ -559,10 +559,10 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     if rearmed:
         log(f"[binance] 크립토 모멘텀 {params.rearm_hours}h 안에 이미 알린 {rearmed}종은 "
             f"↳ 로만 둠")
-    if wave3_fetched:
+    if wave3_cache:
         n3 = sum(1 for v in wave3_cache.values() if v)
-        log(f"[binance] 3파 눌림목 {n3}종 (1h {params.wave3_ma_1h}선 아래 "
-            f"{wave3_fetched}종 중 4h {params.wave3_ma_4h}선 위)")
+        log(f"[binance] 3파 눌림목 {n3}종 (감시 {len(wave3_cache)}종 중 1h {params.wave3_ma_1h}선 아래 · "
+            f"4h {params.wave3_ma_4h}선 위)")
     if muted:
         log(f"[binance] 크립토 모멘텀 눌림목/이탈 ↗️ 없어 제외 {muted}줄 "
             f"(require_resist — 1h·15m 단기선을 건드린 줄만 남긴다)")
