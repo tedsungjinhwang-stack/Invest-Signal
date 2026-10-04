@@ -11,7 +11,9 @@ notify:
   # state/sent_log.jsonl의 hidden에 남긴다 — 🔥 줄과 성적 비교용.
   # false로 바꾸면 예전처럼 전부 나간다.
   fire_only: true
-  always_show: [spike_bar, whale_exit, choch_warn]   # 🔥 없이도 항상 싣는 칸 (10-01 급등봉 · 10-02 세력 이탈)
+  # 🔥 없이도 항상 싣는 칸 — 시그널 이름 또는 `시그널:stage`(그 변형만)
+  # (10-01 급등봉 · 10-02 세력 이탈 · 10-04 파동의 일봉 단기·장기 추세선)
+  always_show: [spike_bar, whale_exit, choch_warn, "wave_setup:일봉ABC", "wave_setup:일봉장기선돌파"]
 
 signal:
   spike_bar:                # 급등봉 (15m봉, 크립토 전용): 장대양봉 하나를 잡는다

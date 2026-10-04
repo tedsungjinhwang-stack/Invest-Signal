@@ -130,3 +130,18 @@ def test_run_sends_spike_bar_without_fire(monkeypatch, tmp_path):
     assert ">S<" in msg and "몸통 +9.0%" in msg and "\n↳ T " in msg
     assert ">B<" not in msg
     assert not state.is_new(spike.dedup_key)
+
+
+def test_daily_wave_lines_pass_without_fire():
+    """🌊 일봉 단기·장기 추세선 줄은 🔥 없이도 나간다(10-04). 4h 파동은 여전히 🔥만."""
+    d1 = SignalEvent(symbol="DUSDT", signal="wave_setup", bar_time=T, price=1.0,
+                     detail={"label": "파동", "stage": "일봉ABC", "interval": "1d",
+                             "touched": "단기선", "kind": "돌파"})
+    d2 = SignalEvent(symbol="EUSDT", signal="wave_setup", bar_time=T, price=1.0,
+                     detail={"label": "파동", "stage": "일봉장기선돌파", "interval": "1d"})
+    h4 = SignalEvent(symbol="FUSDT", signal="wave_setup", bar_time=T, price=1.0,
+                     detail={"label": "파동", "stage": "ABC", "interval": "4h",
+                             "touched": "단기선", "kind": "돌파"})
+    assert [e.symbol for e in notify.fire_only([d1, d2, h4])] == ["DUSDT", "EUSDT"]
+    assert notify.fire_only([d1], ("spike_bar",)) == []                   # 설정에서 빼면 안 나간다
+    assert notify.fire_only_title([d1, d2]) == "🌊 <b>일봉 파동</b>"

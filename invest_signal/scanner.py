@@ -1483,7 +1483,7 @@ def run(config_path: str, state_path: str, only: str | None = None,
         crypto_ongoing = notify.fire_only(crypto_ongoing, always)
         yf_ongoing, community = [], {}
         if hidden:
-            log(f"[notify] 🔥만 보기 — 🔥·{'·'.join(always)} 아닌 새 줄 {len(hidden)}건 알림에서 뺌")
+            log(f"[notify] 🔥만 보기 — 🔥·{' · '.join(always)} 아닌 새 줄 {len(hidden)}건 알림에서 뺌")
     # 같은 종목·같은 시그널이 grace 소급으로 두 봉에서 잡히면 최신 봉만 표시
     # (상태에는 둘 다 기록해 다음 실행에서 재등장하지 않게 한다)
     show_crypto = _collapse(fresh_crypto)
