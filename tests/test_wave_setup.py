@@ -929,3 +929,61 @@ def test_fire_marks_early_bounce_below_weekly_high():
     assert fire(_fire_frame(spike_high=False), Params()) is False   # 고점 바로 밑이면 아님
     assert fire(_fire_frame(), Params(fire_enabled=False)) is None
     assert fire(_fire_frame(n=50), Params()) is None                 # 60봉이 안 되면 못 잰다
+
+
+def _rebound(up_days):
+    """4h봉 100일 하락(200 → 100) 뒤 하루 +4%씩 up_days일 반등."""
+    import numpy as np
+    c = np.r_[np.linspace(200, 100, 600), np.linspace(100, 100 * (1 + 0.04 * up_days), up_days * 6)]
+    idx = pd.date_range("2026-05-01", periods=len(c), freq="4h", tz="UTC")
+    s = pd.Series(c, index=idx)
+    return pd.DataFrame({"Open": s.shift(1).fillna(s.iloc[0]), "High": s * 1.01, "Low": s * 0.99,
+                         "Close": s, "Volume": 1e6}, index=idx)
+
+
+def test_daily_trend_events_follow_the_rebound():
+    """일봉 단기·장기 추세선 (10-04~) — 반등 3일째 단기선 돌파 → 5일째 장기선 터치 →
+    6일째 장기선 돌파. 4h 변형은 꺼 두고 일봉만 본다."""
+    from invest_signal.signals import wave_setup as ws
+    p = ws.Params(vwap_condition=False, abc_enabled=False, slow_break_enabled=False,
+                  retrace_enabled=False, impulse_enabled=False)
+    got = {d: [(e.detail["stage"], e.detail.get("touched"), e.detail.get("kind"))
+               for e in ws.detect(_rebound(d), "X", p)] for d in (3, 5, 7)}
+    assert got[3] == [(ws.ABC_1D, "단기선", "돌파")]
+    assert got[5] == [(ws.ABC_1D, "장기선", "터치")]
+    assert got[7] == [(ws.SLOW_BREAK_1D, None, None)]
+    ev = ws.detect(_rebound(3), "X", p)[0]
+    assert ev.detail["interval"] == "1d" and ev.bar_time.hour == 0
+    assert "fire" in ev.detail and "quiet" in ev.detail          # 그날 마지막 4h봉에서 잰다
+    # 끄면 안 나온다
+    off = ws.Params(vwap_condition=False, abc_enabled=False, slow_break_enabled=False,
+                    retrace_enabled=False, impulse_enabled=False,
+                    daily_abc_enabled=False, daily_slow_break_enabled=False)
+    assert ws.detect(_rebound(3), "X", off) == []
+
+
+def test_daily_events_dont_collide_with_4h_dedup_and_still_active():
+    from invest_signal.signals import wave_setup as ws
+    p = ws.Params(vwap_condition=False, retrace_enabled=False, impulse_enabled=False)
+    evs = ws.detect(_rebound(7), "X", p)
+    daily = [e for e in evs if e.detail["stage"] == ws.SLOW_BREAK_1D]
+    assert daily and daily[0].dedup_key.endswith("|일봉장기선돌파")
+    assert ws.still_active(_rebound(7), daily[0], p)              # 일봉 장기가 상승인 동안
+
+
+def test_notify_marks_daily_wave_lines():
+    from invest_signal.notify import format_events
+    from invest_signal.signals import SignalEvent
+    t = pd.Timestamp("2026-10-03T00:00:00Z")
+    a = SignalEvent(symbol="AUSDT", signal="wave_setup", bar_time=t, price=1.0,
+                    detail={"label": "파동", "stage": "일봉ABC", "interval": "1d",
+                            "touched": "단기선", "kind": "돌파"})
+    b = SignalEvent(symbol="BUSDT", signal="wave_setup", bar_time=t, price=1.0,
+                    detail={"label": "파동", "stage": "일봉장기선돌파", "interval": "1d"})
+    c = SignalEvent(symbol="CUSDT", signal="wave_setup", bar_time=t, price=1.0,
+                    detail={"label": "파동", "stage": "ABC", "interval": "4h",
+                            "touched": "단기선", "kind": "돌파"})
+    rows = [ln for ln in format_events([a, b, c], [], {}).splitlines() if ln.startswith("•")]
+    assert ">C<" in rows[0] and "🔓단기선돌파" in rows[0] and "일봉" not in rows[0]   # 4h가 먼저
+    assert ">A<" in rows[1] and "일봉🔓단기선돌파" in rows[1]
+    assert ">B<" in rows[2] and "일봉💥장기선돌파" in rows[2]

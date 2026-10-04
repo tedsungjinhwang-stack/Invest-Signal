@@ -218,7 +218,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         wave_mark_1h_bars=int(s.get("wave_mark_1h_bars", 24)),
         wave_mark_4h_bars=int(s.get("wave_mark_4h_bars", 6)),
         wave3_enabled=bool(s.get("wave3_enabled", True)),
-        wave3_ma_4h=int(s.get("wave3_ma_4h", 960)),
+        wave3_ma_4h=int(s.get("wave3_ma_4h", 480)),
         wave3_ma_1h=int(s.get("wave3_ma_1h", 20)),
         entry_mode=str(s.get("entry_mode", "wave")),
         entry_1h_bars=int(s.get("entry_1h_bars", 2)),
@@ -320,7 +320,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
     long_cache: dict[str, "pd.DataFrame | None"] = {}
 
     def long4h(sym: str):
-        """4h 1,000봉 — MA960용. 스캔 4h(750봉)로는 안 서서 따로 받는다. 캐시."""
+        """4h 1,000봉 — MA960용(🔻하락 CHoCH). 스캔 4h(750봉)로는 안 서서 따로 받는다. 캐시."""
         nonlocal wave3_fetched
         if sym in long_cache:
             return long_cache[sym]
@@ -336,11 +336,19 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         long_cache[sym] = df4l
         return df4l
 
-    def wave3(sym: str) -> "dict | None":
-        """3️⃣3파 눌림목 — 마감된 1h봉이 20선 아래인 종목만 4h 1,000봉을 따로 받아 본다.
+    def w3_frame(sym: str):
+        """3파 판정용 4h — 스캔 4h(750봉)로 wave3_ma_4h(480)가 서면 그걸 쓰고, 아니면
+        (예전 960 설정처럼) 1,000봉을 따로 받는다."""
+        df4 = trend_frame(sym)
+        if df4 is not None and len(df4) >= params.wave3_ma_4h + 2:
+            return df4
+        return long4h(sym)
 
-        스캔 4h는 750봉이라 MA960이 안 선다. 1h 조건을 먼저 보므로 따로 받는
-        건 감시 종목 중 1h가 눌린 것뿐이다. 조회 실패는 None(표시 안 함).
+    def wave3(sym: str) -> "dict | None":
+        """3️⃣3파 눌림목 — 마감된 1h봉이 20선 아래인 종목만 4h 판정까지 간다.
+
+        1h 조건을 먼저 보므로 4h를 보는 건 감시 종목 중 1h가 눌린 것뿐이다.
+        조회 실패는 None(표시 안 함).
         """
         if sym in wave3_cache:
             return wave3_cache[sym]
@@ -349,7 +357,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         h1 = leader_break._closed(hour_frame(sym), 1, now)
         got = None
         if leader_break.below_1h_ma(h1, params) is not None:
-            got = leader_break.third_wave(h1, leader_break._closed(long4h(sym), 4, now),
+            got = leader_break.third_wave(h1, leader_break._closed(w3_frame(sym), 4, now),
                                           params)
         wave3_cache[sym] = got
         return got
@@ -457,7 +465,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                                         in (leader_break.WAVE_SLOW_BREAK,
                                             leader_break.WAVE_SLOW_TOUCH)):
                 detail["warn"] = True
-            # 3️⃣ 3파 눌림목 — 4h 960선 위 · 1h 20선 아래.
+            # 3️⃣ 3파 눌림목 — 4h 480선 위 · 1h 20선 아래.
             w3 = wave3(sym)
             if w3:
                 detail["wave3"] = w3
@@ -518,7 +526,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             cands = leader_break.detect(df, sym, params)
         else:
             # • 신규 = 마감된 봉에서 새로 생긴 3파 진입 · 1h/4h 단기선 터치·돌파
-            lng = long4h(sym) if leader_break.w3_candidate(hour_frame(sym), params, now) else None
+            lng = w3_frame(sym) if leader_break.w3_candidate(hour_frame(sym), params, now) else None
             trig = leader_break.entry_triggers(hour_frame(sym), trend_frame(sym), lng,
                                                params, now)
             ev = leader_break.entry_event(sym, trig, df, params)

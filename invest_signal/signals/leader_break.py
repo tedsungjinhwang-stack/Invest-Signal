@@ -106,10 +106,10 @@ class Params:
     wave_mark_enabled: bool = True
     wave_mark_1h_bars: int = 24     # 1h 창 (24 × 1h = 24시간)
     wave_mark_4h_bars: int = 6      # 4h 창 (6 × 4h = 24시간)
-    # 3️⃣ 3파 눌림목 — 4h 종가가 MA960 위(큰 추세는 위) · 1h 종가가 MA20 아래
+    # 3️⃣ 3파 눌림목 — 4h 종가가 MA480 위(큰 추세는 위) · 1h 종가가 MA20 아래
     # (짧게 눌렸다). ⚡ 칸 맨 위에 모은다(third_wave()).
     wave3_enabled: bool = True
-    wave3_ma_4h: int = 960
+    wave3_ma_4h: int = 480      # 10-04: 960 → 480 (≈80일선)
     wave3_ma_1h: int = 20
     # • 신규 알림을 무엇으로 낼지. "wave"(기본, 09-28~): 마감된 봉에서 새로 생긴
     # ① 3파 진입 ② 1h 단기선 터치·돌파 ③ 4h 단기선 터치·돌파(entry_triggers()).
@@ -423,16 +423,16 @@ def below_1h_ma(df1h: pd.DataFrame | None, params: Params = Params()) -> float |
 
 def third_wave(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
                params: Params = Params()) -> dict | None:
-    """3️⃣ 3파 눌림목 — ⚡ 종목 중 **4h 종가가 MA960 위**이고 **1h 종가가 MA20
-    아래**인 자리. 해당하면 거리 둘을 담은 dict, 아니면 None.
+    """3️⃣ 3파 눌림목 — ⚡ 종목 중 **4h 종가가 MA(wave3_ma_4h, 기본 480) 위**이고 **1h 종가가
+    MA20 아래**인 자리. 해당하면 거리 둘을 담은 dict, 아니면 None.
 
-    4h MA960(160일)은 큰 흐름이 아직 위라는 확인이고, 1h 20선 하회는 그 안에서
+    4h MA480(≈80일, 10-04에 960에서 낮춤)은 큰 흐름이 아직 위라는 확인이고, 1h 20선 하회는 그 안에서
     짧게 눌린 자리다 — 파동으로 치면 1파(상위권 급등) 뒤 2파 조정을 지나 3파를
     노리는 눌림이라는 뜻으로 붙인 이름이다. 판정은 넘겨받은 프레임의 마지막
     봉 종가로 한다 — 스캐너는 **마감된 봉만** 넘긴다(• 3파진입과 같은 기준).
 
-    4h 이력이 960봉(160일)이 안 되는 종목은 MA960을 못 구해 None이다 — 신규
-    상장은 이 표시가 안 붙는다.
+    4h 이력이 그 봉 수(480봉 = 80일)가 안 되는 종목은 이동평균을 못 구해 None이다 —
+    신규 상장은 이 표시가 안 붙는다.
     """
     d1 = below_1h_ma(df1h, params)
     k = params.wave3_ma_4h
@@ -532,7 +532,7 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
     """• 신규 알림 사건 — **마감된 봉에서 새로 생긴 것만**. (이름, 그 봉의 마감 시각).
 
       3파진입        직전 1h봉은 아니었는데 이번 1h봉에서 '1h 종가 < 1h MA20 이면서
-                     4h 종가 > 4h MA960'이 됐다(4h는 그 1h봉 마감 시점까지 마감된
+                     4h 종가 > 4h MA480'이 됐다(4h는 그 1h봉 마감 시점까지 마감된
                      4h봉으로 본다)
       1h단기선터치/돌파  마감된 1h봉이 단기선(22×3)을 걸쳤거나 단기가 뒤집혔다
       4h단기선터치/돌파  마감된 4h봉에서 같은 사건

@@ -85,6 +85,11 @@ BREAK = "돌파"
 IMPULSE = "임펄스"           # 일봉 터치
 SLOW_BREAK = "장기선돌파"     # 4h — 장기 수퍼트렌드가 상승으로 뒤집힌 봉 자체
 RETRACE = "되돌림"           # 4h — 장기 돌파 뒤 저점~고점 되돌림 진입
+# 일봉 — ⓐ ABC·ⓓ 장기선 돌파와 같은 판정을 일봉 수퍼트렌드(같은 22×3·30×6)로 (10-04~).
+# stage를 따로 둬서 같은 시각(UTC 00시)의 4h 사건과 dedup 키가 겹치지 않게 한다.
+ABC_1D = "일봉ABC"
+SLOW_BREAK_1D = "일봉장기선돌파"
+DAILY_STAGES = (ABC_1D, SLOW_BREAK_1D)
 # 📐이 이 값을 넘으면 저점을 깬 것이라 되돌림이 아니라 이탈이다 — 추적 종료.
 # notify._fib_tag이 '저점이탈'로 바꿔 다는 눈금과 같은 값이다.
 RETRACE_INVALID = 1.0
@@ -130,6 +135,11 @@ class Params:
     # 난 자리가 묻힌다 — 그럴 바엔 안 남기는 게 낫다는 판단으로 껐다.
     track: bool = True
     daily_grace_bars: int = 1   # 일봉 지각 허용 봉 수 — 하루 1봉이라 따로 둔다
+    # 일봉 단기·장기 추세선 — ⓐ ABC(장기선 터치·단기선 돌파·단기선 터치)와 ⓓ 장기선 돌파를
+    # 일봉 수퍼트렌드로도 본다. 일봉은 4h봉을 리샘플해 쓴다(따로 안 받는다).
+    daily_abc_enabled: bool = True
+    daily_slow_break_enabled: bool = True
+    daily_flip_window_bars: int = 5   # 일봉 ⓐ의 '최근 단기 상승 전환' 창 — 5일
     include_live_day: bool = False   # 진행 중인 오늘을 일봉에 포함 (인트라바 스캔)
     # 월간 앵커드 VWAP 조건 — 상승초입과 같은 규칙(above/touch/any).
     # 두 변형 모두 **4h 프레임**의 MVWAP으로 판정한다: 같은 선을 보는
@@ -334,6 +344,8 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
         events += _detect_slow_break(df, symbol, params, rets, vwap_ok, fast, slow)
     if params.retrace_enabled and fast is not None:
         events += _detect_retrace(df, symbol, params, rets, vwap_ok, fast, slow)
+    if params.daily_abc_enabled or params.daily_slow_break_enabled:
+        events += _detect_daily_trends(df, symbol, params, rets, vwap_ok)
     if params.impulse_enabled:
         daily = _daily(df, params.include_live_day)
         # 일봉 트리거를 4h 프레임 위치로 옮긴다 — 그날의 마지막 4h봉이 기준점
@@ -343,7 +355,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     # 🍃조용 판정은 변형과 무관하게 **4h 프레임**에서 한다 — 일봉으로 재면
     # 거래대금 창도 변동성 눈금도 달라져 두 변형을 같은 잣대로 못 본다.
     for ev in events:
-        i = (_at_4h(df, ev.bar_time) if ev.detail.get("stage") == IMPULSE
+        i = (_at_4h(df, ev.bar_time) if ev.detail.get("stage") in (IMPULSE, *DAILY_STAGES)
              else int(df.index.searchsorted(ev.bar_time, "left")))
         q = quiet(df, params, i)
         if q is not None:
@@ -382,6 +394,40 @@ def fire(df: pd.DataFrame, params: Params = Params(), at: int = -1) -> bool | No
         return None
     return bool(c / lo - 1 <= params.fire_from_low_max and c / ma - 1 >= params.fire_ma_min
                 and c / hi - 1 <= params.fire_to_high_max)
+
+
+def _detect_daily_trends(df: pd.DataFrame, symbol: str, params: Params, rets: dict,
+                         vwap_ok) -> list[SignalEvent]:
+    """일봉 ⓐ ABC · ⓓ 장기선 돌파 — 4h와 같은 판정을 일봉 수퍼트렌드로.
+
+    일봉은 4h봉 리샘플(_daily). VWAP 조건은 4h와 같은 선을 그날의 마지막 4h봉에서
+    본다(임펄스와 같은 규약). 소급 범위는 daily_grace_bars(기본 1 = 어제까지)이고,
+    스캐너가 '유지 중'을 찾으려고 grace_bars를 4h 단위로 넓혀 부르면 일수로 환산한다.
+    """
+    from dataclasses import replace
+
+    daily = _daily(df, params.include_live_day)
+    need = max(params.fast_period, params.slow_period) + 2
+    if len(daily) < need + 1:
+        return []
+    fast, slow = _trends(daily, params)
+    look = max(params.daily_grace_bars, params.grace_bars // BARS_PER_DAY - 1)
+    dp = replace(params, grace_bars=look, abc_track_days=0, slow_break_track_days=0,
+                 flip_window_bars=params.daily_flip_window_bars)
+
+    def day_ok(t: int) -> bool:
+        return vwap_ok(_at_4h(df, daily.index[t]))
+
+    out = []
+    if params.daily_abc_enabled:
+        for e in _detect_abc(daily, symbol, dp, rets, day_ok, fast, slow):
+            e.detail.update(stage=ABC_1D, interval="1d")
+            out.append(e)
+    if params.daily_slow_break_enabled:
+        for e in _detect_slow_break(daily, symbol, dp, rets, day_ok, fast, slow):
+            e.detail.update(stage=SLOW_BREAK_1D, interval="1d")
+            out.append(e)
+    return out
 
 
 def _at_4h(df: pd.DataFrame, day) -> int:
@@ -749,6 +795,8 @@ def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()
     stage = event.detail.get("stage")
     frame = (df if stage in (ABC, SLOW_BREAK, RETRACE)
              else _daily(df, params.include_live_day))
+    # 일봉 ⓐ·ⓓ는 프레임만 일봉이고 판정은 4h와 같다
+    stage = {ABC_1D: ABC, SLOW_BREAK_1D: SLOW_BREAK}.get(stage, stage)
     if not len(frame):
         return False
     fast, slow = _trends(frame, params)

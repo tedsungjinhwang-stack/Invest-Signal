@@ -753,12 +753,12 @@ def _flat(closes, freq):
                          "Close": c, "Volume": 1.0}, index=idx)
 
 
-def test_third_wave_needs_4h_above_ma960_and_1h_below_ma20():
-    """3️⃣ 4h 종가가 MA960 위 · 1h 종가가 MA20 아래."""
+def test_third_wave_needs_4h_above_ma480_and_1h_below_ma20():
+    """3️⃣ 4h 종가가 MA480(10-04~, 예전 960) 위 · 1h 종가가 MA20 아래."""
     import numpy as np
     from invest_signal.signals.leader_break import Params, third_wave, below_1h_ma
-    up4 = _flat(np.linspace(50.0, 150.0, 1000), "4h")       # 끝이 MA960(≈100) 위
-    down4 = _flat(np.linspace(150.0, 50.0, 1000), "4h")     # 끝이 MA960 아래
+    up4 = _flat(np.linspace(50.0, 150.0, 1000), "4h")       # 끝이 MA480 위
+    down4 = _flat(np.linspace(150.0, 50.0, 1000), "4h")     # 끝이 MA480 아래
     dip1 = _flat(np.r_[np.full(40, 100.0), 95.0], "1h")     # 마지막 봉이 20선 아래
     firm1 = _flat(np.r_[np.full(40, 100.0), 105.0], "1h")   # 20선 위
     got = third_wave(dip1, up4, Params())
@@ -772,8 +772,11 @@ def test_third_wave_short_history_or_off_is_none():
     import numpy as np
     from invest_signal.signals.leader_break import Params, third_wave
     dip1 = _flat(np.r_[np.full(40, 100.0), 95.0], "1h")
-    short4 = _flat(np.linspace(50.0, 150.0, 700), "4h")     # MA960 못 구함
+    short4 = _flat(np.linspace(50.0, 150.0, 400), "4h")     # MA480 못 구함
     assert third_wave(dip1, short4, Params()) is None
+    mid4 = _flat(np.linspace(50.0, 150.0, 700), "4h")       # 스캔 4h(750봉)로도 MA480은 선다
+    assert third_wave(dip1, mid4, Params()) is not None
+    assert third_wave(dip1, mid4, Params(wave3_ma_4h=960)) is None   # 예전 기준이면 못 구함
     up4 = _flat(np.linspace(50.0, 150.0, 1000), "4h")
     assert third_wave(dip1, up4, Params(wave3_enabled=False)) is None
     assert third_wave(None, up4, Params()) is None
@@ -824,7 +827,7 @@ def test_entry_4h_fast_touch_on_last_closed_bar():
 
 
 def test_entry_third_wave_fires_on_the_crossing_1h_bar_only():
-    """3파 진입 — 직전 1h봉은 20선 위, 이번 봉이 20선 아래 · 4h는 960선 위."""
+    """3파 진입 — 직전 1h봉은 20선 위, 이번 봉이 20선 아래 · 4h는 480선 위."""
     long4 = _bars(np.linspace(50, 150, 1000), "4h", start="2026-01-01")
     end = long4.index[-1] + pd.Timedelta(hours=4)
     idx = pd.date_range(end - pd.Timedelta(hours=60), periods=60, freq="1h", tz="UTC")
@@ -840,7 +843,7 @@ def test_entry_third_wave_fires_on_the_crossing_1h_bar_only():
     p1 = dataclasses_replace(P, entry_1h_bars=1)
     assert not any(n == leader_break.ENTRY_W3
                    for n, _ in leader_break.entry_triggers(h1b, None, long4, p1, now))
-    # 4h가 960선 아래면 안 난다
+    # 4h가 480선 아래면 안 난다
     down4 = _bars(np.linspace(150, 50, 1000), "4h", start="2026-01-01")
     assert not any(n == leader_break.ENTRY_W3
                    for n, _ in leader_break.entry_triggers(h1, None, down4, P, now))

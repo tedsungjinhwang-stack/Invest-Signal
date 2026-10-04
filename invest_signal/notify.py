@@ -84,8 +84,12 @@ def _daily_gain(d: dict) -> float | None:
     return d.get("ret_24h") if g is None else g
 
 
-WAVE_VARIANTS = ("ABC", "장기선돌파", "되돌림", "임펄스")   # 파동 칸 안에서 이 순서로 묶는다
+# 파동 칸 안에서 이 순서로 묶는다 — 일봉 ⓐ·ⓓ(10-04~)는 4h 것 바로 뒤
+WAVE_VARIANTS = ("ABC", "장기선돌파", "일봉ABC", "일봉장기선돌파", "되돌림", "임펄스")
 WAVE_SLOW_BREAK = "장기선돌파"      # wave_setup.SLOW_BREAK
+WAVE_ABC_STAGES = ("ABC", "일봉ABC")                       # wave_setup.ABC · ABC_1D
+WAVE_SLOW_BREAK_STAGES = (WAVE_SLOW_BREAK, "일봉장기선돌파")  # wave_setup.SLOW_BREAK · SLOW_BREAK_1D
+DAILY_MARK = "일봉"                 # 일봉 사건의 마크 앞에 붙인다 — `일봉🔓단기선돌파`
 WAVE_RETRACE = "되돌림"            # wave_setup.RETRACE — 시간 순서가 곧 읽는 순서다
 # ⓐ가 잡는 세 자리 중 **장기선 터치**만 앞쪽 마크로 뽑는다. 반등이 아직
 # 하락인 장기선(위쪽 저항)까지 되돌린 자리라 셋 중 제일 큰 사건인데
@@ -114,7 +118,7 @@ ABC_ORDER = ("장기선 터치", "단기선 터치", "단기선 돌파")
 def _abc_kind(e) -> str | None:
     """ⓐ 줄이 셋 중 어느 자리인지. ⓐ가 아니면 None."""
     d = e.detail
-    if e.signal != "wave_setup" or d.get("stage") != "ABC":
+    if e.signal != "wave_setup" or d.get("stage") not in WAVE_ABC_STAGES:
         return None
     touched = d.get("touched")
     if not touched:
@@ -140,14 +144,14 @@ def _fast_break(e) -> bool:
 def _slow_break(e) -> bool:
     """ⓓ 장기선 돌파 줄인지 — ⓐ와 달리 변형 자체가 그 사건이다."""
     return (e.signal == "wave_setup"
-            and e.detail.get("stage") == WAVE_SLOW_BREAK)
+            and e.detail.get("stage") in WAVE_SLOW_BREAK_STAGES)
 
 
 # ⚡ 줄의 마크(leader_break.wave_mark, 1h·4h 각각) → 파동과 같은 네 마크.
 LEADER_WAVE_TAGS = {"장기선 돌파": SLOW_BREAK_TAG, "장기선 터치": SLOW_TOUCH_TAG,
                     "단기선 돌파": FAST_BREAK_TAG, "단기선 터치": FAST_TOUCH_TAG}
 LEADER_MARK_TFS = ("1h", "4h")      # 줄에 싣는 순서
-# ⚡ 줄 중 4h 960선 위 · 1h 20선 아래 — 칸 맨 위에 모은다(leader_break.third_wave).
+# ⚡ 줄 중 4h 480선 위 · 1h 20선 아래 — 칸 맨 위에 모은다(leader_break.third_wave).
 WAVE3_TAG = "3️⃣3파눌림목"
 # 🔥 떡상 조짐 — 파동·상승초입·⚡ 각각의 fire 판정(signals/*.fire·fire_mark). 먼저 볼 줄.
 FIRE_TAG = "🔥"
@@ -210,14 +214,15 @@ def _wave_mark(e) -> str | None:
         parts = [tf + LEADER_WAVE_TAGS[m] for tf in LEADER_MARK_TFS
                  if (m := e.detail.get(f"wave_mark_{tf}")) in LEADER_WAVE_TAGS]
         return " · ".join(parts) or None
+    tf = DAILY_MARK if e.detail.get("interval") == "1d" else ""
     if _slow_touch(e):
-        return SLOW_TOUCH_TAG
+        return tf + SLOW_TOUCH_TAG
     if _fast_touch(e):
-        return FAST_TOUCH_TAG
+        return tf + FAST_TOUCH_TAG
     if _fast_break(e):
-        return FAST_BREAK_TAG
+        return tf + FAST_BREAK_TAG
     if _slow_break(e):
-        return SLOW_BREAK_TAG
+        return tf + SLOW_BREAK_TAG
     return None
 
 
@@ -343,7 +348,7 @@ LEADER_FAST_MARKS = ("단기선 돌파", "단기선 터치")
 def _leader_fast_first(e) -> int:
     """⚡ 줄의 층 — 0: 🔥 재떡상 조짐 · 1: 3️⃣3파 눌림목 · 2: 1h 단기선 · 3: 4h 단기선 · 4: 나머지.
 
-    **🔥(장기 강세 코인의 식은 눌림 바닥)가 맨 위**, 그다음 3파 눌림목(4h 960선 위 ·
+    **🔥(장기 강세 코인의 식은 눌림 바닥)가 맨 위**, 그다음 3파 눌림목(4h 480선 위 ·
     1h 20선 아래), 그다음 **1h 단기선 터치·돌파(🔓·🔁) 줄**, 그다음 **4h 단기선 줄**이다
     (앞 층에 들면 뒤 층 마크와 무관하게 거기 선다). 신규(•)·추적(↳) 둘 다 같고, 칸을
     조립할 때 층마다 • → ↳ 순으로 싣는다. 층 안은 거래대금 순이다.
@@ -447,6 +452,8 @@ def _returns_tag(d: dict) -> str | None:
 # (다른 칸은 41칸이라 한 줄에 들어간다).
 WAVE_HEADERS = {"ABC": "  ⓐ <b>ABC</b> · 4h 돌파·터치 · 4h/24h/7d",
                 WAVE_SLOW_BREAK: "  ⓓ <b>장기선 돌파</b> · 4h 장기 상승 전환 · 4h/24h/7d",
+                "일봉ABC": "  ⓔ <b>일봉 ABC</b> · 일봉 돌파·터치 · 4h/24h/7d",
+                "일봉장기선돌파": "  ⓕ <b>일봉 장기선 돌파</b> · 일봉 장기 상승 전환 · 4h/24h/7d",
                 WAVE_RETRACE: "  ⓒ <b>되돌림</b> · 4h 돌파 후 · 4h/24h/7d",
                 "임펄스": "  ⓑ <b>임펄스</b> · 일봉 터치 · 4h/24h/7d"}
 
@@ -473,7 +480,7 @@ def _wave_tag(d: dict) -> str:
     글자가 겹쳐 서로 다른 뜻으로 두 번 나온다.
     """
     stage = d.get("stage", "")
-    if stage == WAVE_SLOW_BREAK:
+    if stage in WAVE_SLOW_BREAK_STAGES:
         # 선을 건드린 게 아니라 넘겨 마감한 봉이다 — 소제목이 다 말한다
         return "장기선 돌파"
     if stage == WAVE_RETRACE:
@@ -481,7 +488,7 @@ def _wave_tag(d: dict) -> str:
         # 지금 어디인지는 앞의 📐가 말하고, 여기엔 그 레벨 값을 적는다.
         lv = d.get("wave_level")
         return f"되돌림 {_fmt_price(lv)}" if lv is not None else stage
-    line = d.get("touched") or ("장기선" if stage == "ABC" else "단기선")
+    line = d.get("touched") or ("장기선" if stage in WAVE_ABC_STAGES else "단기선")
     return f"{stage} {line} {d.get('kind', '터치')}"
 
 
