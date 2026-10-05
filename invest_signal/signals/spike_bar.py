@@ -32,33 +32,27 @@ from . import SignalEvent
 NAME = "spike_bar"
 LABEL = "급등봉"
 CRYPTO_ONLY = True          # ETF·주식 스캔에서는 돌리지 않는다
-INTERVAL = "1h"             # 10-04: 15m → 1h. 1h봉은 받아 둔 15m를 묶어 만든다(to_hourly)
-KLINE_LIMIT = 200           # 15m 200봉 = 1h 50봉 — vol_ma(24) + grace + 여유
-BAND_LIMIT = 1000           # 1h MA960 판정용 — 급등봉이 난 종목만 따로 받는다
+INTERVAL = "15m"
+KLINE_LIMIT = 200           # vol_ma(96) + grace + 여유
 
 
 @dataclass(frozen=True)
 class Params:
     body: float = 0.08          # ① 몸통 상승률 하한
     vol_mult: float = 10.0      # ② 거래량 / 직전 평균
-    vol_ma: int = 24            # ② 평균을 낼 봉 수 (1h × 24 = 24시간)
+    vol_ma: int = 96            # ② 평균을 낼 봉 수 (96봉 = 24시간)
     close_pos: float = 0.7      # ③ 종가위치 — 1이면 고가 마감
     min_turnover_usd: float = 1_000_000   # ④ 24h 거래대금 하한
-    # 스캔이 매시 :02라 방금 마감된 1h봉을 본다. 1봉 더 소급해 크론이 밀려도 안 놓친다.
-    grace_bars: int = 1
-    # 발화 뒤 추적 줄로 남길 기간. 24봉 = 하루. 0이면 추적하지 않는다.
-    track_bars: int = 24
-    interval: str = INTERVAL
-    # 🪜 1h 480~960 — 급등봉 종가가 1h MA480과 MA960 **사이**이고 MA480 < MA960(역배열).
-    # band_mark면 줄에 표시하고 칸 맨 위로, band_filter면 이 급등봉만 남긴다(10-04).
-    band_mark: bool = True
-    band_filter: bool = False
-    band_fast: int = 480
-    band_slow: int = 960
+    # 스캔이 한 시간 간격이라 그 사이 지나간 봉도 소급해 잡는다(15m × 4 = 1시간).
+    # **이 시그널은 소급이 특히 중요하다** — 봉이 15분짜리라 소급이 없으면
+    # 스캔 직전 봉 하나만 보게 되어 네 봉 중 셋을 놓친다.
+    grace_bars: int = 4
+    # 발화 뒤 추적 줄로 남길 기간. 96봉 = 하루. 0이면 추적하지 않는다.
+    track_bars: int = 96
 
 
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
-    """마감된 OHLCV(params.interval봉, 오름차순, UTC 인덱스)에서 급등봉을 찾는다.
+    """마감된 15m OHLCV(오름차순, UTC 인덱스)에서 급등봉을 찾는다.
 
     마지막 grace_bars+1개 봉을 각각 독립 후보로 본다. 중복 발송 방지는
     호출 측(state)이 dedup_key로 처리한다.
@@ -86,7 +80,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
         out.append(SignalEvent(
             symbol=symbol, signal=NAME, bar_time=df.index[t], price=cl,
             detail={"label": LABEL, "body": body, "vol_mult": mult,
-                    "close_pos": pos, "interval": params.interval,
+                    "close_pos": pos, "interval": INTERVAL,
                     "bar_high": hi, "bar_low": lo},
         ))
     return out
@@ -120,30 +114,3 @@ def recent(df: pd.DataFrame, symbol: str, params: Params = Params()):
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:
     """_detect_all 경로를 타지 않는다 — 추적은 recent()가 따로 만든다."""
     return False
-
-
-def to_hourly(df15: pd.DataFrame | None) -> pd.DataFrame | None:
-    """마감된 15m봉 → 1h봉. 15m 넷이 다 찬 시간만 남긴다(진행 중인 시간은 버린다)."""
-    if df15 is None or not len(df15):
-        return df15
-    g = df15.resample("1h")
-    h = g.agg({"Open": "first", "High": "max", "Low": "min", "Close": "last",
-               "Volume": "sum"})
-    return h[g["Close"].count() == 4].dropna()
-
-
-def band_zone(df1h: pd.DataFrame | None, at: pd.Timestamp,
-              params: Params = Params()) -> dict | None:
-    """급등봉 봉(at)에서 1h MA(band_fast)·MA(band_slow)와 종가의 자리. 못 재면 None.
-
-    zone = MA480 < MA960(역배열)이고 종가가 그 사이. 이동평균은 그 봉까지 포함해 낸다.
-    """
-    if df1h is None or not len(df1h):
-        return None
-    c = df1h["Close"][df1h.index <= at]
-    if len(c) < params.band_slow or c.index[-1] != at:
-        return None
-    fast = float(c.iloc[-params.band_fast:].mean())
-    slow = float(c.iloc[-params.band_slow:].mean())
-    close = float(c.iloc[-1])
-    return {"ma_fast": fast, "ma_slow": slow, "zone": fast < close < slow and fast < slow}

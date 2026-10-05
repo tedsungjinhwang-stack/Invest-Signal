@@ -393,10 +393,6 @@ def _fire_first(e) -> int:
     return 1 if e.detail.get("fire") else 2
 
 
-# 🚀 급등봉 종가가 1h MA480 < 종가 < MA960(역배열 사이)인 줄 — 칸 맨 위(spike_bar.band_zone)
-SPIKE_BAND_TAG = "🪜1h480~960"
-
-
 def _spike_desc(e):
     """🚀 줄을 거래량 배수 내림차순으로. 급등봉 밖은 전부 같은 값.
 
@@ -404,10 +400,9 @@ def _spike_desc(e):
     커지지만, 평소의 몇 배가 들어왔는지는 그 종목 자신과의 비교라 공평하다.
     """
     if e.signal != "spike_bar":
-        return (0, 0, 0.0)
-    band = 0 if e.detail.get("band_1h") else 1      # 🪜1h 480~960 줄이 맨 위
+        return (0, 0.0)
     v = e.detail.get("vol_mult")
-    return (band, 1, 0.0) if v is None else (band, 0, -float(v))
+    return (1, 0.0) if v is None else (0, -float(v))
 
 
 def _quiet_first(e):
@@ -576,9 +571,7 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         # **봉이 언제 터졌는지를 맨 앞에 적는다.** 스캔이 매시 한 번이라 이
         # 줄은 최대 한 시간 묵은 소식이고, 15분봉이라 네 봉 중 어느 봉인지에
         # 따라 지금 가격과의 거리가 완전히 다르다. 시각이 없으면 읽을 수 없다.
-        tags.append(f"🕒{_kst(e.bar_time)}" + (f" {d['interval']}봉" if d.get("interval") else ""))
-        if d.get("band_1h"):
-            tags.insert(0, SPIKE_BAND_TAG)
+        tags.append(f"🕒{_kst(e.bar_time)}")
         tags.append(f"몸통 {_pct(d['body'])}")
         tags.append(f"거래량 {d['vol_mult']:.0f}배")
     if e.signal == "leader_break":
@@ -862,10 +855,8 @@ def format_events(events_crypto: list, events_etf: list,
             # 추적 줄의 존재 이유는 '터진 뒤에 값을 지키는가'다 — 급등봉
             # 종가 대비 지금이 어디인지가 없으면 신규 줄을 하루 더 반복하는
             # 것에 지나지 않는다.
-            tags = [f"🕒{_kst(e.bar_time)}" + (f" {d['interval']}봉" if d.get("interval") else ""),
-                    f"몸통 {_pct(d['body'])}", f"거래량 {d['vol_mult']:.0f}배"]
-            if d.get("band_1h"):
-                tags.insert(0, SPIKE_BAND_TAG)
+            tags = [f"🕒{_kst(e.bar_time)}", f"몸통 {_pct(d['body'])}",
+                    f"거래량 {d['vol_mult']:.0f}배"]
             if d.get("since") is not None:
                 tags.append(f"이후 {_pct(d['since'])}")
             tv = _turnover_tag(d)

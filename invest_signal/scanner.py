@@ -735,36 +735,25 @@ def _scan_whale_exit(cfg: dict, source: str, frames15: dict, ticker: dict | None
 
 
 def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
-                log=print, session=None, source: str = "fapi") -> tuple[list, list]:
-    """🚀급등봉 — 1h(10-04~, 받아 둔 15m를 묶는다) 장대양봉 하나를 잡는다.
+                log=print) -> tuple[list, list]:
+    """🚀급등봉 — 15m 장대양봉 하나를 잡는다. 추적 없이 그 봉만 알린다.
 
     거래대금 하한은 여기서 건다(캔들엔 그 값이 없다). 티커를 못 받았으면
     하한을 못 걸지만 **그렇다고 칸을 비우지는 않는다** — 조건 ①②③이 이미
     까다로워서, 유동성 필터가 빠져도 잡음이 쏟아지지는 않는다.
-
-    🪜 1h 480~960 표시(band_mark)·거름(band_filter)은 급등봉이 난 종목만 1h 1,000봉을
-    따로 받아 본다 — 받아 둔 15m 1,000봉으로는 1h MA960이 안 선다.
     """
     s = (cfg.get("signal") or {}).get("spike_bar") or {}
     if not s.get("enabled", False):
         return [], []
-    d = spike_bar.Params()
     params = spike_bar.Params(
-        body=float(s.get("body", d.body)),
-        vol_mult=float(s.get("vol_mult", d.vol_mult)),
-        vol_ma=int(s.get("vol_ma", d.vol_ma)),
-        close_pos=float(s.get("close_pos", d.close_pos)),
-        min_turnover_usd=float(s.get("min_turnover_usd", d.min_turnover_usd)),
-        grace_bars=int(s.get("grace_bars", d.grace_bars)),
-        track_bars=int(s.get("track_bars", d.track_bars)),
-        interval=str(s.get("interval", d.interval)),
-        band_mark=bool(s.get("band_mark", d.band_mark)),
-        band_filter=bool(s.get("band_filter", d.band_filter)),
-        band_fast=int(s.get("band_fast", d.band_fast)),
-        band_slow=int(s.get("band_slow", d.band_slow)),
+        body=float(s.get("body", 0.08)),
+        vol_mult=float(s.get("vol_mult", 10.0)),
+        vol_ma=int(s.get("vol_ma", 96)),
+        close_pos=float(s.get("close_pos", 0.7)),
+        min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
+        grace_bars=int(s.get("grace_bars", 4)),
+        track_bars=int(s.get("track_bars", 96)),
     )
-    frames = ({sym: spike_bar.to_hourly(df) for sym, df in frames15.items()}
-              if params.interval == "1h" else frames15)
     events, ongoing, thin = [], [], 0
 
     def stamp(ev) -> bool:
@@ -780,9 +769,7 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
             ev.detail["gain_24h"] = g
         return True
 
-    for sym, df in frames.items():
-        if df is None or not len(df):
-            continue
+    for sym, df in frames15.items():
         for ev in spike_bar.detect(df, sym, params):
             if stamp(ev):
                 events.append(ev)
@@ -793,35 +780,10 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
         old_ev = spike_bar.recent(df, sym, params)
         if old_ev is not None and stamp(old_ev):
             ongoing.append(old_ev)
-    n_zone = n_dropped = 0
-    if (params.band_mark or params.band_filter) and (events or ongoing):
-        cache: dict = {}
-        for ev in events + ongoing:
-            if ev.symbol not in cache:
-                try:
-                    cache[ev.symbol] = data_binance.klines(
-                        session or requests.Session(), ev.symbol, source, "1h",
-                        limit=spike_bar.BAND_LIMIT)
-                except Exception as e:          # noqa: BLE001 — 표시 하나 때문에 칸을 비우지 않는다
-                    log(f"[binance] {ev.symbol} 1h(급등봉 480~960) 수집 실패: {data_binance._safe(e)}")
-                    cache[ev.symbol] = None
-            z = spike_bar.band_zone(cache[ev.symbol], ev.bar_time, params)
-            if z is not None:
-                ev.detail.update({"ma480_1h": z["ma_fast"], "ma960_1h": z["ma_slow"]})
-                if z["zone"]:
-                    ev.detail["band_1h"] = True
-                    n_zone += 1
-        if params.band_filter:
-            before = len(events) + len(ongoing)
-            events = [e for e in events if e.detail.get("band_1h")]
-            ongoing = [e for e in ongoing if e.detail.get("band_1h")]
-            n_dropped = before - len(events) - len(ongoing)
-    if events or ongoing or thin or n_dropped:
+    if events or ongoing or thin:
         log(f"[binance] 급등봉 {len(events)}건 · 추적 {len(ongoing)}건"
             + (f" · 거래대금 하한 미달 {thin}건 제외" if thin else "")
-            + (f" · 🪜1h {params.band_fast}~{params.band_slow} {n_zone}건" if params.band_mark else "")
-            + (f" · 480~960 밖 {n_dropped}건 제외" if n_dropped else "")
-            + f" ({params.interval} · 몸통 {params.body:.0%} · 거래량 {params.vol_mult:.0f}배 · "
+            + f" (몸통 {params.body:.0%} · 거래량 {params.vol_mult:.0f}배 · "
               f"종가위치 {params.close_pos} · 추적 {params.track_bars}봉)")
     return events, ongoing
 
@@ -1027,7 +989,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
             need15 = max(need15, whale_exit.DAY_BARS + 20)    # 24h 전 종가까지
         if need15:
             frames15 = _fetch_15m(s, source, symbols, need15, workers, log)
-        spike_events, spike_ongoing = _scan_spike(cfg, frames15, ticker, log, s, source)
+        spike_events, spike_ongoing = _scan_spike(cfg, frames15, ticker, log)
         spike_events += _scan_whale_exit(cfg, source, frames15, ticker, state, workers, log)
         vo_events, vo_ongoing = _scan_vwap_onset(cfg, frames15, frames, ticker, log)
         # 15m 판정이라 마감·인트라바 양쪽에서 매번 돈다. 4h 프레임은 제외 조건
