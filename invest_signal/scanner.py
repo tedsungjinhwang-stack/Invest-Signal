@@ -631,7 +631,7 @@ def _mark_st30(cfg: dict, items: list, frames15: dict | None, log=print) -> None
     s = (cfg.get("signal") or {}).get("st30_mark") or {}
     if not s.get("enabled", False) or not frames15:
         return
-    bars = int(s.get("bars", 12))
+    bars = int(s.get("bars", 2))
     params = leader_break.Params()
     cache: dict = {}
     n = 0
