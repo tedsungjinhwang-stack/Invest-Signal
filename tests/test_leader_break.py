@@ -1,5 +1,6 @@
 """크립토 모멘텀 눌림목/이탈(15m봉) 검출 로직 테스트 — 네트워크 없이 합성 데이터로."""
 
+import dataclasses
 import numpy as np
 import pandas as pd
 
@@ -807,10 +808,12 @@ def test_entry_1h_fast_break_on_closed_bar():
     """길게 빠지다 크게 오른 1h봉 — 단기선 돌파로 잡는다(마감봉만)."""
     closes = np.r_[np.linspace(200, 100, 150), [100, 130]]
     h1 = _bars(closes, "1h")
-    trig = leader_break.entry_triggers(h1, None, None, P, _now_after(h1, 1))
+    on = dataclasses.replace(P, entry_1h_fast=True)           # 10-06부터 기본은 꺼 둠
+    trig = leader_break.entry_triggers(h1, None, None, on, _now_after(h1, 1))
     assert ("1h단기선돌파", h1.index[-1] + pd.Timedelta(hours=1)) in trig
+    assert leader_break.entry_triggers(h1, None, None, P, _now_after(h1, 1)) == []
     # 같은 봉이 아직 진행 중이면 안 본다
-    live = leader_break.entry_triggers(h1, None, None, P,
+    live = leader_break.entry_triggers(h1, None, None, on,
                                        h1.index[-1] + pd.Timedelta(minutes=10))
     assert all(t <= h1.index[-1] for _, t in live)
 
@@ -906,3 +909,30 @@ def test_entry_trigger_fires_when_fire_condition_turns_on():
     assert (leader_break.ENTRY_FIRE, now) in trig
     off = dataclasses_replace(P, fire_trigger=False)
     assert all(n != leader_break.ENTRY_FIRE for n, _ in leader_break.entry_triggers(None, df, None, off, now))
+
+
+def test_entry_30m_fast_break_and_st30_mark():
+    """10-06 — 30m 단기선(22×3) 상승 전환: • 사건(30m단기선돌파)과 모든 줄의 30m 표시."""
+    closes = np.r_[np.linspace(200, 100, 150), [100, 130]]
+    h30 = _bars(closes, "30min")
+    now = h30.index[-1] + pd.Timedelta(minutes=30)
+    trig = leader_break.entry_triggers(None, None, None, P, now, h30)
+    assert (leader_break.ENTRY_30M, now) in trig
+    off = dataclasses.replace(P, entry_30m=False)
+    assert leader_break.entry_triggers(None, None, None, off, now, h30) == []
+    # 마지막 30m봉이 진행 중이면 안 본다
+    assert leader_break.entry_triggers(None, None, None, P, now - pd.Timedelta(minutes=10),
+                                       h30) == []
+    assert leader_break.st_fast_break(h30, P, 12) is True
+    assert leader_break.st_fast_break(h30.iloc[:-1], P, 12) is False      # 아직 하락
+    down_again = _bars(np.r_[closes, np.linspace(130, 60, 20)], "30min")
+    assert leader_break.st_fast_break(down_again, P, 30) is False       # 다시 꺾였다
+
+
+def test_to_30m_keeps_only_complete_bars():
+    idx = pd.date_range("2026-10-06 00:00", periods=5, freq="15min", tz="UTC")
+    df15 = pd.DataFrame({"Open": [1, 2, 3, 4, 5.0], "High": [2, 3, 4, 5, 6.0],
+                         "Low": [0, 1, 2, 3, 4.0], "Close": [1.5, 2.5, 3.5, 4.5, 5.5],
+                         "Volume": 1.0}, index=idx)
+    h = leader_break.to_30m(df15)
+    assert len(h) == 2 and h["Close"].tolist() == [2.5, 4.5] and h["High"].tolist() == [3, 5]

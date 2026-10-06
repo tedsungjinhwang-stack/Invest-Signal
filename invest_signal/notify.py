@@ -150,7 +150,7 @@ def _slow_break(e) -> bool:
 # ⚡ 줄의 마크(leader_break.wave_mark, 1h·4h 각각) → 파동과 같은 네 마크.
 LEADER_WAVE_TAGS = {"장기선 돌파": SLOW_BREAK_TAG, "장기선 터치": SLOW_TOUCH_TAG,
                     "단기선 돌파": FAST_BREAK_TAG, "단기선 터치": FAST_TOUCH_TAG}
-LEADER_MARK_TFS = ("1h", "4h")      # 줄에 싣는 순서
+LEADER_MARK_TFS = ("4h",)           # 줄에 싣는 순서 — 10-06에 1h를 뺐다(30m 단기선 돌파로 대신)
 # ⚡ 줄 중 4h 480선 위 · 1h 20선 아래 — 칸 맨 위에 모은다(leader_break.third_wave).
 WAVE3_TAG = "3️⃣3파눌림목"
 # 🔥 떡상 조짐 — 파동·상승초입·⚡ 각각의 fire 판정(signals/*.fire·fire_mark). 먼저 볼 줄.
@@ -356,31 +356,46 @@ LEADER_FAST_MARKS = ("단기선 돌파", "단기선 터치")
 
 
 def _leader_fast_first(e) -> int:
-    """⚡ 줄의 층 — 0: 🔥 재떡상 조짐 · 1: 3️⃣3파 눌림목 · 2: 1h 단기선 · 3: 4h 단기선 · 4: 나머지.
+    """⚡ 줄의 층 — 0: 30m 단기선 돌파 · 1: 🔥 · 2: 3️⃣3파 눌림목 · 3: 4h 단기선 · 4: 나머지.
 
-    **🔥(장기 강세 코인의 식은 눌림 바닥)가 맨 위**, 그다음 3파 눌림목(4h 480선 위 ·
-    1h 20선 아래), 그다음 **1h 단기선 터치·돌파(🔓·🔁) 줄**, 그다음 **4h 단기선 줄**이다
+    **30m 단기선 돌파(10-06~)가 맨 위**, 그다음 🔥(장기 강세 코인의 식은 눌림 바닥),
+    3파 눌림목(4h 480선 위 · 1h 20선 아래), **4h 단기선 터치·돌파(🔓·🔁) 줄** 순이다
     (앞 층에 들면 뒤 층 마크와 무관하게 거기 선다). 신규(•)·추적(↳) 둘 다 같고, 칸을
-    조립할 때 층마다 • → ↳ 순으로 싣는다. 층 안은 거래대금 순이다.
+    조립할 때 층마다 • → ↳ 순으로 싣는다. 층 안은 🔥🔥 → 🔥 → 거래대금 순이다.
 
-    장기선 마크(🧱·💥)는 끌어올리지 않는다 — 요청이 단기선이었다. 마크는
-    프레임마다 하나(장기선 돌파 > 장기선 터치 > 단기선 돌파 > 단기선 터치)라서,
-    같은 창에서 장기선까지 건드린 프레임은 장기선 마크가 붙는다.
+    장기선 마크(🧱·💥)는 끌어올리지 않는다 — 요청이 단기선이었다. 1h 마크는 10-06에 뺐다.
     ⚡ 밖은 전부 0이라 다른 칸의 순서가 안 흔들린다.
     """
     if e.signal != "leader_break":
         return 0
-    if e.detail.get("fire"):
+    if e.detail.get("st30"):
         return 0
-    if e.detail.get("wave3"):
+    if e.detail.get("fire"):
         return 1
+    if e.detail.get("wave3"):
+        return 2
     for i, tf in enumerate(LEADER_MARK_TFS):
         if e.detail.get(f"wave_mark_{tf}") in LEADER_FAST_MARKS:
-            return i + 2
-    return len(LEADER_MARK_TFS) + 2
+            return i + 3
+    return len(LEADER_MARK_TFS) + 3
 
 
-LEADER_TIERS = len(LEADER_MARK_TFS) + 2     # 🔥 · 3파 · 1h · 4h — 이 층들은 ↳까지 끌어올린다
+LEADER_TIERS = len(LEADER_MARK_TFS) + 3     # 30m · 🔥 · 3파 · 4h — 이 층들은 ↳까지 끌어올린다
+# 30m 단기 수퍼트렌드(22×3) 상승 전환 — 모든 크립토 줄 맨 앞, 칸 맨 위(10-06~, scanner._mark_st30)
+ST30_TAG = "30m🔓단기선돌파"
+
+
+def _st30_first(e) -> int:
+    """어느 칸이든 30m 단기선 돌파 줄을 맨 위로."""
+    return 0 if e.detail.get("st30") else 1
+
+
+def _with_st30(e, line: str) -> str:
+    """줄 맨 앞 태그 자리에 30m🔓단기선돌파를 끼운다. 🆕 사건이 이미 그 말이면 안 붙인다."""
+    if not e.detail.get("st30") or "30m단기선돌파" in (e.detail.get("triggers") or ()):
+        return line
+    head, sep, rest = line.partition(" · ")
+    return f"{head} · {ST30_TAG}" + (f" · {rest}" if sep else "")
 
 
 def _fire_first(e) -> int:
@@ -421,17 +436,17 @@ def _quiet_first(e):
 
 
 def _new_order(e):
-    """신규 줄 — 변형·🍃로 묶고, ⚡는 단기선 마크 먼저·거래대금 순,
-    나머지는 24h 수익률 순."""
-    return (_variant(e), _fire_first(e), *_abc_first(e), *_spike_desc(e), _leader_fast_first(e),
+    """신규 줄 — 30m 단기선 돌파 먼저, 그다음 변형·🍃로 묶고, ⚡는 단기선 마크 먼저·
+    거래대금 순, 나머지는 24h 수익률 순."""
+    return (_st30_first(e), _variant(e), _fire_first(e), *_abc_first(e), *_spike_desc(e), _leader_fast_first(e),
             *_turnover_desc(e), _quiet_first(e), *_by_gain_desc(e), e.symbol)
 
 
 def _hold_order(e):
     """추적 줄 — 신규 줄과 같은 축(⚡는 단기선 마크 먼저·거래대금 순),
     동률이면 최신 발생 순."""
-    return (_variant(e), _fire_first(e), *_abc_first(e), *_spike_desc(e), _leader_fast_first(e),
-            *_turnover_desc(e), _quiet_first(e), *_by_gain_desc(e),
+    return (_st30_first(e), _variant(e), _fire_first(e), *_abc_first(e), *_spike_desc(e),
+            _leader_fast_first(e), *_turnover_desc(e), _quiet_first(e), *_by_gain_desc(e),
             -e.bar_time.timestamp())
 
 
@@ -942,7 +957,7 @@ def format_events(events_crypto: list, events_etf: list,
             def new_line(e):
                 name = etf_names.get(e.symbol, "") if kind != "crypto" else ""
                 market = "KR" if (kind != "crypto" and e.symbol[:1].isdigit()) else "US"
-                return _event_line(e, chart_url(e.symbol, kind, market), name, kind)
+                return _with_st30(e, _event_line(e, chart_url(e.symbol, kind, market), name, kind))
 
             # ⚡ — 🔥·3파 눌림목·단기선 터치·돌파 줄은 **추적(↳) 줄까지 칸 맨
             # 위로** 올린다. 신규 뒤에 추적을 붙이는 순서 그대로면 추적 줄이
@@ -952,7 +967,7 @@ def format_events(events_crypto: list, events_etf: list,
             lifted = set()
             for tier in range(LEADER_TIERS):
                 for sel, render in ((new_sel, new_line),
-                                    (hold_sel, lambda e: hold_line(e, kind))):
+                                    (hold_sel, lambda e: _with_st30(e, hold_line(e, kind)))):
                     for e in sel:
                         if (e.signal == "leader_break"
                                 and _leader_fast_first(e) == tier):
@@ -973,7 +988,7 @@ def format_events(events_crypto: list, events_etf: list,
                 if stage is not None and stage != variant:
                     lines.append(WAVE_HEADERS.get(stage, f"  {stage}"))
                     variant = stage
-                lines.append(hold_line(e, kind))
+                lines.append(_with_st30(e, hold_line(e, kind)))
 
     lines.extend(_community_lines(community or {}))
     return "\n".join(lines)

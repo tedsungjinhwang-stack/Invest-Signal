@@ -222,6 +222,9 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         wave3_ma_1h=int(s.get("wave3_ma_1h", 20)),
         entry_mode=str(s.get("entry_mode", "wave")),
         entry_1h_bars=int(s.get("entry_1h_bars", 2)),
+        entry_1h_fast=bool(s.get("entry_1h_fast", False)),
+        entry_30m=bool(s.get("entry_30m", True)),
+        entry_30m_bars=int(s.get("entry_30m_bars", 2)),
         entry_4h_bars=int(s.get("entry_4h_bars", 1)),
         rearm_hours=int(s.get("rearm_hours", 24)),
         fire_enabled=bool(s.get("fire_enabled", True)),
@@ -445,8 +448,12 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                 detail["turn_up"] = t
             # 🧱🔁🔓💥 단기·장기선 터치·돌파 — 1h·4h 둘 다. 1h는 구조 판정,
             # 4h는 스캔이 받아 둔 프레임이라 추가 요청이 없다.
-            for tf, frame, bars in (("1h", hour_frame(sym), params.wave_mark_1h_bars),
+            # 10-06: 1h 마크는 껐다(wave_mark_1h_bars: 0) — 대신 30m 단기선 돌파를 모든 줄에 붙인다
+            for tf, frame, bars in (("1h", hour_frame(sym) if params.wave_mark_1h_bars > 0 else None,
+                                     params.wave_mark_1h_bars),
                                     ("4h", df4, params.wave_mark_4h_bars)):
+                if bars <= 0:
+                    continue
                 w = leader_break.wave_mark(frame, params, bars)
                 if w:
                     detail[f"wave_mark_{tf}"] = w
@@ -528,7 +535,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             # • 신규 = 마감된 봉에서 새로 생긴 3파 진입 · 1h/4h 단기선 터치·돌파
             lng = w3_frame(sym) if leader_break.w3_candidate(hour_frame(sym), params, now) else None
             trig = leader_break.entry_triggers(hour_frame(sym), trend_frame(sym), lng,
-                                               params, now)
+                                               params, now, leader_break.to_30m(df))
             ev = leader_break.entry_event(sym, trig, df, params)
             cands = [ev] if ev is not None else []
         if (cands and state is not None and params.rearm_hours > 0
@@ -615,6 +622,30 @@ def _fetch_15m(session, source: str, symbols: list, limit: int,
         log(f"[binance] 15m 수집 {len(out)}/{len(symbols)}종 "
             f"({len(symbols) - len(out)}종 실패 — 건너뜀)")
     return out
+
+
+def _mark_st30(cfg: dict, items: list, frames15: dict | None, log=print) -> None:
+    """모든 크립토 줄에 '30m 단기선 돌파'(30m 단기 수퍼트렌드 22×3 상승 전환, 최근 bars봉 안 ·
+    지금도 상승)를 detail["st30"]로 단다(10-06~). 30m은 받아 둔 15m를 묶어 만든다 —
+    추가 요청이 없다. 15m 프레임이 없는 종목은 건너뛴다."""
+    s = (cfg.get("signal") or {}).get("st30_mark") or {}
+    if not s.get("enabled", False) or not frames15:
+        return
+    bars = int(s.get("bars", 12))
+    params = leader_break.Params()
+    cache: dict = {}
+    n = 0
+    for e in items:
+        sym = e.symbol
+        if sym not in cache:
+            df = frames15.get(sym)
+            cache[sym] = (leader_break.st_fast_break(leader_break.to_30m(df), params, bars)
+                          if df is not None else None)
+        if cache[sym]:
+            e.detail["st30"] = True
+            n += 1
+    log(f"[binance] 30m 단기선 돌파 {n}줄 · {sum(1 for v in cache.values() if v)}종 "
+        f"(30m 단기 22×3 상승 전환 최근 {bars}봉 안 · 지금도 상승)")
 
 
 def _mark_fire2(cfg: dict, source: str, items: list, frames15: dict | None,
@@ -985,6 +1016,8 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
             # 상승초입은 MA960을 봐야 해서 훨씬 길다 — 둘 중 긴 쪽에 맞춰
             # 한 번만 받는다(요청 수는 그대로, 페이로드만 커진다).
             need15 = max(need15, vwap_onset.KLINE_LIMIT)
+        if (scfg.get("st30_mark") or {}).get("enabled", False):
+            need15 = max(need15, 120)                         # 30m 60봉 — ST(22) + 창
         if (scfg.get("whale_exit") or {}).get("enabled", False) and source == "fapi":
             need15 = max(need15, whale_exit.DAY_BARS + 20)    # 24h 전 종가까지
         if need15:
@@ -1001,6 +1034,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         leader_ongoing = spike_ongoing + vo_ongoing + leader_ongoing
         if not detectors:           # 인트라바인데 4h 대상 시그널이 없을 때
             _mark_fire2(cfg, source, leader_events + leader_ongoing, frames15, workers, log)
+            _mark_st30(cfg, leader_events + leader_ongoing, frames15, log)
             return leader_events, leader_ongoing, board
     events, ongoing = _detect_all(frames, detectors, log)
     _fill_daily_return(ongoing, ticker)     # 추적 줄 정렬·표기용 24h 수익률
@@ -1048,6 +1082,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
     events.extend(leader_events)
     ongoing.extend(leader_ongoing)
     _mark_fire2(cfg, source, events + ongoing, frames15, workers, log)
+    _mark_st30(cfg, events + ongoing, frames15, log)
     log(f"[binance] 시그널 {len(events)}건 · 유지 중 {len(ongoing)}건")
     return events, ongoing, board
 
