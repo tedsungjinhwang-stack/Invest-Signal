@@ -1573,7 +1573,7 @@ def run(config_path: str, state_path: str, only: str | None = None,
     hold_stock = [e for e in hold_yf if grp(e) == "stock"]
 
     if st30_mode:
-        title = notify.ST30_TITLE
+        title = notify.st30_only_title(show_crypto + hold_crypto)
     elif fire_mode:
         title = notify.fire_only_title(show_crypto + hold_crypto, always)
     msg = notify.format_events(show_crypto, show_etf, yf_names, hold_crypto, hold_etf,

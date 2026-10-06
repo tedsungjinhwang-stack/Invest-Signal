@@ -202,8 +202,9 @@ def is_st30(e) -> bool:
     return bool(d.get("st30")) or "30m단기선돌파" in (d.get("triggers") or ())
 
 
-# 30m만 보기에서도 같이 싣는 줄 — `시그널:stage`(always_show와 같은 규약). 10-06: 급등 뒤 15m 장기선 터치
-ST30_ALSO = ("spike_bar:장기선터치",)
+# 30m만 보기에서도 같이 싣는 줄 — 시그널 이름 또는 `시그널:stage`(always_show와 같은 규약).
+# 10-06: 급등 뒤 15m 장기선 터치 · 익절 경고(🚨세력 이탈 · 🔻하락 CHoCH)
+ST30_ALSO = ("spike_bar:장기선터치", "whale_exit", "choch_warn")
 
 
 def st30_only(events, also=ST30_ALSO) -> list:
@@ -212,6 +213,15 @@ def st30_only(events, also=ST30_ALSO) -> list:
 
 
 ST30_TITLE = "🔓 <b>30m 단기선 돌파</b>"
+
+
+def st30_only_title(events) -> str:
+    """30m만 보기 머리 — 30m 줄이 있으면 '🔓 30m 단기선 돌파', 경고 칸이 실리면 그 이름도."""
+    parts = [ST30_TITLE] if any(is_st30(e) or e.signal == "spike_bar" for e in events) else []
+    for sig in ("whale_exit", "choch_warn"):
+        if any(e.signal == sig and not is_st30(e) for e in events):
+            parts.append(ALWAYS_TITLES[sig])
+    return " · ".join(parts) or ST30_TITLE
 FIRE_TITLE = "🔥 <b>떡상조짐</b>"
 
 
@@ -599,9 +609,10 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         if tv:
             tags.append(tv)
     if e.signal == "spike_bar" and d.get("stage") == "장기선터치":
-        # 🧱 급등 뒤 15m 장기 수퍼트렌드(30×6) 첫 터치 — 터치 시각 · 선 방향 · 급등봉 대비 지금
+        # 🧱 급등 뒤 상승 중인 15m 장기 수트(30×6)를 캔들이 내려와 터치(종가는 선 위) —
+        # 터치 시각 · 지지선 값 · 급등봉 대비 지금
         tags.append(f"🧱15m장기선터치 🕒{_kst(e.bar_time)}")
-        tags.append(f"선 {_fmt_price(d['line'])}({'상승·지지' if d.get('line_up') else '하락·저항'})")
+        tags.append(f"지지선 {_fmt_price(d['line'])}")
         tags.append(f"급등 🕒{_kst(d['spike_time'])} 몸통 {_pct(d['body'])}")
         if d.get("since") is not None:
             tags.append(f"급등 후 {_pct(d['since'])}")

@@ -152,7 +152,7 @@ def test_run_st30_only_sends_just_30m_rows(monkeypatch, tmp_path):
     a = _ev("AUSDT", "wave_setup", fire=True, st30=True)
     b = _ev("BUSDT", "wave_setup", fire=True)                       # 🔥여도 30m 아니면 뺀다
     c = _ev("CUSDT", "leader_break", triggers=["30m단기선돌파"])
-    d = _ev("DUSDT", "choch_warn", broken_low=1.1, from_high=-0.05)  # 경고도 뺀다
+    d = _ev("DUSDT", "choch_warn", broken_low=1.1, from_high=-0.05)  # 익절 경고는 나간다
     h = _ev("HUSDT", "vwap_onset", st30=True, last_price=1.0)
     cfg = {"notify": {"st30_only": True, "fire_only": True}}
     monkeypatch.setattr(scanner.cfg_mod, "load", lambda p: cfg)
@@ -167,8 +167,8 @@ def test_run_st30_only_sends_just_30m_rows(monkeypatch, tmp_path):
     state_path = str(tmp_path / "state" / "alerts_state.json")
     scanner.run("x.yaml", state_path, log=lambda *x: None)
     msg = sent[0]
-    assert msg.startswith("🔓 <b>30m 단기선 돌파</b> · ")
-    assert ">A<" in msg and ">C<" in msg and "\n↳ H " in msg
-    assert ">B<" not in msg and ">D<" not in msg and "24h 상승률 TOP" not in msg and "📣" not in msg
+    assert msg.startswith("🔓 <b>30m 단기선 돌파</b> · 🔻 <b>하락 CHoCH</b> · ")
+    assert ">A<" in msg and ">C<" in msg and "\n↳ H " in msg and ">D<" in msg
+    assert ">B<" not in msg and "24h 상승률 TOP" not in msg and "📣" not in msg
     st = AlertState(state_path)
-    assert not st.is_new(a.dedup_key) and st.is_new(b.dedup_key) and st.is_new(d.dedup_key)
+    assert not st.is_new(a.dedup_key) and st.is_new(b.dedup_key) and not st.is_new(d.dedup_key)

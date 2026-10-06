@@ -35,7 +35,7 @@ LABEL = "급등봉"
 CRYPTO_ONLY = True          # ETF·주식 스캔에서는 돌리지 않는다
 INTERVAL = "15m"
 KLINE_LIMIT = 500           # vol_ma(96) + 추적 3일(288) + 여유
-TOUCH = "장기선터치"          # 급등 뒤 15m 장기 수퍼트렌드(30×6) 첫 터치 — stage(dedup 키가 갈린다)
+TOUCH = "장기선터치"          # 급등 뒤 상승 중인 15m 장기 수트(30×6)를 내려와 터치 — stage(dedup 키가 갈린다)
 
 
 @dataclass(frozen=True)
@@ -51,8 +51,8 @@ class Params:
     grace_bars: int = 4
     # 발화 뒤 추적 줄로 남길 기간. 288봉 = 3일(10-06~, 예전 96봉 = 하루). 0이면 추적하지 않는다.
     track_bars: int = 288
-    # 🧱 15m 장기선 터치(10-06~) — 급등 뒤 추적 기간 안에 15m 캔들이 15m 장기 수퍼트렌드(30×6)
-    # 선을 **처음** 걸친 봉(저가 ≤ 선 ≤ 고가)을 • 로 알린다. 급등봉 하나당 한 번.
+    # 🧱 15m 장기선 터치(10-06~) — 급등 뒤 추적 기간 안에 15m 장기 수퍼트렌드(30×6)가 이미
+    # 상승(선이 아래 = 지지)인데 캔들이 내려와 선을 터치하고 종가는 선 위로 지킨 봉을 • 로.
     touch_enabled: bool = True
     touch_period: int = 30
     touch_mult: float = 6.0
@@ -124,11 +124,14 @@ def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()
 
 
 def long_touch(df: pd.DataFrame, symbol: str, params: Params = Params()) -> SignalEvent | None:
-    """🧱 급등 뒤 15m 장기 수퍼트렌드(30×6) **첫** 터치 — 최근 grace_bars+1봉 안이면 이벤트.
+    """🧱 급등 뒤 **이미 상승인** 15m 장기 수퍼트렌드(30×6)를 캔들이 **내려와 터치**한 봉.
 
-    추적 기간(track_bars) 안의 가장 최근 급등봉을 기준으로, 그 뒤 처음 선을 걸친 봉이
-    마지막 grace_bars+1봉 안에 있으면 돌려준다. 선 방향(상승 = 아래 지지 / 하락 = 위 저항)과
-    급등봉 대비 지금 가격을 같이 싣는다. 해당 없으면 None.
+    추적 기간(track_bars) 안의 가장 최근 급등봉 이후, 마지막 grace_bars+1봉 안에서
+      ① 장기 수트가 이 봉과 직전 봉 모두 상승(선이 아래 = 지지) — 막 뒤집힌 봉은 아니다
+      ② 저가가 선까지 내려와 닿았지만(저가 ≤ 선) **종가는 선 위**(돌파하지 않고 지켰다)
+      ③ 직전 봉은 선에 닿지 않았다 — 위에서 내려와 닿은 첫 봉(연속 터치는 첫 봉만)
+    인 봉 중 가장 최근 것. 눌림마다 다시 울릴 수 있다(봉이 다르면 dedup 키가 다르다).
+    해당 없으면 None.
     """
     from ..indicators import supertrend_full
 
@@ -148,18 +151,23 @@ def long_touch(df: pd.DataFrame, symbol: str, params: Params = Params()) -> Sign
     d = st["dir"].to_numpy(float)
     hi = df["High"].to_numpy(float)
     lo = df["Low"].to_numpy(float)
-    first = None
-    for t in range(i0 + 1, n):
-        if not np.isnan(line[t]) and lo[t] <= line[t] <= hi[t]:
-            first = t
-            break
-    if first is None or first < n - 1 - params.grace_bars:
+    c = df["Close"].to_numpy(float)
+
+    def touch(t: int) -> bool:
+        return not np.isnan(line[t]) and lo[t] <= line[t] <= hi[t]
+
+    hit = None
+    for t in range(max(i0 + 1, n - 1 - params.grace_bars, 1), n):
+        if (d[t] > 0 and d[t - 1] > 0 and touch(t) and c[t] > line[t]
+                and not touch(t - 1)):
+            hit = t
+    if hit is None:
         return None
-    close = float(df["Close"].iloc[first])
+    close = float(c[hit])
     return SignalEvent(
-        symbol=symbol, signal=NAME, bar_time=df.index[first], price=close,
+        symbol=symbol, signal=NAME, bar_time=df.index[hit], price=close,
         detail={"label": LABEL, "stage": TOUCH, "interval": INTERVAL,
-                "line": float(line[first]), "line_up": bool(d[first] > 0),
+                "line": float(line[hit]), "line_up": True,
                 "spike_time": sp.bar_time, "spike_price": sp.price,
                 "body": sp.detail["body"], "vol_mult": sp.detail["vol_mult"],
                 "since": close / sp.price - 1 if sp.price else None})
