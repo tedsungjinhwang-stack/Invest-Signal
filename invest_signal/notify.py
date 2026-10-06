@@ -202,9 +202,13 @@ def is_st30(e) -> bool:
     return bool(d.get("st30")) or "30m단기선돌파" in (d.get("triggers") or ())
 
 
-def st30_only(events) -> list:
-    """30m 단기선 돌파 줄만 남긴다(notify.st30_only, 10-06~) — 나머지 칸·줄은 전부 뺀다."""
-    return [e for e in events if is_st30(e)]
+# 30m만 보기에서도 같이 싣는 줄 — `시그널:stage`(always_show와 같은 규약). 10-06: 급등 뒤 15m 장기선 터치
+ST30_ALSO = ("spike_bar:장기선터치",)
+
+
+def st30_only(events, also=ST30_ALSO) -> list:
+    """30m 단기선 돌파 줄만 남긴다(notify.st30_only, 10-06~) — also(급등 뒤 15m 장기선 터치)는 같이."""
+    return [e for e in events if is_st30(e) or _always_key(e, also)]
 
 
 ST30_TITLE = "🔓 <b>30m 단기선 돌파</b>"
@@ -594,7 +598,14 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tv = _turnover_tag(d)
         if tv:
             tags.append(tv)
-    if e.signal == "spike_bar":
+    if e.signal == "spike_bar" and d.get("stage") == "장기선터치":
+        # 🧱 급등 뒤 15m 장기 수퍼트렌드(30×6) 첫 터치 — 터치 시각 · 선 방향 · 급등봉 대비 지금
+        tags.append(f"🧱15m장기선터치 🕒{_kst(e.bar_time)}")
+        tags.append(f"선 {_fmt_price(d['line'])}({'상승·지지' if d.get('line_up') else '하락·저항'})")
+        tags.append(f"급등 🕒{_kst(d['spike_time'])} 몸통 {_pct(d['body'])}")
+        if d.get("since") is not None:
+            tags.append(f"급등 후 {_pct(d['since'])}")
+    elif e.signal == "spike_bar":
         # **봉이 언제 터졌는지를 맨 앞에 적는다.** 스캔이 매시 한 번이라 이
         # 줄은 최대 한 시간 묵은 소식이고, 15분봉이라 네 봉 중 어느 봉인지에
         # 따라 지금 가격과의 거리가 완전히 다르다. 시각이 없으면 읽을 수 없다.

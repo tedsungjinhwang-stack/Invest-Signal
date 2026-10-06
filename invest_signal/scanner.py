@@ -783,7 +783,10 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
         close_pos=float(s.get("close_pos", 0.7)),
         min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
         grace_bars=int(s.get("grace_bars", 4)),
-        track_bars=int(s.get("track_bars", 96)),
+        track_bars=int(s.get("track_bars", 288)),
+        touch_enabled=bool(s.get("touch_enabled", True)),
+        touch_period=int(s.get("touch_period", 30)),
+        touch_mult=float(s.get("touch_mult", 6.0)),
     )
     events, ongoing, thin = [], [], 0
 
@@ -800,19 +803,25 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
             ev.detail["gain_24h"] = g
         return True
 
+    touches = 0
     for sym, df in frames15.items():
         for ev in spike_bar.detect(df, sym, params):
             if stamp(ev):
                 events.append(ev)
             else:
                 thin += 1
+        # 🧱 급등 뒤 15m 장기선 첫 터치 — 급등봉 하나당 한 번(• 로 알린다)
+        tev = spike_bar.long_touch(df, sym, params)
+        if tev is not None and stamp(tev):
+            events.append(tev)
+            touches += 1
         # 발화 뒤 하루는 추적 줄로 남긴다 — 터진 종목이 값을 지키는지가
         # 급등봉 자체만큼 중요하다.
         old_ev = spike_bar.recent(df, sym, params)
         if old_ev is not None and stamp(old_ev):
             ongoing.append(old_ev)
     if events or ongoing or thin:
-        log(f"[binance] 급등봉 {len(events)}건 · 추적 {len(ongoing)}건"
+        log(f"[binance] 급등봉 {len(events) - touches}건 · 15m 장기선 터치 {touches}건 · 추적 {len(ongoing)}건"
             + (f" · 거래대금 하한 미달 {thin}건 제외" if thin else "")
             + f" (몸통 {params.body:.0%} · 거래량 {params.vol_mult:.0f}배 · "
               f"종가위치 {params.close_pos} · 추적 {params.track_bars}봉)")
@@ -1514,11 +1523,12 @@ def run(config_path: str, state_path: str, only: str | None = None,
     # 30m만 보기(notify.st30_only, 10-06~) — 30m🔓단기선돌파 줄만 보낸다. 🔥만 보기와 같은
     # 방식(뺀 줄은 상태에 안 남기고 sent_log hidden에 요약)이고, 순위표·ETF·주식·커뮤니티도 뺀다.
     if st30_mode:
-        keep = notify.st30_only(fresh_crypto)
+        also = tuple(ncfg.get("st30_also_show", notify.ST30_ALSO))
+        keep = notify.st30_only(fresh_crypto, also)
         kept = {id(e) for e in keep}
         hidden = [e for e in _collapse(fresh_crypto + fresh_yf) if id(e) not in kept]
         fresh_crypto, fresh_yf = keep, []
-        crypto_ongoing = notify.st30_only(crypto_ongoing)
+        crypto_ongoing = notify.st30_only(crypto_ongoing, also)
         yf_ongoing, community, crypto_board = [], {}, []
         if hidden:
             log(f"[notify] 30m만 보기 — 30m 단기선 돌파 아닌 새 줄 {len(hidden)}건 알림에서 뺌")

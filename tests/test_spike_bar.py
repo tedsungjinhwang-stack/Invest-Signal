@@ -104,9 +104,12 @@ def test_fresh_bar_is_not_also_tracked():
     assert spike_bar.recent(df, "XUSDT") is None
 
 
-def test_older_than_a_day_drops_out():
-    df = _spike(_frame(), -120)                 # 30시간 전 — 창 밖
-    assert spike_bar.recent(df, "XUSDT") is None
+def test_tracked_for_three_days_then_drops_out():
+    """10-06~ 추적 3일(288봉). 62시간 전 급등은 남고 75시간 전은 빠진다."""
+    assert spike_bar.recent(_spike(_frame(n=500), -250), "XUSDT") is not None
+    assert spike_bar.recent(_spike(_frame(n=500), -300), "XUSDT") is None
+    one_day = Params(track_bars=96)
+    assert spike_bar.recent(_spike(_frame(n=500), -120), "XUSDT", one_day) is None
 
 
 def test_latest_spike_wins_when_there_are_several():
@@ -118,3 +121,51 @@ def test_latest_spike_wins_when_there_are_several():
 def test_tracking_can_be_turned_off():
     df = _spike(_frame(), -50)
     assert spike_bar.recent(df, "XUSDT", Params(track_bars=0)) is None
+
+
+def _pump_then_fall(n_flat=200, fall=60):
+    """평평 → 급등봉 하나 → 천천히 하락. 15m 장기 수퍼트렌드(30×6)는 급등 뒤 아래에서 따라온다."""
+    df = _frame(n=n_flat + 1 + fall)
+    _spike(df, n_flat, body=0.30, mult=40.0)
+    c = np.linspace(1.30, 0.90, fall)
+    for k, v in enumerate(c):
+        i = n_flat + 1 + k
+        df.iloc[i, df.columns.get_loc("Open")] = v * 1.002
+        df.iloc[i, df.columns.get_loc("High")] = v * 1.004
+        df.iloc[i, df.columns.get_loc("Low")] = v * 0.996
+        df.iloc[i, df.columns.get_loc("Close")] = v
+    return df
+
+
+def test_long_touch_fires_once_on_first_touch_after_spike():
+    from invest_signal.indicators import supertrend_full
+    df = _pump_then_fall()
+    st = supertrend_full(df, 30, 6.0)["line"].to_numpy()
+    lo, hi = df["Low"].to_numpy(), df["High"].to_numpy()
+    touch = [t for t in range(201, len(df)) if lo[t] <= st[t] <= hi[t]]
+    assert touch, "합성 데이터가 선을 안 건드린다"
+    t0 = touch[0]
+    ev = spike_bar.long_touch(df.iloc[:t0 + 1], "XUSDT")
+    assert ev is not None and ev.bar_time == df.index[t0]
+    assert ev.detail["stage"] == "장기선터치" and ev.detail["spike_time"] == df.index[200]
+    assert ev.detail["since"] < 0 and ev.dedup_key.endswith("|장기선터치")
+    # 첫 터치에서 grace(4봉)보다 더 지나면 다시 안 나온다 — 급등봉 하나당 한 번
+    assert spike_bar.long_touch(df.iloc[:t0 + 10], "XUSDT") is None
+    assert spike_bar.long_touch(df.iloc[:t0 + 1], "XUSDT", Params(touch_enabled=False)) is None
+
+
+def test_notify_renders_long_touch_and_st30_only_keeps_it():
+    from invest_signal import notify
+    from invest_signal.signals import SignalEvent
+    t = pd.Timestamp("2026-10-06T05:00:00Z")
+    ev = SignalEvent(symbol="AUSDT", signal="spike_bar", bar_time=t, price=1.1,
+                     detail={"label": "급등봉", "stage": "장기선터치", "interval": "15m",
+                             "line": 1.08, "line_up": True,
+                             "spike_time": pd.Timestamp("2026-10-05T03:00:00Z"),
+                             "spike_price": 1.3, "body": 0.3, "vol_mult": 40.0, "since": -0.154})
+    line = [ln for ln in notify.format_events([ev], [], {}).splitlines() if ">A<" in ln][0]
+    assert "🧱15m장기선터치 🕒10-06 14:00" in line and "상승·지지" in line
+    assert "급등 🕒10-05 12:00 몸통 +30%" in line and "급등 후 -15%" in line
+    plain = SignalEvent(symbol="BUSDT", signal="spike_bar", bar_time=t, price=1.0,
+                        detail={"label": "급등봉", "body": 0.1, "vol_mult": 20.0})
+    assert notify.st30_only([ev, plain]) == [ev]
