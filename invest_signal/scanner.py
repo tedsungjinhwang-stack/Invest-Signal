@@ -1508,8 +1508,20 @@ def run(config_path: str, state_path: str, only: str | None = None,
     # 성적을 비교할 수 있게 한다.
     hidden, title = [], None
     ncfg = cfg.get("notify") or {}
-    fire_mode = bool(ncfg.get("fire_only", False))
+    st30_mode = bool(ncfg.get("st30_only", False))
+    fire_mode = bool(ncfg.get("fire_only", False)) and not st30_mode
     always = tuple(ncfg.get("always_show", notify.ALWAYS_SIGNALS))
+    # 30m만 보기(notify.st30_only, 10-06~) — 30m🔓단기선돌파 줄만 보낸다. 🔥만 보기와 같은
+    # 방식(뺀 줄은 상태에 안 남기고 sent_log hidden에 요약)이고, 순위표·ETF·주식·커뮤니티도 뺀다.
+    if st30_mode:
+        keep = notify.st30_only(fresh_crypto)
+        kept = {id(e) for e in keep}
+        hidden = [e for e in _collapse(fresh_crypto + fresh_yf) if id(e) not in kept]
+        fresh_crypto, fresh_yf = keep, []
+        crypto_ongoing = notify.st30_only(crypto_ongoing)
+        yf_ongoing, community, crypto_board = [], {}, []
+        if hidden:
+            log(f"[notify] 30m만 보기 — 30m 단기선 돌파 아닌 새 줄 {len(hidden)}건 알림에서 뺌")
     if fire_mode:
         keep = notify.fire_only(fresh_crypto, always)
         kept = {id(e) for e in keep}
@@ -1550,7 +1562,9 @@ def run(config_path: str, state_path: str, only: str | None = None,
     hold_etf = [e for e in hold_yf if grp(e) == "etf"]
     hold_stock = [e for e in hold_yf if grp(e) == "stock"]
 
-    if fire_mode:
+    if st30_mode:
+        title = notify.ST30_TITLE
+    elif fire_mode:
         title = notify.fire_only_title(show_crypto + hold_crypto, always)
     msg = notify.format_events(show_crypto, show_etf, yf_names, hold_crypto, hold_etf,
                                events_stocks=show_stock, ongoing_stocks=hold_stock,

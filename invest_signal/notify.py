@@ -196,6 +196,18 @@ def fire_only(events, always=ALWAYS_SIGNALS) -> list:
     return [e for e in events if _always_key(e, always) or is_fire(e)]
 
 
+def is_st30(e) -> bool:
+    """30m 단기선 돌파 줄인가 — 표시(st30) 또는 ⚡ 🆕30m단기선돌파 사건."""
+    d = e.detail
+    return bool(d.get("st30")) or "30m단기선돌파" in (d.get("triggers") or ())
+
+
+def st30_only(events) -> list:
+    """30m 단기선 돌파 줄만 남긴다(notify.st30_only, 10-06~) — 나머지 칸·줄은 전부 뺀다."""
+    return [e for e in events if is_st30(e)]
+
+
+ST30_TITLE = "🔓 <b>30m 단기선 돌파</b>"
 FIRE_TITLE = "🔥 <b>떡상조짐</b>"
 
 

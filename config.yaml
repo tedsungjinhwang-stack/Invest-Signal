@@ -11,6 +11,11 @@ notify:
   # state/sent_log.jsonl의 hidden에 남긴다 — 🔥 줄과 성적 비교용.
   # false로 바꾸면 예전처럼 전부 나간다.
   fire_only: false        # 10-06: 다시 전부 보이게(요청: "떡상조짐만 보이게 하지말고 싹다")
+  # 30m만 보기(10-06 요청: "너무 많아서 그냥 30m단기선 돌파한것만") — true면 어느 칸이든
+  # 30m🔓단기선돌파가 붙은 줄(⚡ 🆕30m단기선돌파 포함)만 나간다. 신규(•)·추적(↳) 모두.
+  # 그 밖의 줄, 🚨세력 이탈·🔻하락 CHoCH, ⚡ 순위표, ETF·주식, 📣커뮤니티는 안 나간다.
+  # 뺀 새 줄은 상태에 안 남기고 sent_log hidden에 요약만 남긴다. fire_only보다 우선한다.
+  st30_only: true
   # 🔥 없이도 항상 싣는 칸 — 시그널 이름 또는 `시그널:stage`(그 변형만)
   # (10-01 급등봉 · 10-02 세력 이탈 · 10-04 파동의 일봉 단기·장기 추세선)
   always_show: [spike_bar, whale_exit, choch_warn, "wave_setup:일봉ABC", "wave_setup:일봉장기선돌파"]
