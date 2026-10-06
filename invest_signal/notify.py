@@ -887,7 +887,12 @@ def format_events(events_crypto: list, events_etf: list,
             tags = list(_band_tags(d))
             if d.get("fire"):
                 tags.insert(0, _fire_tag(d))
-            if d.get("in_bars"):
+            if d.get("tracked"):
+                # 10일 추적(10-06~) — 언제 떴는지와 그 뒤 얼마인지. 조건이 풀려도 남는다
+                tags.insert(0, f"🕒{_kst(e.bar_time)}")
+                if d.get("since") is not None:
+                    tags.append(f"이후 {_pct(d['since'])}")
+            elif d.get("in_bars"):
                 tags.append(_dwell_tag(d))
             day = _daily_gain(d)
             if day is not None:
@@ -917,6 +922,8 @@ def format_events(events_crypto: list, events_etf: list,
         tags = [f"{_age_days(e.bar_time)}d"]
         if e.signal == "wave_setup" and d.get("fire"):
             tags.insert(0, _fire_tag(d))
+        if d.get("tracked") and d.get("since") is not None:
+            tags.append(f"이후 {_pct(d['since'])}")     # 10일 추적 — 발생가 대비 지금
         wm = _wave_mark(e)
         if wm:
             tags.append(wm)

@@ -163,13 +163,16 @@ def test_leaders_persist_and_expire_after_watch_window(tmp_path):
     now = datetime.now(timezone.utc)
     st = AlertState(str(p))
     st.touch_leaders(["AUSDT", "BUSDT"], when=now - timedelta(days=1))
-    st.touch_leaders(["OLDUSDT"], when=now - timedelta(days=9))
+    st.touch_leaders(["MIDUSDT"], when=now - timedelta(days=9))     # watch_days 10 안
+    st.touch_leaders(["OLDUSDT"], when=now - timedelta(days=11))
     st.save()
 
     reloaded = AlertState(str(p))          # 파일에서 다시 읽어도 남아 있어야 한다
     recent = reloaded.recent_leaders(days=7, now=now)
-    assert set(recent) == {"AUSDT", "BUSDT"}    # 9일 전 등재분은 창 밖
+    assert set(recent) == {"AUSDT", "BUSDT"}    # 9일 전 등재분은 7일 창 밖
     assert recent["AUSDT"] == now - timedelta(days=1)
+    # 10-06: prune 기준이 5일이라 watch_days 10이 실제론 5일이었다 — 10일로 맞췄다
+    assert "MIDUSDT" in reloaded.recent_leaders(days=10, now=now)
     # save()의 prune이 창 밖 항목을 파일에서도 지운다
     assert "OLDUSDT" not in json.loads(p.read_text(encoding="utf-8"))["leaders"]
 
@@ -1207,3 +1210,25 @@ def test_fire_rows_come_first_in_wave_and_onset_sections():
     assert out.index(">WFIRE<") < out.index(">WPLAIN<")
     assert out.index(">OFIRE<") < out.index(">OPLAIN<")
     assert [ln for ln in out.splitlines() if ">OFIRE<" in ln][0].split(" · ")[1] == "🔥"
+
+
+def test_tracks_keep_latest_per_signal_symbol_for_ten_days(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    import numpy as np
+
+    from invest_signal.state import AlertState
+    now = datetime.now(timezone.utc)
+    p = tmp_path / "s.json"
+    st = AlertState(str(p))
+    mk = lambda sym, sig, days, price: SignalEvent(
+        symbol=sym, signal=sig, bar_time=pd.Timestamp(now - timedelta(days=days)), price=price,
+        detail={"label": "급등봉", "body": np.float64(0.1), "fire": np.bool_(True),
+                "spike_time": pd.Timestamp(now)})
+    st.track(mk("AUSDT", "spike_bar", 3, 1.0))
+    st.track(mk("AUSDT", "spike_bar", 5, 0.5))       # 더 오래된 발생은 덮지 않는다
+    st.track(mk("BUSDT", "vwap_onset", 12, 2.0))     # 10일 밖
+    st.save()
+    got = AlertState(str(p)).tracked(("spike_bar", "vwap_onset"), now=now)
+    assert [(g["symbol"], g["price"]) for g in got] == [("AUSDT", 1.0)]
+    assert got[0]["detail"]["body"] == 0.1 and got[0]["detail"]["fire"] is True

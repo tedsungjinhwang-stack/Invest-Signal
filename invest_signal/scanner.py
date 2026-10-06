@@ -624,6 +624,66 @@ def _fetch_15m(session, source: str, symbols: list, limit: int,
     return out
 
 
+TRACK10_SIGNALS = ("spike_bar", "vwap_onset", "wave_setup")
+
+
+def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | None,
+             ticker: dict | None, log=print) -> tuple[list, list]:
+    """급등봉·상승초입·파동 10일 추적(10-06~, signal.track10).
+
+    ① 이번 스캔에서 잡힌 이 시그널들의 이벤트를 상태(tracks)에 적는다 — 보냈든 30m만
+       보기로 뺐든 **잡힌 순간**이다. 종목·시그널당 가장 최근 발생 하나만 남는다.
+    ② 이 시그널들의 추적(↳) 줄을 저장분으로 다시 만든다 — 발생 뒤 days일 동안, 현재가와
+       발생가 대비 %를 붙여서(조건이 풀려도 남는다). 받아 둔 15m 프레임 범위와 무관하다.
+    ③ 🚀 저장된 급등봉마다 15m 장기선 터치(spike_bar.long_touch)를 본다 — • 로 나간다.
+    상태가 없거나 꺼져 있으면 그대로 돌려준다.
+    """
+    s = (cfg.get("signal") or {}).get("track10") or {}
+    if not s.get("enabled", False) or state is None:
+        return events, ongoing
+    sigs = tuple(s.get("signals", TRACK10_SIGNALS))
+    days = float(s.get("days", 10))
+    now = pd.Timestamp.now(tz="UTC")
+    for e in events:
+        if e.signal in sigs and e.detail.get("stage") != spike_bar.TOUCH:
+            state.track(e)
+    fresh = {(e.symbol, e.signal) for e in events}
+    holds = [e for e in ongoing if e.signal not in sigs]
+    sp = _spike_params(cfg)
+    touches = []
+    for it in state.tracked(sigs, days, now=now.to_pydatetime()):
+        sym, sig = it["symbol"], it["signal"]
+        df = (frames15 or {}).get(sym)
+        if df is None or not len(df) or not it.get("price"):
+            continue
+        t = pd.Timestamp(it["t"])
+        d = dict(it["detail"])
+        for k in ("intrabar", "st30", "fire2"):
+            d.pop(k, None)              # 그때 상태가 아니라 지금 다시 잰다
+        last = float(df["Close"].iloc[-1])
+        stat = (ticker or {}).get(sym) or {}
+        d.update({"last_price": last, "since": last / float(it["price"]) - 1,
+                  "tracked": True, "track_days": max(0, (now - t).days)})
+        if stat.get("change_pct") is not None:
+            d["gain_24h"] = stat["change_pct"]
+        if stat.get("quote_volume") is not None:
+            d["turnover_24h"] = stat["quote_volume"]
+        ev = SignalEvent(symbol=sym, signal=sig, bar_time=t, price=float(it["price"]), detail=d)
+        if sig == "spike_bar" and sp.touch_enabled:
+            tev = spike_bar.long_touch(df, sym, sp, spike=ev)
+            if tev is not None:
+                for k in ("gain_24h", "turnover_24h"):
+                    if k in d:
+                        tev.detail[k] = d[k]
+                touches.append(tev)
+        if (sym, sig) not in fresh:
+            holds.append(ev)
+    n_by = collections.Counter(e.signal for e in holds if e.signal in sigs)
+    log(f"[track] {days:g}일 추적 — " + " · ".join(f"{k} {n_by.get(k, 0)}" for k in sigs)
+        + f" · 🧱15m 장기선 터치 {len(touches)}건")
+    return events + touches, holds
+
+
 def _mark_st30(cfg: dict, items: list, frames15: dict | None, log=print) -> None:
     """모든 크립토 줄에 '30m 단기선 돌파'(30m 단기 수퍼트렌드 22×3 상승 전환, 최근 bars봉 안 ·
     지금도 상승)를 detail["st30"]로 단다(10-06~). 30m은 받아 둔 15m를 묶어 만든다 —
@@ -776,18 +836,8 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
     s = (cfg.get("signal") or {}).get("spike_bar") or {}
     if not s.get("enabled", False):
         return [], []
-    params = spike_bar.Params(
-        body=float(s.get("body", 0.08)),
-        vol_mult=float(s.get("vol_mult", 10.0)),
-        vol_ma=int(s.get("vol_ma", 96)),
-        close_pos=float(s.get("close_pos", 0.7)),
-        min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
-        grace_bars=int(s.get("grace_bars", 4)),
-        track_bars=int(s.get("track_bars", 288)),
-        touch_enabled=bool(s.get("touch_enabled", True)),
-        touch_period=int(s.get("touch_period", 30)),
-        touch_mult=float(s.get("touch_mult", 6.0)),
-    )
+    params = _spike_params(cfg)
+    track10 = bool(((cfg.get("signal") or {}).get("track10") or {}).get("enabled", False))
     events, ongoing, thin = [], [], 0
 
     def stamp(ev) -> bool:
@@ -810,12 +860,14 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
                 events.append(ev)
             else:
                 thin += 1
-        # 🧱 급등 뒤 15m 장기선 첫 터치 — 급등봉 하나당 한 번(• 로 알린다)
+        if track10:
+            continue            # 추적 줄·🧱 장기선 터치는 10일 추적(_track10)이 저장분으로 만든다
+        # 🧱 급등 뒤 15m 장기선 터치 — 상승 장기 수트로 내려와 닿고 종가는 지킴(• 로 알린다)
         tev = spike_bar.long_touch(df, sym, params)
         if tev is not None and stamp(tev):
             events.append(tev)
             touches += 1
-        # 발화 뒤 하루는 추적 줄로 남긴다 — 터진 종목이 값을 지키는지가
+        # 발화 뒤 추적 기간은 추적 줄로 남긴다 — 터진 종목이 값을 지키는지가
         # 급등봉 자체만큼 중요하다.
         old_ev = spike_bar.recent(df, sym, params)
         if old_ev is not None and stamp(old_ev):
@@ -826,6 +878,22 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
             + f" (몸통 {params.body:.0%} · 거래량 {params.vol_mult:.0f}배 · "
               f"종가위치 {params.close_pos} · 추적 {params.track_bars}봉)")
     return events, ongoing
+
+
+def _spike_params(cfg: dict) -> "spike_bar.Params":
+    s = (cfg.get("signal") or {}).get("spike_bar") or {}
+    return spike_bar.Params(
+        body=float(s.get("body", 0.08)),
+        vol_mult=float(s.get("vol_mult", 10.0)),
+        vol_ma=int(s.get("vol_ma", 96)),
+        close_pos=float(s.get("close_pos", 0.7)),
+        min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
+        grace_bars=int(s.get("grace_bars", 4)),
+        track_bars=int(s.get("track_bars", 288)),
+        touch_enabled=bool(s.get("touch_enabled", True)),
+        touch_period=int(s.get("touch_period", 30)),
+        touch_mult=float(s.get("touch_mult", 6.0)),
+    )
 
 
 def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
@@ -1042,6 +1110,8 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         leader_events = spike_events + vo_events + leader_events
         leader_ongoing = spike_ongoing + vo_ongoing + leader_ongoing
         if not detectors:           # 인트라바인데 4h 대상 시그널이 없을 때
+            leader_events, leader_ongoing = _track10(cfg, state, leader_events, leader_ongoing,
+                                                     frames15, ticker, log)
             _mark_fire2(cfg, source, leader_events + leader_ongoing, frames15, workers, log)
             _mark_st30(cfg, leader_events + leader_ongoing, frames15, log)
             return leader_events, leader_ongoing, board
@@ -1090,6 +1160,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
     # 크립토 모멘텀 눌림목/이탈은 자체 선정(24h 상승률 상위)이라 위 랭크 필터를 타지 않는다
     events.extend(leader_events)
     ongoing.extend(leader_ongoing)
+    events, ongoing = _track10(cfg, state, events, ongoing, frames15, ticker, log)
     _mark_fire2(cfg, source, events + ongoing, frames15, workers, log)
     _mark_st30(cfg, events + ongoing, frames15, log)
     log(f"[binance] 시그널 {len(events)}건 · 유지 중 {len(ongoing)}건")

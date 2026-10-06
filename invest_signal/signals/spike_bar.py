@@ -123,10 +123,12 @@ def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()
     return False
 
 
-def long_touch(df: pd.DataFrame, symbol: str, params: Params = Params()) -> SignalEvent | None:
+def long_touch(df: pd.DataFrame, symbol: str, params: Params = Params(),
+               spike: SignalEvent | None = None) -> SignalEvent | None:
     """🧱 급등 뒤 **이미 상승인** 15m 장기 수퍼트렌드(30×6)를 캔들이 **내려와 터치**한 봉.
 
-    추적 기간(track_bars) 안의 가장 최근 급등봉 이후, 마지막 grace_bars+1봉 안에서
+    spike를 주면 그 급등봉(10일 추적 저장분)을 기준으로, 안 주면 프레임 안 추적 기간
+    (track_bars)의 가장 최근 급등봉을 기준으로, 그 뒤 마지막 grace_bars+1봉 안에서
       ① 장기 수트가 이 봉과 직전 봉 모두 상승(선이 아래 = 지지) — 막 뒤집힌 봉은 아니다
       ② 저가가 선까지 내려와 닿았지만(저가 ≤ 선) **종가는 선 위**(돌파하지 않고 지켰다)
       ③ 직전 봉은 선에 닿지 않았다 — 위에서 내려와 닿은 첫 봉(연속 터치는 첫 봉만)
@@ -140,12 +142,15 @@ def long_touch(df: pd.DataFrame, symbol: str, params: Params = Params()) -> Sign
     n = len(df)
     if n < max(params.vol_ma, params.touch_period) + 3:
         return None
-    wide = dataclasses_replace(params, grace_bars=params.track_bars)
-    spikes = detect(df, symbol, wide)
-    if not spikes:
-        return None
-    sp = max(spikes, key=lambda e: e.bar_time)
-    i0 = int(df.index.get_loc(sp.bar_time))
+    if spike is None:
+        wide = dataclasses_replace(params, grace_bars=params.track_bars)
+        spikes = detect(df, symbol, wide)
+        if not spikes:
+            return None
+        spike = max(spikes, key=lambda e: e.bar_time)
+    sp = spike
+    # 급등봉이 프레임보다 앞이면(10일 추적) 프레임 처음부터 본다
+    i0 = int(df.index.searchsorted(sp.bar_time, "right")) - 1
     st = supertrend_full(df, params.touch_period, params.touch_mult)
     line = st["line"].to_numpy(float)
     d = st["dir"].to_numpy(float)
@@ -169,5 +174,5 @@ def long_touch(df: pd.DataFrame, symbol: str, params: Params = Params()) -> Sign
         detail={"label": LABEL, "stage": TOUCH, "interval": INTERVAL,
                 "line": float(line[hit]), "line_up": True,
                 "spike_time": sp.bar_time, "spike_price": sp.price,
-                "body": sp.detail["body"], "vol_mult": sp.detail["vol_mult"],
+                "body": sp.detail.get("body"), "vol_mult": sp.detail.get("vol_mult"),
                 "since": close / sp.price - 1 if sp.price else None})
