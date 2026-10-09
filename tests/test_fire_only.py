@@ -167,7 +167,7 @@ def test_run_st30_only_sends_just_30m_rows(monkeypatch, tmp_path):
     state_path = str(tmp_path / "state" / "alerts_state.json")
     scanner.run("x.yaml", state_path, log=lambda *x: None)
     msg = sent[0]
-    assert msg.startswith("🔓 <b>30m 단기선 돌파</b> · 🔻 <b>하락 CHoCH</b> · ")
+    assert msg.startswith("🔓 <b>30m 단기선 돌파·터치</b> · 🔻 <b>하락 CHoCH</b> · ")
     assert ">A<" in msg and ">C<" in msg and "\n↳ H " in msg and ">D<" in msg
     assert ">B<" not in msg and "24h 상승률 TOP" not in msg and "📣" not in msg
     st = AlertState(state_path)

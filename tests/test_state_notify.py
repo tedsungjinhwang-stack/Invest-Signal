@@ -1232,3 +1232,15 @@ def test_tracks_keep_latest_per_signal_symbol_for_ten_days(tmp_path):
     got = AlertState(str(p)).tracked(("spike_bar", "vwap_onset"), now=now)
     assert [(g["symbol"], g["price"]) for g in got] == [("AUSDT", 1.0)]
     assert got[0]["detail"]["body"] == 0.1 and got[0]["detail"]["fire"] is True
+
+
+def test_st30_touch_rows_follow_break_rows_with_own_tag():
+    brk = _lb("BUSDT", 1e6, 0.1, rank=2, st30="돌파")
+    tch = _lb("TUSDT", 9e8, 0.1, rank=1, st30="터치")
+    plain = _lb("PUSDT", 9e9, 0.1, rank=3)
+    out = format_events([plain, tch, brk], [], {})
+    order = [">B<", ">T<", ">P<"]
+    pos = [out.index(k) for k in order]
+    assert pos == sorted(pos), out
+    t_line = [ln for ln in out.splitlines() if ">T<" in ln][0]
+    assert t_line.split(" · ")[1] == "30m🔁단기선터치"

@@ -197,9 +197,10 @@ def fire_only(events, always=ALWAYS_SIGNALS) -> list:
 
 
 def is_st30(e) -> bool:
-    """30m 단기선 돌파 줄인가 — 표시(st30) 또는 ⚡ 🆕30m단기선돌파 사건."""
+    """30m 단기선 돌파·터치 줄인가 — 표시(st30) 또는 ⚡ 🆕30m단기선돌파/터치 사건."""
     d = e.detail
-    return bool(d.get("st30")) or "30m단기선돌파" in (d.get("triggers") or ())
+    trig = d.get("triggers") or ()
+    return bool(d.get("st30")) or "30m단기선돌파" in trig or "30m단기선터치" in trig
 
 
 # 30m만 보기에서도 같이 싣는 줄 — 시그널 이름 또는 `시그널:stage`(always_show와 같은 규약).
@@ -212,7 +213,7 @@ def st30_only(events, also=ST30_ALSO) -> list:
     return [e for e in events if is_st30(e) or _always_key(e, also)]
 
 
-ST30_TITLE = "🔓 <b>30m 단기선 돌파</b>"
+ST30_TITLE = "🔓 <b>30m 단기선 돌파·터치</b>"
 
 
 def st30_only_title(events) -> str:
@@ -411,17 +412,29 @@ LEADER_TIERS = len(LEADER_MARK_TFS) + 3     # 30m · 🔥 · 3파 · 4h — 이 
 ST30_TAG = "30m🔓단기선돌파"
 
 
+ST30_TOUCH_TAG = "30m🔁단기선터치"     # 이미 상승인 30m 단기 수트로 내려와 닿고 지킴(10-09~)
+
+
+def _st30_kind(e) -> str | None:
+    v = e.detail.get("st30")
+    if v in ("돌파", "터치"):
+        return v
+    return "돌파" if v else None         # 예전 표시(True)는 돌파
+
+
 def _st30_first(e) -> int:
-    """어느 칸이든 30m 단기선 돌파 줄을 맨 위로."""
-    return 0 if e.detail.get("st30") else 1
+    """어느 칸이든 30m 단기선 돌파 줄 → 터치 줄을 맨 위로."""
+    return {"돌파": 0, "터치": 1}.get(_st30_kind(e), 2)
 
 
 def _with_st30(e, line: str) -> str:
-    """줄 맨 앞 태그 자리에 30m🔓단기선돌파를 끼운다. 🆕 사건이 이미 그 말이면 안 붙인다."""
-    if not e.detail.get("st30") or "30m단기선돌파" in (e.detail.get("triggers") or ()):
+    """줄 맨 앞 태그 자리에 30m 표시를 끼운다. 🆕 사건이 이미 그 말이면 안 붙인다."""
+    kind = _st30_kind(e)
+    if not kind or f"30m단기선{kind}" in (e.detail.get("triggers") or ()):
         return line
+    tag = ST30_TAG if kind == "돌파" else ST30_TOUCH_TAG
     head, sep, rest = line.partition(" · ")
-    return f"{head} · {ST30_TAG}" + (f" · {rest}" if sep else "")
+    return f"{head} · {tag}" + (f" · {rest}" if sep else "")
 
 
 def _fire_first(e) -> int:

@@ -936,3 +936,31 @@ def test_to_30m_keeps_only_complete_bars():
                          "Volume": 1.0}, index=idx)
     h = leader_break.to_30m(df15)
     assert len(h) == 2 and h["Close"].tolist() == [2.5, 4.5] and h["High"].tolist() == [3, 5]
+
+
+def test_30m_fast_pullback_touch_holds_above_rising_line():
+    """10-09 — 30m 단기 수트가 이미 상승인데 내려와 닿고 종가는 지킨 봉 → 터치(•·표시)."""
+    from invest_signal.indicators import supertrend_full
+    closes = np.r_[np.linspace(100, 160, 80), np.linspace(160, 150, 8), np.linspace(150, 158, 6)]
+    h30 = _bars(closes, "30min")
+    st = supertrend_full(h30, P.turn_fast_period, P.turn_fast_mult)
+    line, d = st["line"].to_numpy(), st["dir"].to_numpy()
+    lo, hi, c = h30["Low"].to_numpy(), h30["High"].to_numpy(), h30["Close"].to_numpy()
+    hits = [t for t in range(2, len(h30)) if d[t] > 0 and d[t - 1] > 0
+            and lo[t] <= line[t] <= hi[t] and c[t] > line[t]
+            and not lo[t - 1] <= line[t - 1] <= hi[t - 1]]
+    if not hits:                                        # 꼬리를 늘려 선에 닿게 한다
+        t = 85
+        h30.iloc[t, h30.columns.get_loc("Low")] = line[t] * 0.999
+        h30.iloc[t - 1, h30.columns.get_loc("Low")] = max(line[t - 1] * 1.01, lo[t - 1])
+        hits = [t]
+    t0 = hits[0]
+    part = h30.iloc[:t0 + 1]
+    assert leader_break.st_fast_pullback(part, P, 2) == t0
+    assert leader_break.st_fast_state(part, P, 2) == "터치"
+    now = part.index[-1] + pd.Timedelta(minutes=30)
+    trig = leader_break.entry_triggers(None, None, None, P, now, part)
+    assert (leader_break.ENTRY_30M_TOUCH, now) in trig
+    off = dataclasses.replace(P, entry_30m_touch=False)
+    assert leader_break.ENTRY_30M_TOUCH not in [n for n, _ in
+                                               leader_break.entry_triggers(None, None, None, off, now, part)]

@@ -225,6 +225,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         entry_1h_fast=bool(s.get("entry_1h_fast", False)),
         entry_30m=bool(s.get("entry_30m", True)),
         entry_30m_bars=int(s.get("entry_30m_bars", 2)),
+        entry_30m_touch=bool(s.get("entry_30m_touch", True)),
         entry_4h_bars=int(s.get("entry_4h_bars", 1)),
         rearm_hours=int(s.get("rearm_hours", 24)),
         fire_enabled=bool(s.get("fire_enabled", True)),
@@ -685,8 +686,9 @@ def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | Non
 
 
 def _mark_st30(cfg: dict, items: list, frames15: dict | None, log=print) -> None:
-    """모든 크립토 줄에 '30m 단기선 돌파'(30m 단기 수퍼트렌드 22×3 상승 전환, 최근 bars봉 안 ·
-    지금도 상승)를 detail["st30"]로 단다(10-06~). 30m은 받아 둔 15m를 묶어 만든다 —
+    """모든 크립토 줄에 30m 단기 수퍼트렌드(22×3) 표시를 detail["st30"]로 단다 — '돌파'(하락→상승
+    전환, 최근 bars봉 안 · 지금도 상승, 10-06~) 또는 '터치'(이미 상승인 선으로 내려와 닿고 종가는
+    지킴, 10-09~). 30m은 받아 둔 15m를 묶어 만든다 —
     추가 요청이 없다. 15m 프레임이 없는 종목은 건너뛴다."""
     s = (cfg.get("signal") or {}).get("st30_mark") or {}
     if not s.get("enabled", False) or not frames15:
@@ -699,13 +701,17 @@ def _mark_st30(cfg: dict, items: list, frames15: dict | None, log=print) -> None
         sym = e.symbol
         if sym not in cache:
             df = frames15.get(sym)
-            cache[sym] = (leader_break.st_fast_break(leader_break.to_30m(df), params, bars)
-                          if df is not None else None)
+            kind = (leader_break.st_fast_state(leader_break.to_30m(df), params, bars)
+                    if df is not None else None)
+            if kind == "터치" and not s.get("touch", True):
+                kind = None
+            cache[sym] = kind
         if cache[sym]:
-            e.detail["st30"] = True
+            e.detail["st30"] = cache[sym]       # '돌파' 또는 '터치'
             n += 1
-    log(f"[binance] 30m 단기선 돌파 {n}줄 · {sum(1 for v in cache.values() if v)}종 "
-        f"(30m 단기 22×3 상승 전환 최근 {bars}봉 안 · 지금도 상승)")
+    kinds = collections.Counter(v for v in cache.values() if v)
+    log(f"[binance] 30m 단기선 {n}줄 · 돌파 {kinds.get('돌파', 0)}종 · 터치 {kinds.get('터치', 0)}종 "
+        f"(30m 단기 22×3, 최근 {bars}봉)")
 
 
 def _mark_fire2(cfg: dict, source: str, items: list, frames15: dict | None,
