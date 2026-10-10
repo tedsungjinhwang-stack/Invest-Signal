@@ -8,6 +8,9 @@
               값은 `{"t": 시각, "best": 순위}`인데, 예전 파일은 시각 문자열
               하나였다. 읽을 때 둘 다 받는다 — 상태 파일은 레포에 커밋돼
               있어서 배포 순간에 옛 모양이 그대로 들어온다.
+  · tracks  — 10일 추적(10-06~): `시그널|종목` → 가장 최근 발생의 봉 시각·가격·표시용
+              detail. 알림을 보냈든(30m만 보기로) 뺐든 **잡힌 순간** 적는다 — 그 뒤
+              10일 안에 30m 단기선 돌파가 붙으면 그때 추적 줄로 보여야 하기 때문이다.
 """
 
 import json
@@ -16,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 RETENTION_DAYS = 30
 LEADER_DAYS = 10         # 상위권에서 밀려난 뒤에도 계속 볼 기간 (config의 watch_days와 같이 둔다)
-                         # 10-06: 5였어서 watch_days 10인데 prune이 5일에 지워 실제 감시가 5일이었다
+TRACK_DAYS = 10          # tracks(급등봉·상승초입·파동 10일 추적, 10-06~) 보존 기간
 
 
 class AlertState:
@@ -24,6 +27,7 @@ class AlertState:
         self.path = path
         self._alerts: dict[str, str] = {}
         self._leaders: dict[str, str] = {}
+        self._tracks: dict[str, dict] = {}
         self._load()
 
     def _load(self) -> None:
@@ -32,9 +36,59 @@ class AlertState:
                 data = json.load(f)
             self._alerts = dict(data.get("alerts", {}))
             self._leaders = dict(data.get("leaders", {}))
+            self._tracks = dict(data.get("tracks", {}))
         except (FileNotFoundError, json.JSONDecodeError, TypeError):
             self._alerts = {}
             self._leaders = {}
+            self._tracks = {}
+
+    @staticmethod
+    def _plain(v):
+        """JSON에 넣을 수 있는 값만 — numpy 숫자는 파이썬 숫자로, 시각은 ISO 문자열로."""
+        if isinstance(v, (bool, str)) or v is None:
+            return v
+        if hasattr(v, "isoformat"):
+            return v.isoformat()
+        if isinstance(v, (list, tuple)):
+            return [AlertState._plain(x) for x in v]
+        if isinstance(v, dict):
+            return {str(k): AlertState._plain(x) for k, x in v.items()}
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return str(v)
+        if hasattr(v, "dtype") and str(getattr(v, "dtype", "")) == "bool":
+            return bool(v)
+        return int(f) if isinstance(v, int) else f
+
+    def track(self, ev) -> None:
+        """잡힌 이벤트를 10일 추적에 적는다 — 종목·시그널당 **가장 최근** 발생 하나."""
+        key = f"{ev.signal}|{ev.symbol}"
+        t = ev.bar_time.isoformat()
+        old = self._tracks.get(key)
+        if old and old.get("t", "") >= t:
+            return
+        self._tracks[key] = {"t": t, "price": float(ev.price),
+                             "detail": self._plain(dict(ev.detail))}
+
+    def tracked(self, signals, days: float = TRACK_DAYS,
+                now: datetime | None = None) -> list[dict]:
+        """최근 days일 안에 잡힌 추적 항목 — [{signal, symbol, t, price, detail}]."""
+        now = now or datetime.now(timezone.utc)
+        cutoff = now - timedelta(days=days)
+        out = []
+        for k, v in self._tracks.items():
+            sig, _, sym = k.partition("|")
+            if sig not in signals:
+                continue
+            try:
+                t = datetime.fromisoformat(v["t"])
+            except (KeyError, ValueError, TypeError):
+                continue
+            if t >= cutoff:
+                out.append({"signal": sig, "symbol": sym, "t": t,
+                            "price": v.get("price"), "detail": v.get("detail") or {}})
+        return out
 
     def touch_leaders(self, symbols, when: datetime | None = None) -> None:
         """이번 스캔 상위권 종목의 등재 시각과 최고 순위를 갱신.
@@ -124,6 +178,8 @@ class AlertState:
         self._alerts = kept
         fresh = self.recent_leaders(now=now)
         self._leaders = {s: v for s, v in self._leaders.items() if s in fresh}
+        tcut = (now - timedelta(days=TRACK_DAYS + 1)).isoformat()
+        self._tracks = {k: v for k, v in self._tracks.items() if str(v.get("t", "")) >= tcut}
 
     def save(self) -> None:
         self.prune()
@@ -132,6 +188,7 @@ class AlertState:
             os.makedirs(d, exist_ok=True)
         tmp = f"{self.path}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"alerts": self._alerts, "leaders": self._leaders},
+            json.dump({"alerts": self._alerts, "leaders": self._leaders,
+                       "tracks": self._tracks},
                       f, ensure_ascii=False, indent=1, sort_keys=True)
         os.replace(tmp, self.path)

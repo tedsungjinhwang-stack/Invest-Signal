@@ -104,9 +104,12 @@ def test_fresh_bar_is_not_also_tracked():
     assert spike_bar.recent(df, "XUSDT") is None
 
 
-def test_older_than_a_day_drops_out():
-    df = _spike(_frame(), -120)                 # 30시간 전 — 창 밖
-    assert spike_bar.recent(df, "XUSDT") is None
+def test_tracked_for_three_days_then_drops_out():
+    """10-06~ 추적 3일(288봉). 62시간 전 급등은 남고 75시간 전은 빠진다."""
+    assert spike_bar.recent(_spike(_frame(n=500), -250), "XUSDT") is not None
+    assert spike_bar.recent(_spike(_frame(n=500), -300), "XUSDT") is None
+    one_day = Params(track_bars=96)
+    assert spike_bar.recent(_spike(_frame(n=500), -120), "XUSDT", one_day) is None
 
 
 def test_latest_spike_wins_when_there_are_several():
@@ -118,3 +121,54 @@ def test_latest_spike_wins_when_there_are_several():
 def test_tracking_can_be_turned_off():
     df = _spike(_frame(), -50)
     assert spike_bar.recent(df, "XUSDT", Params(track_bars=0)) is None
+
+
+def _pump_rise_pullback():
+    """평평 → 급등봉 → 계속 상승(15m 장기 수트 상승) → 눌림이 장기선까지 내려와 닿고 반등."""
+    df = _frame(n=200 + 1 + 120)
+    _spike(df, 200, body=0.30, mult=40.0)
+    c = np.r_[np.linspace(1.30, 1.60, 60), np.linspace(1.60, 1.40, 30), np.linspace(1.40, 1.55, 30)]
+    for k, v in enumerate(c):
+        df.iloc[201 + k, :4] = [v * 0.999, v * 1.004, v * 0.996, v]
+    return df
+
+
+def test_long_touch_is_a_pullback_to_rising_long_line_that_holds():
+    """10-06 정의 — 장기 수트(30×6)가 이미 상승인데 캔들이 내려와 선을 터치, 종가는 선 위."""
+    from invest_signal.indicators import supertrend_full
+    df = _pump_rise_pullback()
+    st = supertrend_full(df, 30, 6.0)
+    line, d = st["line"].to_numpy(), st["dir"].to_numpy()
+    lo, hi, c = df["Low"].to_numpy(), df["High"].to_numpy(), df["Close"].to_numpy()
+    hits = [t for t in range(202, len(df)) if d[t] > 0 and d[t - 1] > 0
+            and lo[t] <= line[t] <= hi[t] and c[t] > line[t]
+            and not lo[t - 1] <= line[t - 1] <= hi[t - 1]]
+    assert hits, "합성 데이터가 선을 안 건드린다"
+    t0 = hits[0]
+    ev = spike_bar.long_touch(df.iloc[:t0 + 1], "XUSDT")
+    assert ev is not None and ev.bar_time == df.index[t0]
+    assert ev.detail["stage"] == "장기선터치" and ev.detail["spike_time"] == df.index[200]
+    assert ev.detail["line"] <= ev.detail["line"] < ev.price and ev.dedup_key.endswith("|장기선터치")
+    # 그 봉이 grace(4봉) 밖으로 밀리면 안 나온다
+    assert spike_bar.long_touch(df.iloc[:t0 + 10], "XUSDT") is None
+    assert spike_bar.long_touch(df.iloc[:t0 + 1], "XUSDT", Params(touch_enabled=False)) is None
+    # 종가가 선 아래로 마감(돌파)하면 터치가 아니다
+    broke = df.iloc[:t0 + 1].copy()
+    broke.iloc[-1, broke.columns.get_loc("Close")] = line[t0] * 0.99
+    broke.iloc[-1, broke.columns.get_loc("Low")] = line[t0] * 0.98
+    got = spike_bar.long_touch(broke, "XUSDT")
+    assert got is None or got.bar_time != df.index[t0]
+
+
+def test_notify_renders_long_touch():
+    from invest_signal import notify
+    from invest_signal.signals import SignalEvent
+    t = pd.Timestamp("2026-10-06T05:00:00Z")
+    ev = SignalEvent(symbol="AUSDT", signal="spike_bar", bar_time=t, price=1.1,
+                     detail={"label": "급등봉", "stage": "장기선터치", "interval": "15m",
+                             "line": 1.08, "line_up": True,
+                             "spike_time": pd.Timestamp("2026-10-05T03:00:00Z"),
+                             "spike_price": 1.3, "body": 0.3, "vol_mult": 40.0, "since": -0.154})
+    line = [ln for ln in notify.format_events([ev], [], {}).splitlines() if ">A<" in ln][0]
+    assert "🧱15m장기선터치 🕒10-06 14:00" in line and "지지선 1.08" in line
+    assert "급등 🕒10-05 12:00 몸통 +30%" in line and "급등 후 -15%" in line

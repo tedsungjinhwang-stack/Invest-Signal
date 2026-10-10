@@ -1189,3 +1189,25 @@ def test_fire_rows_come_first_in_wave_and_onset_sections():
     assert out.index(">WFIRE<") < out.index(">WPLAIN<")
     assert out.index(">OFIRE<") < out.index(">OPLAIN<")
     assert [ln for ln in out.splitlines() if ">OFIRE<" in ln][0].split(" · ")[1] == "🔥"
+
+
+def test_tracks_keep_latest_per_signal_symbol_for_ten_days(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    import numpy as np
+
+    from invest_signal.state import AlertState
+    now = datetime.now(timezone.utc)
+    p = tmp_path / "s.json"
+    st = AlertState(str(p))
+    mk = lambda sym, sig, days, price: SignalEvent(
+        symbol=sym, signal=sig, bar_time=pd.Timestamp(now - timedelta(days=days)), price=price,
+        detail={"label": "급등봉", "body": np.float64(0.1), "fire": np.bool_(True),
+                "spike_time": pd.Timestamp(now)})
+    st.track(mk("AUSDT", "spike_bar", 3, 1.0))
+    st.track(mk("AUSDT", "spike_bar", 5, 0.5))       # 더 오래된 발생은 덮지 않는다
+    st.track(mk("BUSDT", "vwap_onset", 12, 2.0))     # 10일 밖
+    st.save()
+    got = AlertState(str(p)).tracked(("spike_bar", "vwap_onset"), now=now)
+    assert [(g["symbol"], g["price"]) for g in got] == [("AUSDT", 1.0)]
+    assert got[0]["detail"]["body"] == 0.1 and got[0]["detail"]["fire"] is True

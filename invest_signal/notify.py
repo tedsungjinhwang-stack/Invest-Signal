@@ -567,7 +567,15 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tv = _turnover_tag(d)
         if tv:
             tags.append(tv)
-    if e.signal == "spike_bar":
+    if e.signal == "spike_bar" and d.get("stage") == "장기선터치":
+        # 🧱 급등 뒤 상승 중인 15m 장기 수트(30×6)를 캔들이 내려와 터치(종가는 선 위) —
+        # 터치 시각 · 지지선 값 · 급등봉 대비 지금
+        tags.append(f"🧱15m장기선터치 🕒{_kst(e.bar_time)}")
+        tags.append(f"지지선 {_fmt_price(d['line'])}")
+        tags.append(f"급등 🕒{_kst(d['spike_time'])} 몸통 {_pct(d['body'])}")
+        if d.get("since") is not None:
+            tags.append(f"급등 후 {_pct(d['since'])}")
+    elif e.signal == "spike_bar":
         # **봉이 언제 터졌는지를 맨 앞에 적는다.** 스캔이 매시 한 번이라 이
         # 줄은 최대 한 시간 묵은 소식이고, 15분봉이라 네 봉 중 어느 봉인지에
         # 따라 지금 가격과의 거리가 완전히 다르다. 시각이 없으면 읽을 수 없다.
@@ -838,7 +846,12 @@ def format_events(events_crypto: list, events_etf: list,
             tags = list(_band_tags(d))
             if d.get("fire"):
                 tags.insert(0, _fire_tag(d))
-            if d.get("in_bars"):
+            if d.get("tracked"):
+                # 10일 추적 — 언제 떴는지와 그 뒤 얼마인지. 조건이 풀려도 남는다
+                tags.insert(0, f"🕒{_kst(e.bar_time)}")
+                if d.get("since") is not None:
+                    tags.append(f"이후 {_pct(d['since'])}")
+            elif d.get("in_bars"):
                 tags.append(_dwell_tag(d))
             day = _daily_gain(d)
             if day is not None:
@@ -868,6 +881,8 @@ def format_events(events_crypto: list, events_etf: list,
         tags = [f"{_age_days(e.bar_time)}d"]
         if e.signal == "wave_setup" and d.get("fire"):
             tags.insert(0, _fire_tag(d))
+        if d.get("tracked") and d.get("since") is not None:
+            tags.append(f"이후 {_pct(d['since'])}")     # 10일 추적 — 발생가 대비 지금
         wm = _wave_mark(e)
         if wm:
             tags.append(wm)

@@ -25,6 +25,7 @@ $1M 이상): 몸통 8%만 보면 하루 27건인데 ②·③을 얹으면 하루
 
 from dataclasses import dataclass, replace as dataclasses_replace
 
+import numpy as np
 import pandas as pd
 
 from . import SignalEvent
@@ -33,7 +34,8 @@ NAME = "spike_bar"
 LABEL = "급등봉"
 CRYPTO_ONLY = True          # ETF·주식 스캔에서는 돌리지 않는다
 INTERVAL = "15m"
-KLINE_LIMIT = 200           # vol_ma(96) + grace + 여유
+KLINE_LIMIT = 500           # vol_ma(96) + 추적 3일(288) + 여유
+TOUCH = "장기선터치"          # 급등 뒤 상승 중인 15m 장기 수트(30×6)를 내려와 터치 — stage(dedup 키가 갈린다)
 
 
 @dataclass(frozen=True)
@@ -47,8 +49,13 @@ class Params:
     # **이 시그널은 소급이 특히 중요하다** — 봉이 15분짜리라 소급이 없으면
     # 스캔 직전 봉 하나만 보게 되어 네 봉 중 셋을 놓친다.
     grace_bars: int = 4
-    # 발화 뒤 추적 줄로 남길 기간. 96봉 = 하루. 0이면 추적하지 않는다.
-    track_bars: int = 96
+    # 발화 뒤 추적 줄로 남길 기간. 288봉 = 3일(10-06~, 예전 96봉 = 하루). 0이면 추적하지 않는다.
+    track_bars: int = 288
+    # 🧱 15m 장기선 터치(10-06~) — 급등 뒤 추적 기간 안에 15m 장기 수퍼트렌드(30×6)가 이미
+    # 상승(선이 아래 = 지지)인데 캔들이 내려와 선을 터치하고 종가는 선 위로 지킨 봉을 • 로.
+    touch_enabled: bool = True
+    touch_period: int = 30
+    touch_mult: float = 6.0
 
 
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
@@ -114,3 +121,58 @@ def recent(df: pd.DataFrame, symbol: str, params: Params = Params()):
 def still_active(df: pd.DataFrame, event: SignalEvent, params: Params = Params()) -> bool:
     """_detect_all 경로를 타지 않는다 — 추적은 recent()가 따로 만든다."""
     return False
+
+
+def long_touch(df: pd.DataFrame, symbol: str, params: Params = Params(),
+               spike: SignalEvent | None = None) -> SignalEvent | None:
+    """🧱 급등 뒤 **이미 상승인** 15m 장기 수퍼트렌드(30×6)를 캔들이 **내려와 터치**한 봉.
+
+    spike를 주면 그 급등봉(10일 추적 저장분)을 기준으로, 안 주면 프레임 안 추적 기간
+    (track_bars)의 가장 최근 급등봉을 기준으로, 그 뒤 마지막 grace_bars+1봉 안에서
+      ① 장기 수트가 이 봉과 직전 봉 모두 상승(선이 아래 = 지지) — 막 뒤집힌 봉은 아니다
+      ② 저가가 선까지 내려와 닿았지만(저가 ≤ 선) **종가는 선 위**(돌파하지 않고 지켰다)
+      ③ 직전 봉은 선에 닿지 않았다 — 위에서 내려와 닿은 첫 봉(연속 터치는 첫 봉만)
+    인 봉 중 가장 최근 것. 눌림마다 다시 울릴 수 있다(봉이 다르면 dedup 키가 다르다).
+    해당 없으면 None.
+    """
+    from ..indicators import supertrend_full
+
+    if not params.touch_enabled or params.track_bars <= 0:
+        return None
+    n = len(df)
+    if n < max(params.vol_ma, params.touch_period) + 3:
+        return None
+    if spike is None:
+        wide = dataclasses_replace(params, grace_bars=params.track_bars)
+        spikes = detect(df, symbol, wide)
+        if not spikes:
+            return None
+        spike = max(spikes, key=lambda e: e.bar_time)
+    sp = spike
+    # 급등봉이 프레임보다 앞이면(10일 추적) 프레임 처음부터 본다
+    i0 = int(df.index.searchsorted(sp.bar_time, "right")) - 1
+    st = supertrend_full(df, params.touch_period, params.touch_mult)
+    line = st["line"].to_numpy(float)
+    d = st["dir"].to_numpy(float)
+    hi = df["High"].to_numpy(float)
+    lo = df["Low"].to_numpy(float)
+    c = df["Close"].to_numpy(float)
+
+    def touch(t: int) -> bool:
+        return not np.isnan(line[t]) and lo[t] <= line[t] <= hi[t]
+
+    hit = None
+    for t in range(max(i0 + 1, n - 1 - params.grace_bars, 1), n):
+        if (d[t] > 0 and d[t - 1] > 0 and touch(t) and c[t] > line[t]
+                and not touch(t - 1)):
+            hit = t
+    if hit is None:
+        return None
+    close = float(c[hit])
+    return SignalEvent(
+        symbol=symbol, signal=NAME, bar_time=df.index[hit], price=close,
+        detail={"label": LABEL, "stage": TOUCH, "interval": INTERVAL,
+                "line": float(line[hit]), "line_up": True,
+                "spike_time": sp.bar_time, "spike_price": sp.price,
+                "body": sp.detail.get("body"), "vol_mult": sp.detail.get("vol_mult"),
+                "since": close / sp.price - 1 if sp.price else None})
