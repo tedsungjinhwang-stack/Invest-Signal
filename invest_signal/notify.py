@@ -150,7 +150,7 @@ def _slow_break(e) -> bool:
 # ⚡ 줄의 마크(leader_break.wave_mark, 1h·4h 각각) → 파동과 같은 네 마크.
 LEADER_WAVE_TAGS = {"장기선 돌파": SLOW_BREAK_TAG, "장기선 터치": SLOW_TOUCH_TAG,
                     "단기선 돌파": FAST_BREAK_TAG, "단기선 터치": FAST_TOUCH_TAG}
-LEADER_MARK_TFS = ("4h",)           # 줄에 싣는 순서 — 10-06에 1h를 뺐다(30m 단기선 돌파로 대신)
+LEADER_MARK_TFS = ("1h", "4h")      # 줄에 싣는 순서
 # ⚡ 줄 중 4h 480선 위 · 1h 20선 아래 — 칸 맨 위에 모은다(leader_break.third_wave).
 WAVE3_TAG = "3️⃣3파눌림목"
 # 🔥 떡상 조짐 — 파동·상승초입·⚡ 각각의 fire 판정(signals/*.fire·fire_mark). 먼저 볼 줄.
@@ -196,33 +196,6 @@ def fire_only(events, always=ALWAYS_SIGNALS) -> list:
     return [e for e in events if _always_key(e, always) or is_fire(e)]
 
 
-def is_st30(e) -> bool:
-    """30m 단기선 돌파·터치 줄인가 — 표시(st30) 또는 ⚡ 🆕30m단기선돌파/터치 사건."""
-    d = e.detail
-    trig = d.get("triggers") or ()
-    return bool(d.get("st30")) or "30m단기선돌파" in trig or "30m단기선터치" in trig
-
-
-# 30m만 보기에서도 같이 싣는 줄 — 시그널 이름 또는 `시그널:stage`(always_show와 같은 규약).
-# 10-06: 급등 뒤 15m 장기선 터치 · 익절 경고(🚨세력 이탈 · 🔻하락 CHoCH)
-ST30_ALSO = ("spike_bar:장기선터치", "whale_exit", "choch_warn")
-
-
-def st30_only(events, also=ST30_ALSO) -> list:
-    """30m 단기선 돌파 줄만 남긴다(notify.st30_only, 10-06~) — also(급등 뒤 15m 장기선 터치)는 같이."""
-    return [e for e in events if is_st30(e) or _always_key(e, also)]
-
-
-ST30_TITLE = "🔓 <b>30m 단기선 돌파·터치</b>"
-
-
-def st30_only_title(events) -> str:
-    """30m만 보기 머리 — 30m 줄이 있으면 '🔓 30m 단기선 돌파', 경고 칸이 실리면 그 이름도."""
-    parts = [ST30_TITLE] if any(is_st30(e) or e.signal == "spike_bar" for e in events) else []
-    for sig in ("whale_exit", "choch_warn"):
-        if any(e.signal == sig and not is_st30(e) for e in events):
-            parts.append(ALWAYS_TITLES[sig])
-    return " · ".join(parts) or ST30_TITLE
 FIRE_TITLE = "🔥 <b>떡상조짐</b>"
 
 
@@ -383,58 +356,31 @@ LEADER_FAST_MARKS = ("단기선 돌파", "단기선 터치")
 
 
 def _leader_fast_first(e) -> int:
-    """⚡ 줄의 층 — 0: 30m 단기선 돌파 · 1: 🔥 · 2: 3️⃣3파 눌림목 · 3: 4h 단기선 · 4: 나머지.
+    """⚡ 줄의 층 — 0: 🔥 재떡상 조짐 · 1: 3️⃣3파 눌림목 · 2: 1h 단기선 · 3: 4h 단기선 · 4: 나머지.
 
-    **30m 단기선 돌파(10-06~)가 맨 위**, 그다음 🔥(장기 강세 코인의 식은 눌림 바닥),
-    3파 눌림목(4h 480선 위 · 1h 20선 아래), **4h 단기선 터치·돌파(🔓·🔁) 줄** 순이다
+    **🔥(장기 강세 코인의 식은 눌림 바닥)가 맨 위**, 그다음 3파 눌림목(4h 480선 위 ·
+    1h 20선 아래), 그다음 **1h 단기선 터치·돌파(🔓·🔁) 줄**, 그다음 **4h 단기선 줄**이다
     (앞 층에 들면 뒤 층 마크와 무관하게 거기 선다). 신규(•)·추적(↳) 둘 다 같고, 칸을
-    조립할 때 층마다 • → ↳ 순으로 싣는다. 층 안은 🔥🔥 → 🔥 → 거래대금 순이다.
+    조립할 때 층마다 • → ↳ 순으로 싣는다. 층 안은 거래대금 순이다.
 
-    장기선 마크(🧱·💥)는 끌어올리지 않는다 — 요청이 단기선이었다. 1h 마크는 10-06에 뺐다.
+    장기선 마크(🧱·💥)는 끌어올리지 않는다 — 요청이 단기선이었다. 마크는
+    프레임마다 하나(장기선 돌파 > 장기선 터치 > 단기선 돌파 > 단기선 터치)라서,
+    같은 창에서 장기선까지 건드린 프레임은 장기선 마크가 붙는다.
     ⚡ 밖은 전부 0이라 다른 칸의 순서가 안 흔들린다.
     """
     if e.signal != "leader_break":
         return 0
-    if e.detail.get("st30"):
-        return 0
     if e.detail.get("fire"):
-        return 1
+        return 0
     if e.detail.get("wave3"):
-        return 2
+        return 1
     for i, tf in enumerate(LEADER_MARK_TFS):
         if e.detail.get(f"wave_mark_{tf}") in LEADER_FAST_MARKS:
-            return i + 3
-    return len(LEADER_MARK_TFS) + 3
+            return i + 2
+    return len(LEADER_MARK_TFS) + 2
 
 
-LEADER_TIERS = len(LEADER_MARK_TFS) + 3     # 30m · 🔥 · 3파 · 4h — 이 층들은 ↳까지 끌어올린다
-# 30m 단기 수퍼트렌드(22×3) 상승 전환 — 모든 크립토 줄 맨 앞, 칸 맨 위(10-06~, scanner._mark_st30)
-ST30_TAG = "30m🔓단기선돌파"
-
-
-ST30_TOUCH_TAG = "30m🔁단기선터치"     # 이미 상승인 30m 단기 수트로 내려와 닿고 지킴(10-09~)
-
-
-def _st30_kind(e) -> str | None:
-    v = e.detail.get("st30")
-    if v in ("돌파", "터치"):
-        return v
-    return "돌파" if v else None         # 예전 표시(True)는 돌파
-
-
-def _st30_first(e) -> int:
-    """어느 칸이든 30m 단기선 돌파 줄 → 터치 줄을 맨 위로."""
-    return {"돌파": 0, "터치": 1}.get(_st30_kind(e), 2)
-
-
-def _with_st30(e, line: str) -> str:
-    """줄 맨 앞 태그 자리에 30m 표시를 끼운다. 🆕 사건이 이미 그 말이면 안 붙인다."""
-    kind = _st30_kind(e)
-    if not kind or f"30m단기선{kind}" in (e.detail.get("triggers") or ()):
-        return line
-    tag = ST30_TAG if kind == "돌파" else ST30_TOUCH_TAG
-    head, sep, rest = line.partition(" · ")
-    return f"{head} · {tag}" + (f" · {rest}" if sep else "")
+LEADER_TIERS = len(LEADER_MARK_TFS) + 2     # 🔥 · 3파 · 1h · 4h — 이 층들은 ↳까지 끌어올린다
 
 
 def _fire_first(e) -> int:
@@ -475,17 +421,17 @@ def _quiet_first(e):
 
 
 def _new_order(e):
-    """신규 줄 — 30m 단기선 돌파 먼저, 그다음 변형·🍃로 묶고, ⚡는 단기선 마크 먼저·
-    거래대금 순, 나머지는 24h 수익률 순."""
-    return (_st30_first(e), _variant(e), _fire_first(e), *_abc_first(e), *_spike_desc(e), _leader_fast_first(e),
+    """신규 줄 — 변형·🍃로 묶고, ⚡는 단기선 마크 먼저·거래대금 순,
+    나머지는 24h 수익률 순."""
+    return (_variant(e), _fire_first(e), *_abc_first(e), *_spike_desc(e), _leader_fast_first(e),
             *_turnover_desc(e), _quiet_first(e), *_by_gain_desc(e), e.symbol)
 
 
 def _hold_order(e):
     """추적 줄 — 신규 줄과 같은 축(⚡는 단기선 마크 먼저·거래대금 순),
     동률이면 최신 발생 순."""
-    return (_st30_first(e), _variant(e), _fire_first(e), *_abc_first(e), *_spike_desc(e),
-            _leader_fast_first(e), *_turnover_desc(e), _quiet_first(e), *_by_gain_desc(e),
+    return (_variant(e), _fire_first(e), *_abc_first(e), *_spike_desc(e), _leader_fast_first(e),
+            *_turnover_desc(e), _quiet_first(e), *_by_gain_desc(e),
             -e.bar_time.timestamp())
 
 
@@ -621,15 +567,7 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tv = _turnover_tag(d)
         if tv:
             tags.append(tv)
-    if e.signal == "spike_bar" and d.get("stage") == "장기선터치":
-        # 🧱 급등 뒤 상승 중인 15m 장기 수트(30×6)를 캔들이 내려와 터치(종가는 선 위) —
-        # 터치 시각 · 지지선 값 · 급등봉 대비 지금
-        tags.append(f"🧱15m장기선터치 🕒{_kst(e.bar_time)}")
-        tags.append(f"지지선 {_fmt_price(d['line'])}")
-        tags.append(f"급등 🕒{_kst(d['spike_time'])} 몸통 {_pct(d['body'])}")
-        if d.get("since") is not None:
-            tags.append(f"급등 후 {_pct(d['since'])}")
-    elif e.signal == "spike_bar":
+    if e.signal == "spike_bar":
         # **봉이 언제 터졌는지를 맨 앞에 적는다.** 스캔이 매시 한 번이라 이
         # 줄은 최대 한 시간 묵은 소식이고, 15분봉이라 네 봉 중 어느 봉인지에
         # 따라 지금 가격과의 거리가 완전히 다르다. 시각이 없으면 읽을 수 없다.
@@ -900,12 +838,7 @@ def format_events(events_crypto: list, events_etf: list,
             tags = list(_band_tags(d))
             if d.get("fire"):
                 tags.insert(0, _fire_tag(d))
-            if d.get("tracked"):
-                # 10일 추적(10-06~) — 언제 떴는지와 그 뒤 얼마인지. 조건이 풀려도 남는다
-                tags.insert(0, f"🕒{_kst(e.bar_time)}")
-                if d.get("since") is not None:
-                    tags.append(f"이후 {_pct(d['since'])}")
-            elif d.get("in_bars"):
+            if d.get("in_bars"):
                 tags.append(_dwell_tag(d))
             day = _daily_gain(d)
             if day is not None:
@@ -935,8 +868,6 @@ def format_events(events_crypto: list, events_etf: list,
         tags = [f"{_age_days(e.bar_time)}d"]
         if e.signal == "wave_setup" and d.get("fire"):
             tags.insert(0, _fire_tag(d))
-        if d.get("tracked") and d.get("since") is not None:
-            tags.append(f"이후 {_pct(d['since'])}")     # 10일 추적 — 발생가 대비 지금
         wm = _wave_mark(e)
         if wm:
             tags.append(wm)
@@ -1011,7 +942,7 @@ def format_events(events_crypto: list, events_etf: list,
             def new_line(e):
                 name = etf_names.get(e.symbol, "") if kind != "crypto" else ""
                 market = "KR" if (kind != "crypto" and e.symbol[:1].isdigit()) else "US"
-                return _with_st30(e, _event_line(e, chart_url(e.symbol, kind, market), name, kind))
+                return _event_line(e, chart_url(e.symbol, kind, market), name, kind)
 
             # ⚡ — 🔥·3파 눌림목·단기선 터치·돌파 줄은 **추적(↳) 줄까지 칸 맨
             # 위로** 올린다. 신규 뒤에 추적을 붙이는 순서 그대로면 추적 줄이
@@ -1021,7 +952,7 @@ def format_events(events_crypto: list, events_etf: list,
             lifted = set()
             for tier in range(LEADER_TIERS):
                 for sel, render in ((new_sel, new_line),
-                                    (hold_sel, lambda e: _with_st30(e, hold_line(e, kind)))):
+                                    (hold_sel, lambda e: hold_line(e, kind))):
                     for e in sel:
                         if (e.signal == "leader_break"
                                 and _leader_fast_first(e) == tier):
@@ -1042,7 +973,7 @@ def format_events(events_crypto: list, events_etf: list,
                 if stage is not None and stage != variant:
                     lines.append(WAVE_HEADERS.get(stage, f"  {stage}"))
                     variant = stage
-                lines.append(_with_st30(e, hold_line(e, kind)))
+                lines.append(hold_line(e, kind))
 
     lines.extend(_community_lines(community or {}))
     return "\n".join(lines)

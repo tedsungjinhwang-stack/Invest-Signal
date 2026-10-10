@@ -96,7 +96,7 @@ def hidden_rows(events: list) -> list[dict]:
         d = e.detail or {}
         r = {"symbol": e.symbol, "signal": e.signal,
              "bar_time": e.bar_time.isoformat(), "price": float(e.price)}
-        for k in ("label", "stage", "triggers", "fire", "fire2", "st30", "warn", "rank"):
+        for k in ("label", "stage", "triggers", "fire", "fire2", "warn", "rank"):
             v = d.get(k)
             if v not in (None, False, [], ()):
                 r[k] = list(v) if isinstance(v, tuple) else v

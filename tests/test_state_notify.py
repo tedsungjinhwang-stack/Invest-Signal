@@ -169,10 +169,9 @@ def test_leaders_persist_and_expire_after_watch_window(tmp_path):
 
     reloaded = AlertState(str(p))          # 파일에서 다시 읽어도 남아 있어야 한다
     recent = reloaded.recent_leaders(days=7, now=now)
-    assert set(recent) == {"AUSDT", "BUSDT"}    # 9일 전 등재분은 7일 창 밖
+    assert set(recent) == {"AUSDT", "BUSDT"}    # 9일 전 등재분은 창 밖
     assert recent["AUSDT"] == now - timedelta(days=1)
-    # 10-06: prune 기준이 5일이라 watch_days 10이 실제론 5일이었다 — 10일로 맞췄다
-    assert "MIDUSDT" in reloaded.recent_leaders(days=10, now=now)
+    assert "MIDUSDT" in reloaded.recent_leaders(days=10, now=now)    # 10-06: 5일 → 10일
     # save()의 prune이 창 밖 항목을 파일에서도 지운다
     assert "OLDUSDT" not in json.loads(p.read_text(encoding="utf-8"))["leaders"]
 
@@ -668,38 +667,17 @@ def test_momentum_rows_show_line_marks_instead_of_resist():
     assert "4h🔁단기선터치" in hold
 
 
-def test_momentum_rows_show_only_4h_marks_now():
-    """10-06 — ⚡ 줄의 1h 마크는 뺐다(30m 단기선 돌파로 대신). 4h 마크만 싣는다."""
+def test_momentum_rows_show_1h_and_4h_marks_together():
+    """1h·4h 마크를 둘 다 싣고 프레임을 앞에 붙인다 — 1h 먼저."""
     e = _leader("BOTHUSDT")
     e.detail["wave_mark_1h"] = "단기선 돌파"
     e.detail["wave_mark_4h"] = "장기선 터치"
-    out = format_events([e], [], {})
-    assert "4h🧱장기선터치" in out and "1h🔓" not in out
-
-
-def test_st30_rows_go_first_in_every_section_with_tag():
-    """30m 단기선 돌파 줄 — 어느 칸이든 맨 위, 줄 맨 앞에 30m🔓단기선돌파."""
-    a = _lb("AUSDT", 9e8, 0.1, rank=1, fire=True)
-    b = _lb("BUSDT", 1e6, 0.1, rank=2, st30=True)
-    h = _lb("HUSDT", 5e9, 0.05, watch_days=1, above_ma=True, st30=True)
-    w1 = SignalEvent(symbol="W1USDT", signal="wave_setup",
-                     bar_time=pd.Timestamp("2026-10-06T00:00:00Z"), price=1.0,
-                     detail={"label": "파동", "stage": "ABC", "touched": "단기선", "kind": "돌파"})
-    w2 = SignalEvent(symbol="W2USDT", signal="wave_setup",
-                     bar_time=pd.Timestamp("2026-10-06T00:00:00Z"), price=1.0,
-                     detail={"label": "파동", "stage": "장기선돌파", "st30": True})
-    out = format_events([a, b, w1, w2], [], {}, ongoing_crypto=[h])
-    order = [">W2<", ">W1<", ">B<", "↳ H", ">A<"]
-    pos = [out.index(k) for k in order]
-    assert pos == sorted(pos), out
-    b_line = [ln for ln in out.splitlines() if ">B<" in ln][0]
-    assert b_line.split(" · ")[1] == "30m🔓단기선돌파"
-    assert "30m🔓단기선돌파" in [ln for ln in out.splitlines() if ln.startswith("↳ H")][0]
-    assert "30m🔓" not in [ln for ln in out.splitlines() if ">A<" in ln][0]
-    # 🆕 사건이 이미 30m단기선돌파면 표시를 또 붙이지 않는다
-    c = _lb("CUSDT", 1e6, 0.1, rank=3, st30=True, triggers=["30m단기선돌파"])
-    c_line = [ln for ln in format_events([c], [], {}).splitlines() if ">C<" in ln][0]
-    assert c_line.count("30m") == 1
+    h = _leader("HOLDUSDT", hold=True)
+    h.detail["wave_mark_1h"] = "단기선 터치"
+    out = format_events([e], [], {}, ongoing_crypto=[h])
+    assert "1h🔓단기선돌파 · 4h🧱장기선터치" in out
+    hold = [ln for ln in out.splitlines() if ln.startswith("↳")][0]
+    assert "1h🔁단기선터치" in hold and "4h" not in hold.split("·")[1]
 
 
 def test_4h_mark_and_turn_up_can_share_a_row():
@@ -1085,37 +1063,38 @@ def test_leader_lines_sort_by_turnover_not_gain():
 
 
 def test_leader_fast_marks_come_first():
-    """⚡ — 30m 단기선 돌파 → 🔥 → 3파 → 4h 단기선 → 나머지. 층마다 • → ↳, 층 안은
-    거래대금 순. 장기선 마크만 있는 줄·1h 마크(10-06에 뺌)는 끌어올리지 않는다."""
-    w3 = {"d1h": -0.02, "d4h": 0.4}
-    new = [_lb("BIGUSDT", 9e8, 0.1, rank=1, wave_mark_1h="단기선 돌파"),
-           _lb("SLOWUSDT", 5e8, 0.1, rank=2, wave_mark_4h="장기선 터치"),
+    """⚡ — 1h 단기선 줄 → 4h 단기선 줄 → 나머지. 층마다 • → ↳, 층 안은
+    거래대금 순. 장기선 마크만 있는 줄은 끌어올리지 않는다."""
+    new = [_lb("BIGUSDT", 9e8, 0.1, rank=1),
+           _lb("SLOWUSDT", 5e8, 0.1, rank=2, wave_mark_1h="장기선 돌파",
+               wave_mark_4h="장기선 터치"),
            _lb("F4HUSDT", 7e8, 0.1, rank=3, wave_mark_4h="단기선 터치"),
-           _lb("W3USDT", 2e6, 0.1, rank=4, wave3=w3),
-           _lb("FIREUSDT", 1e6, 0.1, rank=5, fire=True),
-           _lb("S30USDT", 5e5, 0.1, rank=6, st30=True)]
+           _lb("F1LOUSDT", 3e6, 0.1, rank=4, wave_mark_1h="단기선 터치"),
+           _lb("F1HIUSDT", 8e6, 0.1, rank=5, wave_mark_1h="단기선 돌파",
+               wave_mark_4h="단기선 돌파")]
     hold = [_lb("HBIGUSDT", 2e9, 0.05, watch_days=2, above_ma=True),
             _lb("HF4HUSDT", 5e9, 0.05, watch_days=1, above_ma=True,
                 wave_mark_4h="단기선 돌파"),
-            _lb("HS30USDT", 1e6, 0.05, watch_days=1, above_ma=True, st30=True)]
+            _lb("HF1HUSDT", 1e6, 0.05, watch_days=1, above_ma=True,
+                wave_mark_1h="단기선 터치")]
     out = format_events(new, [], {}, ongoing_crypto=hold)
-    order = [">S30<", "↳ HS30", ">FIRE<", ">W3<", ">F4H<", "↳ HF4H", ">BIG<", ">SLOW<",
+    order = [">F1HI<", ">F1LO<", "↳ HF1H", ">F4H<", "↳ HF4H", ">BIG<", ">SLOW<",
              "↳ HBIG"]
     pos = [out.index(k) for k in order]
     assert pos == sorted(pos), out
 
 
 def test_third_wave_rows_come_first_with_tag():
-    """3️⃣3파 눌림목 줄이 4h 단기선 줄보다 위, 층마다 • → ↳."""
+    """3️⃣3파 눌림목 줄이 ⚡ 칸 맨 위 — 1h 단기선 줄보다도 위, 층마다 • → ↳."""
     w3 = {"d1h": -0.02, "d4h": 0.4}
     new = [_lb("BIGUSDT", 9e8, 0.1, rank=1),
-           _lb("F4HUSDT", 8e8, 0.1, rank=2, wave_mark_4h="단기선 돌파"),
+           _lb("F1HUSDT", 8e8, 0.1, rank=2, wave_mark_1h="단기선 돌파"),
            _lb("W3USDT", 2e6, 0.1, rank=3, wave3=w3)]
-    hold = [_lb("HF4HUSDT", 5e9, 0.05, watch_days=1, above_ma=True,
-                wave_mark_4h="단기선 터치"),
+    hold = [_lb("HF1HUSDT", 5e9, 0.05, watch_days=1, above_ma=True,
+                wave_mark_1h="단기선 터치"),
             _lb("HW3USDT", 1e6, 0.05, watch_days=2, above_ma=False, wave3=w3)]
     out = format_events(new, [], {}, ongoing_crypto=hold)
-    order = [">W3<", "↳ HW3", ">F4H<", "↳ HF4H", ">BIG<"]
+    order = [">W3<", "↳ HW3", ">F1H<", "↳ HF1H", ">BIG<"]
     pos = [out.index(k) for k in order]
     assert pos == sorted(pos), out
     w3_new = [ln for ln in out.splitlines() if ">W3<" in ln][0]
@@ -1210,37 +1189,3 @@ def test_fire_rows_come_first_in_wave_and_onset_sections():
     assert out.index(">WFIRE<") < out.index(">WPLAIN<")
     assert out.index(">OFIRE<") < out.index(">OPLAIN<")
     assert [ln for ln in out.splitlines() if ">OFIRE<" in ln][0].split(" · ")[1] == "🔥"
-
-
-def test_tracks_keep_latest_per_signal_symbol_for_ten_days(tmp_path):
-    from datetime import datetime, timedelta, timezone
-
-    import numpy as np
-
-    from invest_signal.state import AlertState
-    now = datetime.now(timezone.utc)
-    p = tmp_path / "s.json"
-    st = AlertState(str(p))
-    mk = lambda sym, sig, days, price: SignalEvent(
-        symbol=sym, signal=sig, bar_time=pd.Timestamp(now - timedelta(days=days)), price=price,
-        detail={"label": "급등봉", "body": np.float64(0.1), "fire": np.bool_(True),
-                "spike_time": pd.Timestamp(now)})
-    st.track(mk("AUSDT", "spike_bar", 3, 1.0))
-    st.track(mk("AUSDT", "spike_bar", 5, 0.5))       # 더 오래된 발생은 덮지 않는다
-    st.track(mk("BUSDT", "vwap_onset", 12, 2.0))     # 10일 밖
-    st.save()
-    got = AlertState(str(p)).tracked(("spike_bar", "vwap_onset"), now=now)
-    assert [(g["symbol"], g["price"]) for g in got] == [("AUSDT", 1.0)]
-    assert got[0]["detail"]["body"] == 0.1 and got[0]["detail"]["fire"] is True
-
-
-def test_st30_touch_rows_follow_break_rows_with_own_tag():
-    brk = _lb("BUSDT", 1e6, 0.1, rank=2, st30="돌파")
-    tch = _lb("TUSDT", 9e8, 0.1, rank=1, st30="터치")
-    plain = _lb("PUSDT", 9e9, 0.1, rank=3)
-    out = format_events([plain, tch, brk], [], {})
-    order = [">B<", ">T<", ">P<"]
-    pos = [out.index(k) for k in order]
-    assert pos == sorted(pos), out
-    t_line = [ln for ln in out.splitlines() if ">T<" in ln][0]
-    assert t_line.split(" · ")[1] == "30m🔁단기선터치"

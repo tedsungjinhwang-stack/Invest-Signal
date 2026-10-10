@@ -116,11 +116,6 @@ class Params:
     # "15m": 예전 동작 — 15m 종가가 ma선을 하향 이탈한 첫 봉(detect()).
     entry_mode: str = "wave"
     entry_1h_bars: int = 2          # 마감된 1h봉 중 최근 몇 개까지 볼지 (스캔 한 번 놓쳐도 잡게)
-    # 10-06: 1h 단기선 터치·돌파 • 를 끄고 30m 단기선 돌파 • 로 바꿨다(요청). 3파진입은 1h 그대로.
-    entry_1h_fast: bool = False     # 1h단기선터치/돌파 • (예전 동작)
-    entry_30m: bool = True          # 30m단기선돌파 • — 마감된 30m봉에서 단기(22×3)가 상승 전환
-    entry_30m_bars: int = 2         # 마감된 30m봉 중 최근 몇 개 (2 = 1시간 = 스캔 간격)
-    entry_30m_touch: bool = True    # 30m단기선터치 • (10-09~) — 상승 수트로 내려와 닿고 종가는 지킴
     entry_4h_bars: int = 1          # 마감된 4h봉 중 최근 몇 개 (4h봉 하나를 매시 스캔 넷이 본다)
     rearm_hours: int = 24           # 같은 종목은 이 시간 안에 • 로 다시 안 알린다
     # 🔥 재떡상 조짐 — 장기 강세 코인(4h MA480 +40% 위)이 단기 과열이 식고(4h MA120
@@ -452,8 +447,6 @@ def third_wave(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
 
 
 ENTRY_W3 = "3파진입"
-ENTRY_30M = "30m단기선돌파"
-ENTRY_30M_TOUCH = "30m단기선터치"
 ENTRY_FIRE = "🔥진입"
 
 
@@ -496,72 +489,6 @@ def _closed(df: pd.DataFrame | None, hours: int, now: pd.Timestamp):
     return df[df.index + pd.Timedelta(hours=hours) <= now]
 
 
-def to_30m(df15: pd.DataFrame | None) -> pd.DataFrame | None:
-    """15m봉 → 30m봉. 15m 둘이 다 찬 봉만 남긴다(진행 중인 30m은 버린다).
-
-    스캔이 받아 둔 15m를 묶어 쓰므로 30m을 따로 받지 않는다.
-    """
-    if df15 is None or not len(df15):
-        return df15
-    g = df15.resample("30min")
-    out = g.agg({"Open": "first", "High": "max", "Low": "min", "Close": "last",
-                 "Volume": "sum"})
-    return out[g["Close"].count() == 2].dropna()
-
-
-def st_fast_break(df: pd.DataFrame | None, params: Params = Params(),
-                  bars: int = 12) -> bool | None:
-    """단기 수퍼트렌드(22×3)가 마지막 bars봉 안에서 하락→상승으로 뒤집혔고 **지금도 상승**.
-
-    30m 단기선 돌파 표시(10-06~)에 쓴다 — 모든 크립토 줄에 붙이고 칸 맨 위로 올린다.
-    판단할 봉이 모자라면 None.
-    """
-    if df is None or len(df) < params.turn_fast_period + 2:
-        return None
-    d = supertrend_full(df, params.turn_fast_period, params.turn_fast_mult)["dir"].to_numpy(float)
-    last = len(d) - 1
-    if not d[last] > 0:
-        return False
-    for t in range(max(1, last - max(1, bars) + 1), last + 1):
-        if d[t] > 0 and d[t - 1] < 0:
-            return True
-    return False
-
-
-def st_fast_pullback(df: pd.DataFrame | None, params: Params = Params(),
-                     bars: int = 2) -> int | None:
-    """단기 수퍼트렌드(22×3)가 **이미 상승**(이 봉·직전 봉)인데 캔들이 내려와 선을 터치하고
-    (저가 ≤ 선 ≤ 고가) **종가는 선 위**로 지킨 봉 — 마지막 bars봉 안의 가장 최근 위치, 없으면 None.
-    직전 봉은 선에 안 닿았어야 한다(연속 터치는 첫 봉만). 30m 단기선 터치(10-09~)에 쓴다.
-    """
-    if df is None or len(df) < params.turn_fast_period + 2:
-        return None
-    st = supertrend_full(df, params.turn_fast_period, params.turn_fast_mult)
-    d = st["dir"].to_numpy(float)
-    line = st["line"].to_numpy(float)
-    hi = df["High"].to_numpy(float)
-    lo = df["Low"].to_numpy(float)
-    c = df["Close"].to_numpy(float)
-
-    def touch(t: int) -> bool:
-        return not np.isnan(line[t]) and lo[t] <= line[t] <= hi[t]
-
-    hit = None
-    for t in range(max(2, len(df) - max(1, bars)), len(df)):
-        if d[t] > 0 and d[t - 1] > 0 and touch(t) and c[t] > line[t] and not touch(t - 1):
-            hit = t
-    return hit
-
-
-def st_fast_state(df: pd.DataFrame | None, params: Params = Params(),
-                  bars: int = 2) -> str | None:
-    """30m 표시 — '돌파'(하락→상승 수트, 지금도 상승) 또는 '터치'(상승 수트로 내려와 닿고 지킴).
-    둘 다면 돌파. 해당 없으면 None."""
-    if st_fast_break(df, params, bars):
-        return "돌파"
-    return "터치" if st_fast_pullback(df, params, bars) is not None else None
-
-
 def _fast_events(df: pd.DataFrame, params: Params, bars: int):
     """마지막 bars개 봉에서 단기선(22×3) 사건 — (봉 위치, '돌파'|'터치') 목록.
 
@@ -601,17 +528,13 @@ def w3_candidate(df1h: pd.DataFrame | None, params: Params, now: pd.Timestamp) -
 
 def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
                    df4h_long: pd.DataFrame | None, params: Params,
-                   now: pd.Timestamp,
-                   df30: pd.DataFrame | None = None) -> list[tuple[str, pd.Timestamp]]:
+                   now: pd.Timestamp) -> list[tuple[str, pd.Timestamp]]:
     """• 신규 알림 사건 — **마감된 봉에서 새로 생긴 것만**. (이름, 그 봉의 마감 시각).
 
       3파진입        직전 1h봉은 아니었는데 이번 1h봉에서 '1h 종가 < 1h MA20 이면서
                      4h 종가 > 4h MA480'이 됐다(4h는 그 1h봉 마감 시점까지 마감된
                      4h봉으로 본다)
-      30m단기선돌파  마감된 30m봉에서 단기(22×3)가 상승으로 뒤집혔다(10-06~, entry_30m)
-      30m단기선터치  이미 상승인 30m 단기 수트로 캔들이 내려와 닿고 종가는 지켰다(10-09~)
       1h단기선터치/돌파  마감된 1h봉이 단기선(22×3)을 걸쳤거나 단기가 뒤집혔다
-                     (10-06부터 꺼 둠 — entry_1h_fast)
       4h단기선터치/돌파  마감된 4h봉에서 같은 사건
       🔥진입          마감된 4h봉에서 🔥 조건(fire_mark)이 새로 섰다(직전 봉은 아님)
 
@@ -621,22 +544,10 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
     """
     out: list[tuple[str, pd.Timestamp]] = []
     hour, four = pd.Timedelta(hours=1), pd.Timedelta(hours=4)
-    if params.entry_30m:
-        half = pd.Timedelta(minutes=30)
-        h30 = _closed(df30, 0.5, now)
-        if h30 is not None and len(h30) > 2:
-            for t, kind in _fast_events(h30, params, params.entry_30m_bars):
-                if kind == "돌파":
-                    out.append((ENTRY_30M, h30.index[t] + half))
-            if params.entry_30m_touch:
-                t = st_fast_pullback(h30, params, params.entry_30m_bars)
-                if t is not None:
-                    out.append((ENTRY_30M_TOUCH, h30.index[t] + half))
     h1 = _closed(df1h, 1, now)
     if h1 is not None and len(h1) > 2:
-        if params.entry_1h_fast:
-            for t, kind in _fast_events(h1, params, params.entry_1h_bars):
-                out.append((f"1h단기선{kind}", h1.index[t] + hour))
+        for t, kind in _fast_events(h1, params, params.entry_1h_bars):
+            out.append((f"1h단기선{kind}", h1.index[t] + hour))
         k1, k4 = params.wave3_ma_1h, params.wave3_ma_4h
         l4 = _closed(df4h_long, 4, now)
         if (params.wave3_enabled and l4 is not None and len(l4) >= k4
@@ -664,8 +575,7 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
     return out
 
 
-ENTRY_ORDER = (ENTRY_30M, ENTRY_30M_TOUCH, ENTRY_FIRE, ENTRY_W3, "1h단기선돌파", "1h단기선터치",
-               "4h단기선돌파", "4h단기선터치")
+ENTRY_ORDER = (ENTRY_FIRE, ENTRY_W3, "1h단기선돌파", "1h단기선터치", "4h단기선돌파", "4h단기선터치")
 
 
 def entry_event(symbol: str, triggers: list, df15: pd.DataFrame,
