@@ -5,7 +5,25 @@ import pandas as pd
 
 from invest_signal import notify
 from invest_signal.signals import vwap_onset as vo
-from invest_signal.signals.vwap_onset import Params, detect, tracking
+from invest_signal.signals.vwap_onset import Params as _Params
+from invest_signal.signals.vwap_onset import detect as _detect
+from invest_signal.signals.vwap_onset import tracking as _tracking
+
+# 아래 픽스처는 400 → 100 하락 끝이라 15m MA960(≈250)이 월 상단선(≈140)보다 위다 — 10-10에
+# 넣은 '상단선 > MA960' 조건을 끄고 나머지 규칙을 본다. 그 조건은 따로 테스트한다.
+
+
+def Params(**kw):
+    kw.setdefault("upper_above_ma", None)
+    return _Params(**kw)
+
+
+def detect(df15, df4h, symbol, params=None):
+    return _detect(df15, df4h, symbol, params or Params())
+
+
+def tracking(df15, df4h, symbol, params=None):
+    return _tracking(df15, df4h, symbol, params or Params())
 
 
 def _f15(closes, start="2026-09-05"):
@@ -225,7 +243,7 @@ def test_scanner_drops_lines_whose_ticker_24h_is_negative():
     df4h = _f4h()
     up = _upper(_bear(), df4h)
     df15 = _tail(_bear(), up)
-    cfg = {"signal": {"vwap_onset": {"enabled": True}}}
+    cfg = {"signal": {"vwap_onset": {"enabled": True, "upper_above_ma": None}}}
     rising = {"XUSDT": {"quote_volume": 5e6, "change_pct": 0.03}}
     falling = {"XUSDT": {"quote_volume": 5e6, "change_pct": -0.004}}
     logs = []
@@ -287,3 +305,16 @@ def test_detail_carries_fire_flag():
     up = _upper(_bear(), df4h)
     got = detect(_tail(_bear(), up), df4h, "XUSDT")
     assert len(got) == 1 and "fire" in got[0].detail
+
+
+def test_upper_band_must_be_above_ma960():
+    """10-10 — 월 VWAP 상단선이 15m MA960 위여야 한다. 하락 끝(MA960 ≈ 250 > 상단 140)은 안 뜬다."""
+    df4h = _f4h()
+    up = _upper(_bear(), df4h)
+    df15 = _tail(_bear(), up)
+    assert _stack(df15, (960,))[0] > up
+    assert len(detect(df15, df4h, "XUSDT")) == 1                         # 조건 끄면 뜬다
+    assert _detect(df15, df4h, "XUSDT") == []                            # 기본(960) — 안 뜬다
+    # 정배열(20 → 60, MA960 ≈ 40)은 상단선(≈140)이 MA960 위라 그대로 뜬다
+    bull = _tail(_bull(), _upper(_bull(), df4h) * 1.01)
+    assert len(_detect(bull, df4h, "XUSDT")) == 1

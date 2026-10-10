@@ -59,6 +59,9 @@ class Params:
     near_pct: float = 0.02              # ② 종가가 상단밴드의 ±2% 안
     band_gap: bool = True               # ② 월초 가드 — ±구간이 VWAP을 품으면 안 본다
     min_ret_24h: float | None = 0.0     # ③ 24h 상승률 하한 — None이면 안 본다
+    # ② 추가(10-10 요청) — 월 VWAP 상단선이 15m MA(upper_above_ma) **위**여야 한다. None이면 안 본다.
+    # MA960은 1,000봉 중 마지막 41봉에서만 서므로, 못 재는 앞쪽 봉은 통과로 둔다(재알림 판정용).
+    upper_above_ma: int | None = 960
     rearm_bars: int = 96                # 나갔다 이만큼 안에 다시 들어오면 새로 안 알린다
     grace_bars: int = 4                 # 15m × 4 = 1시간(스캔 주기)
     min_turnover_usd: float = 1_000_000
@@ -120,6 +123,9 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
     rest = dist.abs() <= params.near_pct
     if params.band_gap:
         rest &= band.upper * (1 - params.near_pct) > band.vwap
+    if params.upper_above_ma:
+        ma = c.rolling(params.upper_above_ma).mean()
+        rest &= (band.upper > ma) | ma.isna()
     # ③ 24h = 15m 96봉 전 종가 대비. 봉마다 재야 진입 봉을 정할 수 있다
     # (스캔 시점의 티커 값은 스캐너가 한 번 더 거른다).
     d1 = c / c.shift(96) - 1

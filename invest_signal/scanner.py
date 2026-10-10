@@ -813,6 +813,8 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         fire_enabled=bool(s.get("fire_enabled", True)),
         fire_ma1h20_min=float(s.get("fire_ma1h20_min", 0.04)),
         fire_from_low_max=float(s.get("fire_from_low_max", 0.25)),
+        upper_above_ma=(None if s.get("upper_above_ma", 960) is None
+                        else int(s.get("upper_above_ma", 960))),
         min_ret_24h=(None if s.get("min_ret_24h", 0.0) is None
                      else float(s.get("min_ret_24h", 0.0))),
         rearm_bars=int(s.get("rearm_bars", 96)),
