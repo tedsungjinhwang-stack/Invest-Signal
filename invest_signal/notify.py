@@ -150,7 +150,7 @@ def _slow_break(e) -> bool:
 # ⚡ 줄의 마크(leader_break.wave_mark, 1h·4h 각각) → 파동과 같은 네 마크.
 LEADER_WAVE_TAGS = {"장기선 돌파": SLOW_BREAK_TAG, "장기선 터치": SLOW_TOUCH_TAG,
                     "단기선 돌파": FAST_BREAK_TAG, "단기선 터치": FAST_TOUCH_TAG}
-LEADER_MARK_TFS = ("1h", "4h")      # 줄에 싣는 순서
+LEADER_MARK_TFS = ("30m", "1h", "4h")   # 줄에 싣는 순서 (30m은 10-10~)
 # ⚡ 줄 중 4h 480선 위 · 1h 20선 아래 — 칸 맨 위에 모은다(leader_break.third_wave).
 WAVE3_TAG = "3️⃣3파눌림목"
 # 🔥 떡상 조짐 — 파동·상승초입·⚡ 각각의 fire 판정(signals/*.fire·fire_mark). 먼저 볼 줄.
@@ -380,7 +380,7 @@ def _leader_fast_first(e) -> int:
     return len(LEADER_MARK_TFS) + 2
 
 
-LEADER_TIERS = len(LEADER_MARK_TFS) + 2     # 🔥 · 3파 · 1h · 4h — 이 층들은 ↳까지 끌어올린다
+LEADER_TIERS = len(LEADER_MARK_TFS) + 2     # 🔥 · 3파 · 30m · 1h · 4h — 이 층들은 ↳까지 끌어올린다
 
 
 def _fire_first(e) -> int:

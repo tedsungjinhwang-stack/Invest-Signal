@@ -215,6 +215,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         turn15m_bars=int(s.get("turn15m_bars", 8)),
         turn15m_require_bearish=bool(s.get("turn15m_require_bearish", False)),
         wave_mark_enabled=bool(s.get("wave_mark_enabled", True)),
+        wave_mark_30m_bars=int(s.get("wave_mark_30m_bars", 48)),
         wave_mark_1h_bars=int(s.get("wave_mark_1h_bars", 24)),
         wave_mark_4h_bars=int(s.get("wave_mark_4h_bars", 6)),
         wave3_enabled=bool(s.get("wave3_enabled", True)),
@@ -445,8 +446,13 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                 detail["turn_up"] = t
             # 🧱🔁🔓💥 단기·장기선 터치·돌파 — 1h·4h 둘 다. 1h는 구조 판정,
             # 4h는 스캔이 받아 둔 프레임이라 추가 요청이 없다.
-            for tf, frame, bars in (("1h", hour_frame(sym), params.wave_mark_1h_bars),
+            # 30m(10-10~)는 받아 둔 15m를 묶어 만든다 — 추가 요청이 없다
+            for tf, frame, bars in (("30m", leader_break.to_30m(df) if params.wave_mark_30m_bars > 0
+                                     else None, params.wave_mark_30m_bars),
+                                    ("1h", hour_frame(sym), params.wave_mark_1h_bars),
                                     ("4h", df4, params.wave_mark_4h_bars)):
+                if bars <= 0 or frame is None:
+                    continue
                 w = leader_break.wave_mark(frame, params, bars)
                 if w:
                     detail[f"wave_mark_{tf}"] = w

@@ -1211,3 +1211,16 @@ def test_tracks_keep_latest_per_signal_symbol_for_ten_days(tmp_path):
     got = AlertState(str(p)).tracked(("spike_bar", "vwap_onset"), now=now)
     assert [(g["symbol"], g["price"]) for g in got] == [("AUSDT", 1.0)]
     assert got[0]["detail"]["body"] == 0.1 and got[0]["detail"]["fire"] is True
+
+
+def test_momentum_rows_show_30m_1h_4h_marks():
+    """10-10 — ⚡ 줄에 30m 마크도 1h·4h처럼 싣는다(30m → 1h → 4h 순), 30m 단기선 층은 1h 위."""
+    e = _leader("ALLUSDT")
+    e.detail.update(wave_mark_30m="단기선 돌파", wave_mark_1h="단기선 터치",
+                    wave_mark_4h="장기선 터치")
+    out = format_events([e], [], {})
+    assert "30m🔓단기선돌파 · 1h🔁단기선터치 · 4h🧱장기선터치" in out
+    new = [_lb("H1USDT", 9e8, 0.1, rank=1, wave_mark_1h="단기선 돌파"),
+           _lb("M30USDT", 1e6, 0.1, rank=2, wave_mark_30m="단기선 터치")]
+    out = format_events(new, [], {})
+    assert out.index(">M30<") < out.index(">H1<")

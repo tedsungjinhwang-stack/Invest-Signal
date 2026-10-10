@@ -906,3 +906,12 @@ def test_entry_trigger_fires_when_fire_condition_turns_on():
     assert (leader_break.ENTRY_FIRE, now) in trig
     off = dataclasses_replace(P, fire_trigger=False)
     assert all(n != leader_break.ENTRY_FIRE for n, _ in leader_break.entry_triggers(None, df, None, off, now))
+
+
+def test_to_30m_keeps_only_complete_bars():
+    idx = pd.date_range("2026-10-06 00:00", periods=5, freq="15min", tz="UTC")
+    df15 = pd.DataFrame({"Open": [1, 2, 3, 4, 5.0], "High": [2, 3, 4, 5, 6.0],
+                         "Low": [0, 1, 2, 3, 4.0], "Close": [1.5, 2.5, 3.5, 4.5, 5.5],
+                         "Volume": 1.0}, index=idx)
+    h = leader_break.to_30m(df15)
+    assert len(h) == 2 and h["Close"].tolist() == [2.5, 4.5] and h["High"].tolist() == [3, 5]

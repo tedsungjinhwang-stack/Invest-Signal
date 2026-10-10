@@ -104,6 +104,7 @@ class Params:
     # **1h와 4h 두 프레임에 각각** 건다. 줄에는 `1h🔁단기선터치 · 4h💥장기선돌파`
     # 처럼 프레임을 앞에 붙여 둘 다 싣는다. 창은 둘 다 24시간이다.
     wave_mark_enabled: bool = True
+    wave_mark_30m_bars: int = 48    # 30m 창 (48 × 30m = 24시간, 10-10~). 0이면 안 본다
     wave_mark_1h_bars: int = 24     # 1h 창 (24 × 1h = 24시간)
     wave_mark_4h_bars: int = 6      # 4h 창 (6 × 4h = 24시간)
     # 3️⃣ 3파 눌림목 — 4h 종가가 MA480 위(큰 추세는 위) · 1h 종가가 MA20 아래
@@ -487,6 +488,17 @@ def _closed(df: pd.DataFrame | None, hours: int, now: pd.Timestamp):
     if df is None:
         return None
     return df[df.index + pd.Timedelta(hours=hours) <= now]
+
+
+def to_30m(df15: pd.DataFrame | None) -> pd.DataFrame | None:
+    """15m봉 → 30m봉. 15m 둘이 다 찬 봉만 남긴다(진행 중인 30m은 버린다) — 30m 마크용,
+    받아 둔 15m를 묶으므로 따로 받지 않는다."""
+    if df15 is None or not len(df15):
+        return df15
+    g = df15.resample("30min")
+    out = g.agg({"Open": "first", "High": "max", "Low": "min", "Close": "last",
+                 "Volume": "sum"})
+    return out[g["Close"].count() == 2].dropna()
 
 
 def _fast_events(df: pd.DataFrame, params: Params, bars: int):
