@@ -52,17 +52,17 @@ KLINE_LIMIT = 1000
 
 @dataclass(frozen=True)
 class Params:
-    # ① 역배열 쪽(10-11~ band): 15m MA240 < **종가 < 월 VWAP 상단선**, 그리고 30m 장기 수퍼트렌드
+    # ① 역배열 쪽(10-11~ band): 15m MA240 < **종가 < 월 VWAP 상단선**, 그리고 15m 장기 수퍼트렌드
     #    (30×6)가 상승(상승 전환 뒤). bear_mode="align"이면 예전 240 < 480 < 960 쌓임.
     bear_mode: str = "band"
     bear_lower_ma: int = 240             # 아래 선 — 15m MA240
     bear_upper: object = "band"          # 위 선 — "band"(월 VWAP 상단선, 10-11 최종) 또는 MA 기간
     bear_st_up: bool = True
     bear_st: tuple = (30, 6.0)           # 장기 수퍼트렌드 (ATR 기간, 배수)
-    bear_st_tf: str = "30m"              # 장기 수트를 볼 봉 — 30m(10-11 최종, 15m를 묶는다) 또는 15m
+    bear_st_tf: str = "15m"              # 장기 수트를 볼 봉 — 15m(10-11 최종) 또는 30m(15m를 묶는다)
     # 장기 수트가 **최근 bear_st_flip_bars봉 안에** 하락→상승으로 돌파·전환했어야 한다(10-11). 0이면
     # 지금 상승이기만 하면 된다.
-    bear_st_flip_bars: int = 48          # bear_st_tf 봉 수 — 30m × 48 = 24시간
+    bear_st_flip_bars: int = 96          # bear_st_tf 봉 수 — 15m × 96 = 24시간
     bear_align: tuple = (240, 480, 960)  # ① 15m 역배열 판정선 (bear_mode="align"일 때)
     bull_align: tuple = (120, 240, 480)  # ① 15m 정배열 판정선 — 둘 중 하나면 된다
     band_anchor: str = "M"              # ② 이 앵커드 VWAP의 상단밴드 (M=월)

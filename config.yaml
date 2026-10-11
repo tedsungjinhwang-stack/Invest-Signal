@@ -99,15 +99,15 @@ signal:
     #   ±1%:                  24h 신규 21회
     enabled: true
     # ① 역배열 쪽 (10-11 요청으로 바꿈 — 최종): 종가가 **15m MA240과 월 VWAP 상단선 사이**,
-    #    그리고 **30m 장기 수퍼트렌드(30×6)가 최근 24시간(30m 48봉) 안에 하락→상승 전환**(돌파)했고
-    #    지금도 상승. 30m은 15m를 둘씩 묶는다. bear_mode: align이면 예전 240<480<960 쌓임.
+    #    그리고 **15m 장기 수퍼트렌드(30×6)가 최근 24시간(15m 96봉) 안에 하락→상승 전환**(돌파)했고
+    #    지금도 상승. bear_mode: align이면 예전 240<480<960 쌓임.
     bear_mode: band
     bear_lower_ma: 240
     bear_upper: band        # 위 선 — band(월 VWAP 상단선) 또는 MA 기간(예: 960)
     bear_st_up: true
     bear_st: [30, 6.0]
-    bear_st_tf: 30m
-    bear_st_flip_bars: 48   # 30m × 48 = 24시간 안의 상승 전환
+    bear_st_tf: 15m         # 장기 수트를 볼 봉 (15m · 30m)
+    bear_st_flip_bars: 96   # 15m × 96 = 24시간 안의 상승 전환
     bear_align: [240, 480, 960] # ① 15m 역배열 판정선 (bear_mode: align일 때만)
     bull_align: [120, 240, 480] # ① 15m 정배열 판정선 — 둘 중 하나면 된다
     band_anchor: M              # ② 이 앵커드 VWAP의 상단밴드 (M=월)

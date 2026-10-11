@@ -322,8 +322,9 @@ def test_upper_band_must_be_above_ma960():
     assert len(_detect(bull, df4h, "XUSDT", _Params(bear_mode="align"))) == 1
 
 
-def test_bear_band_close_between_240_and_upper_with_30m_long_st_flip():
-    """10-11 최종 — 역배열 쪽: 15m MA240 < 종가 < 월 VWAP 상단선 + 30m 장기 수트(30×6) 최근 상승 전환."""
+def test_bear_band_close_between_240_and_upper_with_long_st_flip():
+    """10-11 최종 — 역배열 쪽: 15m MA240 < 종가 < 월 VWAP 상단선 + 15m 장기 수트(30×6) 최근 상승 전환
+    (30m로도 볼 수 있다)."""
     from invest_signal.indicators import supertrend_full
     c = np.r_[np.linspace(300.0, 100.0, 900), np.linspace(100.0, 120.0, 200)]
     df15 = _f15(c)
@@ -336,9 +337,17 @@ def test_bear_band_close_between_240_and_upper_with_30m_long_st_flip():
     flips = [i for i in range(1, len(d)) if d[i] > 0 and d[i - 1] < 0]
     assert d[-1] > 0 and flips
     age = len(d) - 1 - flips[-1]
-    ok, known = vo._between(df15, _Params(bear_st_flip_bars=age + 1), upper)
+    P30 = dict(bear_st_tf="30m")
+    ok, known = vo._between(df15, _Params(bear_st_flip_bars=age + 1, **P30), upper)
     assert ok.iloc[-1] and known.iloc[-1]
-    assert not vo._between(df15, _Params(bear_st_flip_bars=max(1, age - 1)), upper)[0].iloc[-1]
+    assert not vo._between(df15, _Params(bear_st_flip_bars=max(1, age - 1), **P30), upper)[0].iloc[-1]
+    # 기본은 15m 장기 수트(10-11 최종)
+    d15 = supertrend_full(df15, 30, 6.0)["dir"].to_numpy()
+    f15 = [i for i in range(1, len(d15)) if d15[i] > 0 and d15[i - 1] < 0]
+    age15 = len(d15) - 1 - f15[-1]
+    assert _Params().bear_st_tf == "15m"
+    assert vo._between(df15, _Params(bear_st_flip_bars=age15 + 1), upper)[0].iloc[-1]
+    assert not vo._between(df15, _Params(bear_st_flip_bars=max(1, age15 - 1)), upper)[0].iloc[-1]
     # 종가가 상단선 위면 사이가 아니다
     assert not vo._between(df15, _Params(bear_st_flip_bars=0),
                            pd.Series(110.0, index=df15.index))[0].iloc[-1]
