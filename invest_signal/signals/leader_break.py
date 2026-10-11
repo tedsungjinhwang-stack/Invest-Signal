@@ -120,6 +120,9 @@ class Params:
     entry_4h_bars: int = 1          # 마감된 4h봉 중 최근 몇 개 (4h봉 하나를 매시 스캔 넷이 본다)
     # 🎯 눌림목타점(10-11~) — 15m MA240 > MA480 > MA960 정배열에서 15m 장기 수퍼트렌드(30×6)가
     # 하락→상승으로 전환한 마감 15m봉. 최근 entry_15m_bars봉(4 = 1시간 = 스캔 간격) 안.
+    entry_w3: bool = True           # 🆕3파진입 •
+    entry_1h_fast: bool = True      # 🆕1h단기선터치/돌파 •
+    entry_4h_fast: bool = True      # 🆕4h단기선터치/돌파 •
     entry_pullback: bool = True
     entry_pullback_align: tuple = (240, 480, 960)
     entry_pullback_st: tuple = (30, 6.0)
@@ -588,11 +591,12 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
             out.append((ENTRY_PULLBACK, h15.index[t] + q))
     h1 = _closed(df1h, 1, now)
     if h1 is not None and len(h1) > 2:
-        for t, kind in _fast_events(h1, params, params.entry_1h_bars):
-            out.append((f"1h단기선{kind}", h1.index[t] + hour))
+        if params.entry_1h_fast:
+            for t, kind in _fast_events(h1, params, params.entry_1h_bars):
+                out.append((f"1h단기선{kind}", h1.index[t] + hour))
         k1, k4 = params.wave3_ma_1h, params.wave3_ma_4h
         l4 = _closed(df4h_long, 4, now)
-        if (params.wave3_enabled and l4 is not None and len(l4) >= k4
+        if (params.entry_w3 and params.wave3_enabled and l4 is not None and len(l4) >= k4
                 and len(h1) > k1 + 1):
             c4 = l4["Close"]
             up4 = pd.Series((c4 > c4.rolling(k4).mean()).to_numpy(),
@@ -607,8 +611,9 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
                     out.append((ENTRY_W3, close_t[t]))
     h4 = _closed(df4h, 4, now)
     if h4 is not None and len(h4) > 2:
-        for t, kind in _fast_events(h4, params, params.entry_4h_bars):
-            out.append((f"4h단기선{kind}", h4.index[t] + four))
+        if params.entry_4h_fast:
+            for t, kind in _fast_events(h4, params, params.entry_4h_bars):
+                out.append((f"4h단기선{kind}", h4.index[t] + four))
         # 🔥 조건이 마감된 4h봉에서 **새로** 섰다 — 직전 봉은 아니었는데 이번 봉에서 참
         if params.fire_trigger:
             ok = fire_series(h4, params)

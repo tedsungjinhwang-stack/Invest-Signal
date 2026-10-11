@@ -798,6 +798,10 @@ signal:
     # (퍼프 전 종목이면 하루 ≈73건이라 ⚡ 감시 종목으로 좁혔다)
     entry_pullback: true
     entry_15m_bars: 4
+    # 10-11: ⚡ • 사건은 🎯눌림목타점만 남기고 나머지는 껐다(요청: "3파진입 이런거 싹 없애자")
+    entry_w3: false         # 🆕3파진입
+    entry_1h_fast: false    # 🆕1h단기선터치/돌파
+    entry_4h_fast: false    # 🆕4h단기선터치/돌파
     entry_4h_bars: 1        # 마감된 4h봉 최근 1개 (4h봉 하나를 매시 스캔 넷이 본다)
     rearm_hours: 24         # 같은 종목은 24시간 안에 • 로 다시 안 알린다(↳ 로만)
     # 🔥 재떡상 조짐(09-30) — 3일 저점 +10% 이내(눌림 바닥) · 4h MA480보다 +40% 이상 위
@@ -813,7 +817,7 @@ signal:
     fire_ma_long_min: 0.40
     fire_ma_mid: 120
     fire_ma_mid_max: 0.20
-    fire_trigger: true
+    fire_trigger: false     # 🆕🔥진입 — 10-11에 껐다(🎯눌림목타점만)
     # ⚠️ 급락 주의 — 지금 24h 상승률 상위 5위 안이거나 4h 💥장기선돌파·🧱장기선터치가 붙은 줄.
     # 실제 ⚡ 알림에서 7일 안에 −15%를 먼저 맞은 비율이 60~68%·39~54%(나머지 19~37%).
     warn_enabled: true
