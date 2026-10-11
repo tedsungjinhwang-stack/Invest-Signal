@@ -69,6 +69,8 @@ class Params:
     band_anchor: str = "M"              # ② 이 앵커드 VWAP의 상단밴드 (M=월)
     band_mult: float = 1.0              # ② 표준편차 배수
     near_pct: float = 0.02              # ② 종가가 상단밴드의 ±2% 안
+    near_enabled: bool = True           # False면 역배열 자리(band)는 ±near_pct를 안 본다 —
+                                        # '240선 < 종가 < 월상단'이 이미 자리다(10-11). 정배열은 그대로 본다.
     band_gap: bool = True               # ② 월초 가드 — ±구간이 VWAP을 품으면 안 본다
     min_ret_24h: float | None = 0.0     # ③ 24h 상승률 하한 — None이면 안 본다
     # ② 추가(10-10 요청) — 월 VWAP 상단선이 15m MA(upper_above_ma) **위**여야 한다. None이면 안 본다.
@@ -191,12 +193,15 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
     else:
         bull = pd.Series(False, index=c.index)
     dist = c / band.upper - 1
-    rest = dist.abs() <= params.near_pct
+    near = dist.abs() <= params.near_pct
+    rest = pd.Series(True, index=c.index)
     if params.band_gap:
         rest &= band.upper * (1 - params.near_pct) > band.vwap
     if params.upper_above_ma:
         ma = c.rolling(params.upper_above_ma).mean()
         rest &= (band.upper > ma) | ma.isna()
+    if params.near_enabled or params.bear_mode != "band":
+        rest &= near                    # ② 상단밴드 근처 — 끄면 정배열만 따로 본다
     # ③ 24h = 15m 96봉 전 종가 대비. 봉마다 재야 진입 봉을 정할 수 있다
     # (스캔 시점의 티커 값은 스캐너가 한 번 더 거른다).
     d1 = c / c.shift(96) - 1
@@ -214,7 +219,7 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
                          "vwap": band.vwap, "dist": dist,
                          "ret_24h": d1, "ret_7d": d7, "rest": rest,
                          "ma1h20": ma1h20, "from_7d_low": f7l,
-                         "ok": (bear | bull) & rest})
+                         "ok": (bear | (bull & near)) & rest})
 
 
 def _detail(row, params: Params) -> dict:

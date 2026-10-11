@@ -906,6 +906,7 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         band_anchor=str(s.get("band_anchor", "M")),
         band_mult=float(s.get("band_mult", 1.0)),
         near_pct=float(s.get("near_pct", 0.02)),
+        near_enabled=bool(s.get("near_enabled", True)),
         band_gap=bool(s.get("band_gap", True)),
         fire_enabled=bool(s.get("fire_enabled", True)),
         fire_ma1h20_min=float(s.get("fire_ma1h20_min", 0.04)),
@@ -968,7 +969,9 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
                + (" 또는 " if params.bull_enabled else " · "))
             + (f"{'>'.join(str(x) for x in params.bull_align)} 정배열 · "
                if params.bull_enabled else "")
-            + f"종가가 {params.band_anchor} 상단 ±{params.near_pct:.0%}"
+            + (f"종가가 {params.band_anchor} 상단 ±{params.near_pct:.0%}"
+               if params.near_enabled or params.bull_enabled
+               else f"{params.band_anchor} 상단 > {params.upper_above_ma}선")
               + (f" · 24h {params.min_ret_24h:+.0%} 이상"
                  if params.min_ret_24h is not None else "") + ")")
     return events, ongoing

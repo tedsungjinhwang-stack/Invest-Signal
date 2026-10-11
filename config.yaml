@@ -119,6 +119,7 @@ signal:
     band_anchor: M              # ② 이 앵커드 VWAP의 상단밴드 (M=월)
     band_mult: 1.0              # ② 표준편차 배수 (사진의 밴드 배수 #1)
     near_pct: 0.02              # ② '근처' 허용폭 — ±2%
+    near_enabled: false         # 10-11 — 역배열 자리는 '240선 < 종가 < 월상단'으로 충분, ±2%는 안 본다
     band_gap: true              # ② 월초 가드 (위 설명)
     upper_above_ma: 960         # ② 월 VWAP 상단선이 15m MA960 위일 때만 (10-10 요청, null이면 끔)
     min_ret_24h: 0.0            # ③ 24h 상승률 하한 (-0.03이면 −3%까지 허용 · null이면 끔)

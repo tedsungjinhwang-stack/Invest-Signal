@@ -355,3 +355,18 @@ def test_bear_band_close_between_240_and_upper_with_long_st_flip():
     # 상단선 대신 MA960(예전 설정)도 그대로 된다
     assert vo._between(df15, _Params(bear_st_flip_bars=0, bear_upper=960))[0].iloc[-1] == bool(
         ma240 < df15.Close.iloc[-1] < df15.Close.rolling(960).mean().iloc[-1])
+
+
+def test_near_disabled_lets_bear_band_rows_far_below_upper(monkeypatch):
+    """10-11 — near_enabled false면 역배열 자리(240 < 종가 < 월상단)는 상단 ±2%를 안 본다."""
+    c = np.r_[np.linspace(300.0, 100.0, 900), np.linspace(100.0, 120.0, 200)]
+    df15 = _f15(c)
+    band = pd.DataFrame({"upper": 150.0, "vwap": 100.0}, index=df15.index)   # 종가 120 = 상단 −20%
+    monkeypatch.setattr(vo, "_band_on_15m", lambda *a: band)
+    yes = pd.Series(True, index=df15.index)
+    monkeypatch.setattr(vo, "_between", lambda *a: (yes, yes))
+    df4h = _f4h()
+    p = _Params(upper_above_ma=None, min_ret_24h=None)
+    assert not vo._state(df15, df4h, p).ok.iloc[-1]
+    assert vo._state(df15, df4h, _Params(upper_above_ma=None, min_ret_24h=None,
+                                         near_enabled=False, bull_enabled=False)).ok.iloc[-1]
