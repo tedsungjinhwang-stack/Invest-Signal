@@ -23,7 +23,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from ..indicators import alignment, atr, pct_over, sma, supertrend_full
+from ..indicators import alignment, atr, pct_over, sma, stacked_any, supertrend_full
 from . import SignalEvent
 
 NAME = "leader_break"
@@ -119,13 +119,14 @@ class Params:
     entry_mode: str = "wave"
     entry_1h_bars: int = 2          # 마감된 1h봉 중 최근 몇 개까지 볼지 (스캔 한 번 놓쳐도 잡게)
     entry_4h_bars: int = 1          # 마감된 4h봉 중 최근 몇 개 (4h봉 하나를 매시 스캔 넷이 본다)
-    # 🎯 눌림목타점(10-11~) — 15m MA240 > MA480 > MA960 정배열에서 15m 장기 수퍼트렌드(30×6)가
+    # 🎯 눌림목타점(10-11~) — 15m MA240 > MA480 > MA960 또는 MA480 > MA960 정배열에서 15m 장기 수퍼트렌드(30×6)가
     # 하락→상승으로 전환한 마감 15m봉. 최근 entry_15m_bars봉(4 = 1시간 = 스캔 간격) 안.
     entry_w3: bool = True           # 🆕3파진입 •
     entry_1h_fast: bool = True      # 🆕1h단기선터치/돌파 •
     entry_4h_fast: bool = True      # 🆕4h단기선터치/돌파 •
     entry_pullback: bool = True
-    entry_pullback_align: tuple = (240, 480, 960)
+    # 정배열 묶음 — 하나 또는 여럿(OR). 10-11: 240>480>960 또는 480>960
+    entry_pullback_align: tuple = ((240, 480, 960), (480, 960))
     entry_pullback_st: tuple = (30, 6.0)
     entry_15m_bars: int = 4
     rearm_hours: int = 24           # 같은 종목은 이 시간 안에 • 로 다시 안 알린다
@@ -551,18 +552,23 @@ def w3_candidate(df1h: pd.DataFrame | None, params: Params, now: pd.Timestamp) -
     return bool((c.iloc[-tail:] < m.iloc[-tail:]).any())
 
 
+def _aligns(al) -> tuple:
+    """(240, 480, 960) 하나든 묶음 여럿이든 묶음 튜플로."""
+    return (tuple(al),) if al and not isinstance(al[0], (tuple, list)) else tuple(tuple(x) for x in al)
+
+
 def pullback_flips(df15: pd.DataFrame | None, params: Params, bars: int) -> list[int]:
-    """🎯 눌림목타점 — 마지막 bars봉 중 '15m 정배열(240>480>960) + 장기 수트 하락→상승 전환' 봉 위치."""
-    a, b, c3 = params.entry_pullback_align
-    if df15 is None or len(df15) < c3 + 2:
+    """🎯 눌림목타점 — 마지막 bars봉 중 '15m 정배열(240>480>960 또는 480>960) + 장기 수트
+    하락→상승 전환' 봉 위치."""
+    aligns = _aligns(params.entry_pullback_align)
+    if df15 is None or len(df15) < min(max(al) for al in aligns) + 2:
         return []
-    c = df15["Close"]
-    m1, m2, m3 = (c.rolling(k).mean().to_numpy() for k in (a, b, c3))
+    ok = stacked_any(df15["Close"], aligns)
     d = supertrend_full(df15, int(params.entry_pullback_st[0]),
                         float(params.entry_pullback_st[1]))["dir"].to_numpy(float)
     out = []
     for t in range(max(1, len(df15) - max(1, bars)), len(df15)):
-        if m1[t] > m2[t] > m3[t] and d[t] > 0 and d[t - 1] < 0:
+        if ok[t] and d[t] > 0 and d[t - 1] < 0:
             out.append(t)
     return out
 

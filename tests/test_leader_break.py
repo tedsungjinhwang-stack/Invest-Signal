@@ -939,3 +939,18 @@ def test_pullback_flip_in_15m_uptrend_alignment():
     down = _bars(np.r_[np.linspace(300, 100, 1100), np.linspace(100, 80, 60), np.linspace(80, 95, 60)],
                  "15min")
     assert leader_break.pullback_flips(down, P, 200) == []
+
+
+def test_pullback_align_accepts_or_groups():
+    """10-11 — 정배열 묶음 OR: 240>480>960 또는 480>960."""
+    import numpy as np
+    import pandas as pd
+    from invest_signal.indicators import stacked_any
+    c = pd.Series(np.r_[np.linspace(100, 200, 1000), np.linspace(200, 150, 200)])
+    m240, m480, m960 = (c.rolling(k).mean() for k in (240, 480, 960))
+    t = [i for i in range(960, len(c)) if m480[i] > m960[i] and not m240[i] > m480[i]]
+    assert t, "합성 데이터에 480>960만 선 봉이 없다"
+    assert not stacked_any(c, (240, 480, 960))[t[0]]
+    assert stacked_any(c, ((240, 480, 960), (480, 960)))[t[0]]
+    assert stacked_any(c, (480, 960))[t[0]]
+    assert not stacked_any(c, (480, 960))[100]                     # 기간 모자라면 False

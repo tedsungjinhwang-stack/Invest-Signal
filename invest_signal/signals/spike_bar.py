@@ -57,10 +57,10 @@ class Params:
     touch_enabled: bool = True
     touch_period: int = 30
     touch_mult: float = 6.0
-    # 🎯 15m 눌림목타점(10-11~) — 급등 뒤 15m 240>480>960 정배열에서 장기 수트(touch_period×
+    # 🎯 15m 눌림목타점(10-11~) — 급등 뒤 15m 240>480>960 또는 480>960 정배열에서 장기 수트(touch_period×
     # touch_mult)가 하락→상승으로 바뀐 봉을 • 로. ⚡ 🎯눌림목타점과 같은 정의.
     pullback_enabled: bool = True
-    pullback_align: tuple = (240, 480, 960)
+    pullback_align: tuple = ((240, 480, 960), (480, 960))   # 정배열 묶음 — 여럿이면 OR
 
 
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
@@ -185,7 +185,7 @@ def long_touch(df: pd.DataFrame, symbol: str, params: Params = Params(),
 
 def pullback_entry(df: pd.DataFrame, symbol: str, params: Params = Params(),
                    spike: SignalEvent | None = None) -> SignalEvent | None:
-    """🎯 급등 뒤 15m **정배열(240>480>960)**에서 장기 수트(30×6)가 **하락→상승 전환**한 봉.
+    """🎯 급등 뒤 15m **정배열(240>480>960 또는 480>960)**에서 장기 수트(30×6)가 **하락→상승 전환**한 봉.
 
     spike(10일 추적 저장분) 뒤, 마지막 grace_bars+1봉 안에서 가장 최근 것. 해당 없으면 None.
     """
@@ -193,17 +193,20 @@ def pullback_entry(df: pd.DataFrame, symbol: str, params: Params = Params(),
 
     if not params.pullback_enabled or spike is None:
         return None
-    a, b, c3 = params.pullback_align
+    from ..indicators import stacked_any
+    from .leader_break import _aligns
+
+    aligns = _aligns(params.pullback_align)
     n = len(df)
-    if n < c3 + 2:
+    if n < min(max(al) for al in aligns) + 2:
         return None
     i0 = int(df.index.searchsorted(spike.bar_time, "right")) - 1
     c = df["Close"]
-    m1, m2, m3 = (c.rolling(k).mean().to_numpy(float) for k in (a, b, c3))
+    ok = stacked_any(c, aligns)
     d = supertrend_full(df, params.touch_period, params.touch_mult)["dir"].to_numpy(float)
     hit = None
     for t in range(max(i0 + 1, n - 1 - params.grace_bars, 1), n):
-        if m1[t] > m2[t] > m3[t] and d[t] > 0 and d[t - 1] < 0:
+        if ok[t] and d[t] > 0 and d[t - 1] < 0:
             hit = t
     if hit is None:
         return None

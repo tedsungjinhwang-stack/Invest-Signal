@@ -26,6 +26,23 @@ def alignment(df: pd.DataFrame, periods: tuple = (120, 240, 480)) -> str | None:
     return "혼조"
 
 
+def stacked_any(close: pd.Series, aligns) -> np.ndarray:
+    """봉마다 '정배열(짧은 MA > 긴 MA 순)'인지 — aligns는 (240, 480, 960) 하나 또는 그런 묶음 여럿(OR).
+
+    값이 없는(기간이 모자란) 봉은 False.
+    """
+    if aligns and not isinstance(aligns[0], (tuple, list)):
+        aligns = (aligns,)
+    out = np.zeros(len(close), bool)
+    for al in aligns:
+        ms = [close.rolling(int(k)).mean().to_numpy(float) for k in al]
+        ok = np.ones(len(close), bool)
+        for x, y in zip(ms, ms[1:]):
+            ok &= x > y             # NaN 비교는 False
+        out |= ok
+    return out
+
+
 def anchored_vwap(df: pd.DataFrame, period: str) -> pd.Series | None:
     """앵커드 VWAP — 기간 시작(UTC)마다 리셋. period: "Q"(분기) 또는 "M"(월).
 

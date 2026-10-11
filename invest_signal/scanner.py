@@ -229,6 +229,9 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         entry_1h_fast=bool(s.get("entry_1h_fast", True)),
         entry_4h_fast=bool(s.get("entry_4h_fast", True)),
         entry_pullback=bool(s.get("entry_pullback", True)),
+        entry_pullback_align=tuple(tuple(x) if isinstance(x, list) else x
+                                   for x in s.get("entry_pullback_align",
+                                                  ((240, 480, 960), (480, 960)))),
         entry_15m_bars=int(s.get("entry_15m_bars", 4)),
         rearm_hours=int(s.get("rearm_hours", 24)),
         fire_enabled=bool(s.get("fire_enabled", True)),
@@ -881,7 +884,8 @@ def _spike_params(cfg: dict) -> "spike_bar.Params":
         touch_period=int(s.get("touch_period", 30)),
         touch_mult=float(s.get("touch_mult", 6.0)),
         pullback_enabled=bool(s.get("pullback_enabled", True)),
-        pullback_align=tuple(s.get("pullback_align", (240, 480, 960))),
+        pullback_align=tuple(tuple(x) if isinstance(x, list) else x
+                             for x in s.get("pullback_align", ((240, 480, 960), (480, 960)))),
     )
 
 
