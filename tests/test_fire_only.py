@@ -153,3 +153,28 @@ def test_pullback_trigger_passes_fire_only_without_fire():
     always = ("spike_bar", "leader_break:🎯눌림목타점")
     assert [x.symbol for x in notify.fire_only([e, plain], always)] == ["PUSDT"]
     assert notify.fire_only_title([e], always) == "🎯 <b>눌림목 타점</b>"
+
+
+def test_leader_only_triggers_keeps_just_pullback_rows(monkeypatch, tmp_path):
+    """10-11 — ⚡는 🎯눌림목타점 새 줄만. ⚡ 추적 줄·순위표는 빼고 다른 칸은 그대로."""
+    pb = _ev("PUSDT", "leader_break", triggers=["🎯눌림목타점", "3파진입"])
+    fire_lb = _ev("FUSDT", "leader_break", fire=True, triggers=["4h단기선터치"])
+    wave = _ev("WUSDT", "wave_setup", fire=True)
+    hold = _ev("HUSDT", "leader_break", fire=True, last_price=1.0, watch_days=2)
+    cfg = {"notify": {"fire_only": True, "leader_only_triggers": ["🎯눌림목타점"],
+                      "always_show": ["leader_break:🎯눌림목타점"]}}
+    monkeypatch.setattr(scanner.cfg_mod, "load", lambda p: cfg)
+    monkeypatch.setattr(scanner, "scan_crypto",
+                        lambda *a, **k: ([pb, fire_lb, wave], [hold],
+                                         [{"symbol": "ZUSDT", "rank": 1, "gain_24h": 0.5}]))
+    monkeypatch.setattr(scanner, "scan_yfinance", lambda *a, **k: ([], [], {}, {}))
+    monkeypatch.setattr(scanner, "_scan_community", lambda *a, **k: {})
+    sent = []
+    monkeypatch.setattr(notify, "send_telegram", lambda msg, log=print: sent.append(msg) or True)
+    state_path = str(tmp_path / "state" / "alerts_state.json")
+    scanner.run("x.yaml", state_path, log=lambda *x: None)
+    msg = sent[0]
+    assert ">P<" in msg and ">W<" in msg
+    assert ">F<" not in msg and "↳ H " not in msg and "24h 상승률 TOP" not in msg
+    st = AlertState(state_path)
+    assert not st.is_new(pb.dedup_key) and st.is_new(fire_lb.dedup_key)
