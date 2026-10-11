@@ -188,3 +188,25 @@ def test_onset_in_always_show_passes_without_fire():
     assert [e.symbol for e in notify.fire_only([plain, fire], always)] == ["OUSDT", "PUSDT"]
     assert notify.fire_only_title([plain], always) == "🟢 <b>상승초입</b>"
     assert notify.fire_only_title([plain, fire], always) == "🔥 <b>떡상조짐</b> · 🟢 <b>상승초입</b>"
+
+
+def test_hide_holds_drops_tracked_lines_only(monkeypatch, tmp_path):
+    """10-11 — notify.hide_holds 칸은 • 새 줄만 싣고 ↳ 추적 줄은 뺀다."""
+    new = _ev("NUSDT", "vwap_onset")
+    hold = _ev("HUSDT", "vwap_onset", last_price=1.0)
+    w4 = _ev("WUSDT", "wave_setup", fire=True, stage="ABC", last_price=1.0)
+    wd = _ev("DUSDT", "wave_setup", stage="일봉ABC", interval="1d", last_price=1.0)
+    sp = _ev("SUSDT", "spike_bar", body=0.09, vol_mult=12.0, since=0.01, last_price=1.0)
+    cfg = {"notify": {"fire_only": True,
+                      "always_show": ["spike_bar", "vwap_onset", "wave_setup:일봉ABC"],
+                      "hide_holds": ["vwap_onset", "wave_setup:ABC"]}}
+    monkeypatch.setattr(scanner.cfg_mod, "load", lambda p: cfg)
+    monkeypatch.setattr(scanner, "scan_crypto", lambda *a, **k: ([new], [hold, w4, wd, sp], []))
+    monkeypatch.setattr(scanner, "scan_yfinance", lambda *a, **k: ([], [], {}, {}))
+    monkeypatch.setattr(scanner, "_scan_community", lambda *a, **k: {})
+    sent = []
+    monkeypatch.setattr(notify, "send_telegram", lambda msg, log=print: sent.append(msg) or True)
+    scanner.run("x.yaml", str(tmp_path / "state" / "alerts_state.json"), log=lambda *x: None)
+    msg = sent[0]
+    assert ">N<" in msg and "↳ D " in msg and "↳ S " in msg
+    assert "↳ H " not in msg and "↳ W " not in msg

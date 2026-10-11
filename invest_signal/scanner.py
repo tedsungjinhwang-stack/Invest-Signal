@@ -1601,6 +1601,14 @@ def run(config_path: str, state_path: str, only: str | None = None,
         yf_ongoing, community = [], {}
         if hidden:
             log(f"[notify] 🔥만 보기 — 🔥·{' · '.join(always)} 아닌 새 줄 {len(hidden)}건 알림에서 뺌")
+    # 추적 줄(↳) 빼기(notify.hide_holds, 10-11 요청: "상승초입 막 다 온다") — 시그널 이름 또는
+    # `시그널:stage`. 10일 추적(상태)은 그대로 — 🧱·🎯 같은 • 알림은 계속 난다.
+    hide = tuple(ncfg.get("hide_holds") or ())
+    if hide:
+        n0 = len(crypto_ongoing)
+        crypto_ongoing = [e for e in crypto_ongoing if notify._always_key(e, hide) is None]
+        if n0 != len(crypto_ongoing):
+            log(f"[notify] 추적 줄 {n0 - len(crypto_ongoing)}건 뺌 ({' · '.join(hide)})")
     # ⚡ 감시 종목은 이 사건만(notify.leader_only_triggers, 10-11 요청: "눌림목타점만, 너무 많아서").
     # ⚡ 새 줄은 그 사건이 있는 것만, ⚡ 추적 줄과 24h 순위표는 뺀다. 다른 칸은 그대로.
     only = tuple((cfg.get("notify") or {}).get("leader_only_triggers") or ())

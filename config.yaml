@@ -18,6 +18,10 @@ notify:
   # (10-01 급등봉 · 10-02 세력 이탈 · 10-04 파동의 일봉 단기·장기 추세선)
   always_show: [spike_bar, vwap_onset, whale_exit, choch_warn, "wave_setup:일봉ABC", "wave_setup:일봉장기선돌파",
                 "leader_break:🎯눌림목타점"]   # ⚡ • 🆕🎯눌림목타점(10-11)도 🔥 없이
+  # 추적 줄(↳)을 안 싣는 칸 — 시그널 이름 또는 `시그널:stage`. 추적 자체(상태)는 그대로라
+  # 🚀 🧱·🎯 같은 • 알림은 계속 난다. 10-11: 상승초입 ↳가 한 번에 160줄 넘게 나가서 뺌,
+  # 4h 파동(ABC·장기선돌파·되돌림)은 껐으니 남은 추적 줄도 뺌. 일봉 파동(일봉ABC 등)은 그대로.
+  hide_holds: [vwap_onset, "wave_setup:ABC", "wave_setup:장기선돌파", "wave_setup:되돌림"]
   # vwap_onset(10-11): 🟢상승초입은 역배열 자리면 🔥 없이도 다 싣는다 — 🔥는 줄 앞 표시로만
 
 signal:
