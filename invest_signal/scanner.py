@@ -648,6 +648,8 @@ def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | Non
         return events, ongoing
     sigs = tuple(s.get("signals", TRACK10_SIGNALS))
     days = float(s.get("days", 10))
+    # 시그널별 추적 기간(10-11: 상승초입은 하루) — 없으면 days
+    days_by = {k: float(v) for k, v in (s.get("days_by") or {}).items()}
     now = pd.Timestamp.now(tz="UTC")
     for e in events:
         if e.signal in sigs and e.detail.get("stage") not in (spike_bar.TOUCH, spike_bar.PULLBACK):
@@ -656,8 +658,10 @@ def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | Non
     holds = [e for e in ongoing if e.signal not in sigs]
     sp = _spike_params(cfg)
     touches = []
-    for it in state.tracked(sigs, days, now=now.to_pydatetime()):
+    for it in state.tracked(sigs, max([days, *days_by.values()]), now=now.to_pydatetime()):
         sym, sig = it["symbol"], it["signal"]
+        if now - pd.Timestamp(it["t"]) > pd.Timedelta(days=days_by.get(sig, days)):
+            continue
         df = (frames15 or {}).get(sym)
         if df is None or not len(df) or not it.get("price"):
             continue

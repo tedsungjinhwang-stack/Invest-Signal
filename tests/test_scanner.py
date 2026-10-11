@@ -526,3 +526,8 @@ def test_track10_records_and_rebuilds_holds_for_ten_days(tmp_path):
     assert {e.symbol for e in holds2} == {"OUSDT", "NUSDT"}
     # 꺼져 있으면 그대로
     assert scanner._track10({}, st, [new], [keep], frames, {}) == ([new], [keep])
+    # 10-11 — 시그널별 기간(days_by): 상승초입 1일이면 9일 전 OUSDT는 빠진다
+    cfg1 = {"signal": {"track10": {"enabled": True, "days_by": {"vwap_onset": 1}},
+                       "spike_bar": {"touch_enabled": False}}}
+    _, holds3 = scanner._track10(cfg1, st, [], [], frames, {}, log=lambda *a: None)
+    assert {e.symbol for e in holds3} == {"NUSDT"}
