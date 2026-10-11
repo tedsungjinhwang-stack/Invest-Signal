@@ -224,6 +224,8 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         entry_mode=str(s.get("entry_mode", "wave")),
         entry_1h_bars=int(s.get("entry_1h_bars", 2)),
         entry_4h_bars=int(s.get("entry_4h_bars", 1)),
+        entry_pullback=bool(s.get("entry_pullback", True)),
+        entry_15m_bars=int(s.get("entry_15m_bars", 4)),
         rearm_hours=int(s.get("rearm_hours", 24)),
         fire_enabled=bool(s.get("fire_enabled", True)),
         fire_low_bars=int(s.get("fire_low_bars", 18)),
@@ -534,7 +536,7 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             # • 신규 = 마감된 봉에서 새로 생긴 3파 진입 · 1h/4h 단기선 터치·돌파
             lng = w3_frame(sym) if leader_break.w3_candidate(hour_frame(sym), params, now) else None
             trig = leader_break.entry_triggers(hour_frame(sym), trend_frame(sym), lng,
-                                               params, now)
+                                               params, now, df)
             ev = leader_break.entry_event(sym, trig, df, params)
             cands = [ev] if ev is not None else []
         if (cands and state is not None and params.rearm_hours > 0

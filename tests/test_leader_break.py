@@ -915,3 +915,27 @@ def test_to_30m_keeps_only_complete_bars():
                          "Volume": 1.0}, index=idx)
     h = leader_break.to_30m(df15)
     assert len(h) == 2 and h["Close"].tolist() == [2.5, 4.5] and h["High"].tolist() == [3, 5]
+
+
+def test_pullback_flip_in_15m_uptrend_alignment():
+    """10-11 — 🎯눌림목타점: 15m 240>480>960 정배열에서 장기 수트(30×6) 하락→상승 전환 봉."""
+    from invest_signal.indicators import supertrend_full
+    # 길게 오르다(정배열) 짧게 눌리고 다시 오른다 — 눌림 끝에서 장기 수트가 다시 상승 전환
+    closes = np.r_[np.linspace(100, 300, 1100), np.linspace(300, 255, 60), np.linspace(255, 290, 60)]
+    h15 = _bars(closes, "15min")
+    d = supertrend_full(h15, 30, 6.0)["dir"].to_numpy()
+    flips = [t for t in range(1101, len(d)) if d[t] > 0 and d[t - 1] < 0]
+    assert flips, "합성 데이터에서 장기 수트가 다시 안 뒤집혔다"
+    t0 = flips[-1]
+    part = h15.iloc[:t0 + 1]
+    assert leader_break.pullback_flips(part, P, 4) == [t0]
+    now = part.index[-1] + pd.Timedelta(minutes=15)
+    trig = leader_break.entry_triggers(None, None, None, P, now, part)
+    assert (leader_break.ENTRY_PULLBACK, now) in trig
+    off = dataclasses_replace(P, entry_pullback=False)
+    assert leader_break.ENTRY_PULLBACK not in [n for n, _ in
+                                              leader_break.entry_triggers(None, None, None, off, now, part)]
+    # 역배열(하락 추세)에서의 전환은 아니다
+    down = _bars(np.r_[np.linspace(300, 100, 1100), np.linspace(100, 80, 60), np.linspace(80, 95, 60)],
+                 "15min")
+    assert leader_break.pullback_flips(down, P, 200) == []

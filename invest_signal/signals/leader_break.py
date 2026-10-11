@@ -118,6 +118,12 @@ class Params:
     entry_mode: str = "wave"
     entry_1h_bars: int = 2          # 마감된 1h봉 중 최근 몇 개까지 볼지 (스캔 한 번 놓쳐도 잡게)
     entry_4h_bars: int = 1          # 마감된 4h봉 중 최근 몇 개 (4h봉 하나를 매시 스캔 넷이 본다)
+    # 🎯 눌림목타점(10-11~) — 15m MA240 > MA480 > MA960 정배열에서 15m 장기 수퍼트렌드(30×6)가
+    # 하락→상승으로 전환한 마감 15m봉. 최근 entry_15m_bars봉(4 = 1시간 = 스캔 간격) 안.
+    entry_pullback: bool = True
+    entry_pullback_align: tuple = (240, 480, 960)
+    entry_pullback_st: tuple = (30, 6.0)
+    entry_15m_bars: int = 4
     rearm_hours: int = 24           # 같은 종목은 이 시간 안에 • 로 다시 안 알린다
     # 🔥 재떡상 조짐 — 장기 강세 코인(4h MA480 +40% 위)이 단기 과열이 식고(4h MA120
     # 대비 +20% 이하) 3일 저점 근처(+10% 이내)까지 눌린 자리(fire_mark()).
@@ -449,6 +455,7 @@ def third_wave(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
 
 ENTRY_W3 = "3파진입"
 ENTRY_FIRE = "🔥진입"
+ENTRY_PULLBACK = "🎯눌림목타점"
 
 
 def fire_series(df4h: pd.DataFrame | None, params: Params = Params()) -> np.ndarray | None:
@@ -538,9 +545,26 @@ def w3_candidate(df1h: pd.DataFrame | None, params: Params, now: pd.Timestamp) -
     return bool((c.iloc[-tail:] < m.iloc[-tail:]).any())
 
 
+def pullback_flips(df15: pd.DataFrame | None, params: Params, bars: int) -> list[int]:
+    """🎯 눌림목타점 — 마지막 bars봉 중 '15m 정배열(240>480>960) + 장기 수트 하락→상승 전환' 봉 위치."""
+    a, b, c3 = params.entry_pullback_align
+    if df15 is None or len(df15) < c3 + 2:
+        return []
+    c = df15["Close"]
+    m1, m2, m3 = (c.rolling(k).mean().to_numpy() for k in (a, b, c3))
+    d = supertrend_full(df15, int(params.entry_pullback_st[0]),
+                        float(params.entry_pullback_st[1]))["dir"].to_numpy(float)
+    out = []
+    for t in range(max(1, len(df15) - max(1, bars)), len(df15)):
+        if m1[t] > m2[t] > m3[t] and d[t] > 0 and d[t - 1] < 0:
+            out.append(t)
+    return out
+
+
 def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
                    df4h_long: pd.DataFrame | None, params: Params,
-                   now: pd.Timestamp) -> list[tuple[str, pd.Timestamp]]:
+                   now: pd.Timestamp,
+                   df15: pd.DataFrame | None = None) -> list[tuple[str, pd.Timestamp]]:
     """• 신규 알림 사건 — **마감된 봉에서 새로 생긴 것만**. (이름, 그 봉의 마감 시각).
 
       3파진입        직전 1h봉은 아니었는데 이번 1h봉에서 '1h 종가 < 1h MA20 이면서
@@ -549,6 +573,7 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
       1h단기선터치/돌파  마감된 1h봉이 단기선(22×3)을 걸쳤거나 단기가 뒤집혔다
       4h단기선터치/돌파  마감된 4h봉에서 같은 사건
       🔥진입          마감된 4h봉에서 🔥 조건(fire_mark)이 새로 섰다(직전 봉은 아님)
+      🎯눌림목타점     15m 240>480>960 정배열에서 15m 장기 수트(30×6)가 하락→상승 전환(10-11~)
 
     1h는 최근 entry_1h_bars개(기본 2 — 스캔 한 번을 놓쳐도 잡게), 4h는 최근
     entry_4h_bars개(기본 1 — 4h봉 하나를 매시 스캔 넷이 본다)를 본다. 같은 봉이
@@ -556,6 +581,11 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
     """
     out: list[tuple[str, pd.Timestamp]] = []
     hour, four = pd.Timedelta(hours=1), pd.Timedelta(hours=4)
+    if params.entry_pullback:
+        q = pd.Timedelta(minutes=15)
+        h15 = _closed(df15, 0.25, now)
+        for t in pullback_flips(h15, params, params.entry_15m_bars):
+            out.append((ENTRY_PULLBACK, h15.index[t] + q))
     h1 = _closed(df1h, 1, now)
     if h1 is not None and len(h1) > 2:
         for t, kind in _fast_events(h1, params, params.entry_1h_bars):
@@ -587,7 +617,7 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
     return out
 
 
-ENTRY_ORDER = (ENTRY_FIRE, ENTRY_W3, "1h단기선돌파", "1h단기선터치", "4h단기선돌파", "4h단기선터치")
+ENTRY_ORDER = (ENTRY_FIRE, ENTRY_PULLBACK, ENTRY_W3, "1h단기선돌파", "1h단기선터치", "4h단기선돌파", "4h단기선터치")
 
 
 def entry_event(symbol: str, triggers: list, df15: pd.DataFrame,

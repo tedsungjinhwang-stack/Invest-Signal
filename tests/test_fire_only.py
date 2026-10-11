@@ -145,3 +145,11 @@ def test_daily_wave_lines_pass_without_fire():
     assert [e.symbol for e in notify.fire_only([d1, d2, h4])] == ["DUSDT", "EUSDT"]
     assert notify.fire_only([d1], ("spike_bar",)) == []                   # 설정에서 빼면 안 나간다
     assert notify.fire_only_title([d1, d2]) == "🌊 <b>일봉 파동</b>"
+
+
+def test_pullback_trigger_passes_fire_only_without_fire():
+    e = _ev("PUSDT", "leader_break", triggers=["🎯눌림목타점"])
+    plain = _ev("QUSDT", "leader_break", triggers=["4h단기선터치"])
+    always = ("spike_bar", "leader_break:🎯눌림목타점")
+    assert [x.symbol for x in notify.fire_only([e, plain], always)] == ["PUSDT"]
+    assert notify.fire_only_title([e], always) == "🎯 <b>눌림목 타점</b>"

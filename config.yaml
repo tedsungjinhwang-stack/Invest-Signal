@@ -13,7 +13,8 @@ notify:
   fire_only: true
   # 🔥 없이도 항상 싣는 칸 — 시그널 이름 또는 `시그널:stage`(그 변형만)
   # (10-01 급등봉 · 10-02 세력 이탈 · 10-04 파동의 일봉 단기·장기 추세선)
-  always_show: [spike_bar, whale_exit, choch_warn, "wave_setup:일봉ABC", "wave_setup:일봉장기선돌파"]
+  always_show: [spike_bar, whale_exit, choch_warn, "wave_setup:일봉ABC", "wave_setup:일봉장기선돌파",
+                "leader_break:🎯눌림목타점"]   # ⚡ • 🆕🎯눌림목타점(10-11)도 🔥 없이
 
 signal:
   spike_bar:                # 급등봉 (15m봉, 크립토 전용): 장대양봉 하나를 잡는다
@@ -789,6 +790,11 @@ signal:
     # "15m"으로 바꾸면 예전 동작(15m 20선 하향 이탈 첫 봉)으로 돌아간다.
     entry_mode: wave
     entry_1h_bars: 2        # 마감된 1h봉 최근 2개까지 (스캔 한 번 놓쳐도 잡게)
+    # 🎯눌림목타점(10-11~) — 15m MA240 > MA480 > MA960 정배열에서 15m 장기 수퍼트렌드(30×6)가
+    # 하락→상승으로 전환한 마감 15m봉(최근 4봉 = 1시간). ⚡ 감시 종목에만. 🔥만 보기에서도 나간다.
+    # (퍼프 전 종목이면 하루 ≈73건이라 ⚡ 감시 종목으로 좁혔다)
+    entry_pullback: true
+    entry_15m_bars: 4
     entry_4h_bars: 1        # 마감된 4h봉 최근 1개 (4h봉 하나를 매시 스캔 넷이 본다)
     rearm_hours: 24         # 같은 종목은 24시간 안에 • 로 다시 안 알린다(↳ 로만)
     # 🔥 재떡상 조짐(09-30) — 3일 저점 +10% 이내(눌림 바닥) · 4h MA480보다 +40% 이상 위

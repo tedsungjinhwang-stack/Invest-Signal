@@ -171,7 +171,8 @@ WARN_TAG = "⚠️"
 ALWAYS_TITLES = {"spike_bar": "🚀 <b>급등봉</b>", "whale_exit": "🚨 <b>세력 이탈</b>",
                  "choch_warn": "🔻 <b>하락 CHoCH</b>",
                  "wave_setup:일봉ABC": "🌊 <b>일봉 파동</b>",
-                 "wave_setup:일봉장기선돌파": "🌊 <b>일봉 파동</b>"}
+                 "wave_setup:일봉장기선돌파": "🌊 <b>일봉 파동</b>",
+                 "leader_break:🎯눌림목타점": "🎯 <b>눌림목 타점</b>"}
 ALWAYS_SIGNALS = tuple(ALWAYS_TITLES)
 
 
@@ -180,7 +181,13 @@ def _always_key(e, always) -> str | None:
     if e.signal in always:
         return e.signal
     k = f"{e.signal}:{e.detail.get('stage')}"
-    return k if k in always else None
+    if k in always:
+        return k
+    for t in e.detail.get("triggers") or ():       # ⚡ • 사건 — `leader_break:🎯눌림목타점`
+        k = f"{e.signal}:{t}"
+        if k in always:
+            return k
+    return None
 
 
 def is_fire(e) -> bool:
