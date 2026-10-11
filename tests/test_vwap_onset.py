@@ -331,7 +331,7 @@ def test_bear_band_close_between_240_480_with_long_st_up():
     ma240, ma480 = df15.Close.rolling(240).mean().iloc[-1], df15.Close.rolling(480).mean().iloc[-1]
     assert ma240 < df15.Close.iloc[-1] < ma480
     assert supertrend_full(df15, 30, 6.0)["dir"].iloc[-1] > 0
-    ok, known = vo._between(df15, _Params())
+    ok, known = vo._between(df15, _Params(bear_st_flip_bars=0))
     assert ok.iloc[-1] and known.iloc[-1]
     assert not vo._between(df15, _Params(bear_band=(240, 480)))[0].iloc[-500]   # MA 못 잼/조건 밖
     # 장기 수트가 하락이면 안 된다
@@ -339,6 +339,19 @@ def test_bear_band_close_between_240_480_with_long_st_up():
                       np.linspace(125.0, 112.0, 50)])
     if supertrend_full(down, 30, 6.0)["dir"].iloc[-1] < 0:
         assert not vo._between(down, _Params())[0].iloc[-1]
-    assert vo._between(down, _Params(bear_st_up=False))[0].iloc[-1] == bool(
+    assert vo._between(down, _Params(bear_st_up=False, bear_st_flip_bars=0))[0].iloc[-1] == bool(
         down.Close.rolling(240).mean().iloc[-1] < down.Close.iloc[-1]
         < down.Close.rolling(480).mean().iloc[-1])
+
+
+def test_bear_band_needs_recent_long_st_flip():
+    """10-11 — 장기 수트가 지금 상승이어도 전환이 bear_st_flip_bars봉보다 오래면 안 된다."""
+    from invest_signal.indicators import supertrend_full
+    c = np.r_[np.linspace(300.0, 100.0, 900), np.linspace(100.0, 120.0, 200)]
+    df15 = _f15(c)
+    d = supertrend_full(df15, 30, 6.0)["dir"].to_numpy()
+    flips = [i for i in range(1, len(d)) if d[i] > 0 and d[i - 1] < 0]
+    age = len(d) - 1 - flips[-1]
+    assert vo._between(df15, _Params(bear_st_flip_bars=age + 1))[0].iloc[-1]
+    assert not vo._between(df15, _Params(bear_st_flip_bars=max(1, age - 1)))[0].iloc[-1]
+    assert vo._between(df15, _Params(bear_st_flip_bars=0))[0].iloc[-1]

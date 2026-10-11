@@ -58,6 +58,9 @@ class Params:
     bear_band: tuple = (240, 480)
     bear_st_up: bool = True
     bear_st: tuple = (30, 6.0)           # 15m 장기 수퍼트렌드 (ATR 기간, 배수)
+    # 장기 수트가 **최근 bear_st_flip_bars봉 안에** 하락→상승으로 돌파·전환했어야 한다(10-11). 0이면
+    # 지금 상승이기만 하면 된다.
+    bear_st_flip_bars: int = 96          # 15m × 96 = 24시간
     bear_align: tuple = (240, 480, 960)  # ① 15m 역배열 판정선 (bear_mode="align"일 때)
     bull_align: tuple = (120, 240, 480)  # ① 15m 정배열 판정선 — 둘 중 하나면 된다
     band_anchor: str = "M"              # ② 이 앵커드 VWAP의 상단밴드 (M=월)
@@ -112,7 +115,8 @@ def _stacked(c: pd.Series, periods: tuple, rising: bool) -> tuple:
 def _between(df15: pd.DataFrame, params: Params) -> tuple:
     """(역배열 사이 + 장기 수트 상승, 잴 수 있는가) — 10-11~ 역배열 쪽 판정.
 
-    MA(짧은) < MA(긴)이고 종가가 두 선 사이, bear_st_up이면 15m 장기 수퍼트렌드가 상승.
+    MA(짧은) < MA(긴)이고 종가가 두 선 사이, bear_st_up이면 15m 장기 수퍼트렌드가 상승이고
+    최근 bear_st_flip_bars봉 안에 하락→상승으로 전환(캔들이 장기선을 돌파)했다.
     """
     c = df15["Close"]
     a, b = params.bear_band
@@ -123,6 +127,9 @@ def _between(df15: pd.DataFrame, params: Params) -> tuple:
         d = supertrend_full(df15, int(params.bear_st[0]), float(params.bear_st[1]))["dir"]
         ok &= d > 0
         known &= d.notna()
+        if params.bear_st_flip_bars > 0:
+            flip = ((d > 0) & (d.shift(1) < 0)).astype(float)
+            ok &= flip.rolling(params.bear_st_flip_bars, min_periods=1).max() > 0
     return ok & known, known
 
 
