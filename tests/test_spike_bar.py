@@ -172,3 +172,35 @@ def test_notify_renders_long_touch():
     line = [ln for ln in notify.format_events([ev], [], {}).splitlines() if ">A<" in ln][0]
     assert "🧱15m장기선터치 🕒10-06 14:00" in line and "지지선 1.08" in line
     assert "급등 🕒10-05 12:00 몸통 +30%" in line and "급등 후 -15%" in line
+
+
+def test_pullback_entry_after_spike_on_aligned_long_st_flip():
+    """10-11 — 급등 뒤 15m 240>480>960 정배열에서 장기 수트(30×6) 하락→상승 전환 봉."""
+    from invest_signal.indicators import supertrend_full
+    from invest_signal.signals import SignalEvent
+    n = 1100
+    base = np.linspace(50.0, 100.0, n)
+    wig = np.where((np.arange(n) // 60) % 2 == 0, 1.0, -1.0) * np.minimum(np.arange(n) % 60, 60 - np.arange(n) % 60) * 0.25
+    c = base + wig
+    idx = pd.date_range("2026-09-01", periods=n, freq="15min", tz="UTC")
+    df = pd.DataFrame({"Open": c, "High": c * 1.003, "Low": c * 0.997, "Close": c,
+                       "Volume": 1.0}, index=idx)
+    d = supertrend_full(df, 30, 6.0)["dir"].to_numpy()
+    m = [df.Close.rolling(k).mean().to_numpy() for k in (240, 480, 960)]
+    flips = [t for t in range(961, n) if d[t] > 0 and d[t - 1] < 0 and m[0][t] > m[1][t] > m[2][t]]
+    assert flips, "합성 데이터에 정배열 전환이 없다"
+    t0 = flips[-1]
+    spike = SignalEvent(symbol="XUSDT", signal="spike_bar", bar_time=idx[t0 - 50], price=c[t0 - 50],
+                        detail={"label": "급등봉", "body": 0.1, "vol_mult": 12.0})
+    ev = spike_bar.pullback_entry(df.iloc[:t0 + 1], "XUSDT", spike=spike)
+    assert ev is not None and ev.bar_time == idx[t0]
+    assert ev.detail["stage"] == "눌림목타점" and ev.dedup_key.endswith("|눌림목타점")
+    assert spike_bar.pullback_entry(df.iloc[:t0 + 10], "XUSDT", spike=spike) is None      # grace 밖
+    late = SignalEvent(symbol="XUSDT", signal="spike_bar", bar_time=idx[t0], price=c[t0], detail={})
+    assert spike_bar.pullback_entry(df.iloc[:t0 + 1], "XUSDT", spike=late) is None        # 급등 전 전환
+    assert spike_bar.pullback_entry(df.iloc[:t0 + 1], "XUSDT", Params(pullback_enabled=False),
+                                    spike=spike) is None
+    from invest_signal import notify
+    ev.detail["since"] = 0.05
+    line = [ln for ln in notify.format_events([ev], [], {}).splitlines() if ">X<" in ln][0]
+    assert "🎯15m눌림목타점 🕒" in line and "급등 후 +5.0%" in line

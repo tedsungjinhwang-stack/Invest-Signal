@@ -650,7 +650,7 @@ def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | Non
     days = float(s.get("days", 10))
     now = pd.Timestamp.now(tz="UTC")
     for e in events:
-        if e.signal in sigs and e.detail.get("stage") != spike_bar.TOUCH:
+        if e.signal in sigs and e.detail.get("stage") not in (spike_bar.TOUCH, spike_bar.PULLBACK):
             state.track(e)
     fresh = {(e.symbol, e.signal) for e in events}
     holds = [e for e in ongoing if e.signal not in sigs]
@@ -674,18 +674,20 @@ def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | Non
         if stat.get("quote_volume") is not None:
             d["turnover_24h"] = stat["quote_volume"]
         ev = SignalEvent(symbol=sym, signal=sig, bar_time=t, price=float(it["price"]), detail=d)
-        if sig == "spike_bar" and sp.touch_enabled:
-            tev = spike_bar.long_touch(df, sym, sp, spike=ev)
-            if tev is not None:
-                for k in ("gain_24h", "turnover_24h"):
-                    if k in d:
-                        tev.detail[k] = d[k]
-                touches.append(tev)
+        if sig == "spike_bar":
+            for tev in (spike_bar.long_touch(df, sym, sp, spike=ev),
+                        spike_bar.pullback_entry(df, sym, sp, spike=ev)):
+                if tev is not None:
+                    for k in ("gain_24h", "turnover_24h"):
+                        if k in d:
+                            tev.detail[k] = d[k]
+                    touches.append(tev)
         if (sym, sig) not in fresh:
             holds.append(ev)
     n_by = collections.Counter(e.signal for e in holds if e.signal in sigs)
     log(f"[track] {days:g}일 추적 — " + " · ".join(f"{k} {n_by.get(k, 0)}" for k in sigs)
-        + f" · 🧱15m 장기선 터치 {len(touches)}건")
+        + f" · 🧱15m 장기선 터치 {sum(e.detail.get('stage') == spike_bar.TOUCH for e in touches)}건"
+        + f" · 🎯15m 눌림목타점 {sum(e.detail.get('stage') == spike_bar.PULLBACK for e in touches)}건")
     return events + touches, holds
 
 
@@ -874,6 +876,8 @@ def _spike_params(cfg: dict) -> "spike_bar.Params":
         touch_enabled=bool(s.get("touch_enabled", True)),
         touch_period=int(s.get("touch_period", 30)),
         touch_mult=float(s.get("touch_mult", 6.0)),
+        pullback_enabled=bool(s.get("pullback_enabled", True)),
+        pullback_align=tuple(s.get("pullback_align", (240, 480, 960))),
     )
 
 

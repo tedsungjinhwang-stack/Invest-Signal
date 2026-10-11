@@ -69,6 +69,11 @@ signal:
     touch_enabled: true
     touch_period: 30
     touch_mult: 6.0
+    # 🎯 15m 눌림목타점(10-11~) — 10일 추적 중인 급등봉 종목이 15m 240>480>960 정배열에서
+    # 장기 수트(위 touch_period×touch_mult)가 하락→상승 전환한 봉을 • 로(⚡ 🎯과 같은 정의).
+    # 줄: 🎯15m눌림목타점 🕒전환 시각 · 급등 시각·몸통 · 급등 후 %.
+    pullback_enabled: true
+    pullback_align: [240, 480, 960]
 
   vwap_onset:               # 상승초입 (15m + 4h): 역배열 또는 정배열 · 월 VWAP 상단밴드 근처 · 24h 플러스
     # **짧은 눈금 배열이 선 종목이 월 상단밴드에 올라와 닿은 자리를 잡는다.**

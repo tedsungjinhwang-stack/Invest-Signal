@@ -36,6 +36,7 @@ CRYPTO_ONLY = True          # ETF·주식 스캔에서는 돌리지 않는다
 INTERVAL = "15m"
 KLINE_LIMIT = 500           # vol_ma(96) + 추적 3일(288) + 여유
 TOUCH = "장기선터치"          # 급등 뒤 상승 중인 15m 장기 수트(30×6)를 내려와 터치 — stage(dedup 키가 갈린다)
+PULLBACK = "눌림목타점"       # 급등 뒤 15m 정배열에서 장기 수트 하락→상승 전환(⚡ 🎯과 같은 정의, 10-11~)
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,10 @@ class Params:
     touch_enabled: bool = True
     touch_period: int = 30
     touch_mult: float = 6.0
+    # 🎯 15m 눌림목타점(10-11~) — 급등 뒤 15m 240>480>960 정배열에서 장기 수트(touch_period×
+    # touch_mult)가 하락→상승으로 바뀐 봉을 • 로. ⚡ 🎯눌림목타점과 같은 정의.
+    pullback_enabled: bool = True
+    pullback_align: tuple = (240, 480, 960)
 
 
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
@@ -176,3 +181,36 @@ def long_touch(df: pd.DataFrame, symbol: str, params: Params = Params(),
                 "spike_time": sp.bar_time, "spike_price": sp.price,
                 "body": sp.detail.get("body"), "vol_mult": sp.detail.get("vol_mult"),
                 "since": close / sp.price - 1 if sp.price else None})
+
+
+def pullback_entry(df: pd.DataFrame, symbol: str, params: Params = Params(),
+                   spike: SignalEvent | None = None) -> SignalEvent | None:
+    """🎯 급등 뒤 15m **정배열(240>480>960)**에서 장기 수트(30×6)가 **하락→상승 전환**한 봉.
+
+    spike(10일 추적 저장분) 뒤, 마지막 grace_bars+1봉 안에서 가장 최근 것. 해당 없으면 None.
+    """
+    from ..indicators import supertrend_full
+
+    if not params.pullback_enabled or spike is None:
+        return None
+    a, b, c3 = params.pullback_align
+    n = len(df)
+    if n < c3 + 2:
+        return None
+    i0 = int(df.index.searchsorted(spike.bar_time, "right")) - 1
+    c = df["Close"]
+    m1, m2, m3 = (c.rolling(k).mean().to_numpy(float) for k in (a, b, c3))
+    d = supertrend_full(df, params.touch_period, params.touch_mult)["dir"].to_numpy(float)
+    hit = None
+    for t in range(max(i0 + 1, n - 1 - params.grace_bars, 1), n):
+        if m1[t] > m2[t] > m3[t] and d[t] > 0 and d[t - 1] < 0:
+            hit = t
+    if hit is None:
+        return None
+    close = float(c.iloc[hit])
+    return SignalEvent(
+        symbol=symbol, signal=NAME, bar_time=df.index[hit], price=close,
+        detail={"label": LABEL, "stage": PULLBACK, "interval": INTERVAL,
+                "spike_time": spike.bar_time, "spike_price": spike.price,
+                "body": spike.detail.get("body"), "vol_mult": spike.detail.get("vol_mult"),
+                "since": close / spike.price - 1 if spike.price else None})

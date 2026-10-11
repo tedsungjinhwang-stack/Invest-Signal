@@ -583,6 +583,12 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tags.append(f"급등 🕒{_kst(d['spike_time'])} 몸통 {_pct(d['body'])}")
         if d.get("since") is not None:
             tags.append(f"급등 후 {_pct(d['since'])}")
+    elif e.signal == "spike_bar" and d.get("stage") == "눌림목타점":
+        # 🎯 급등 뒤 15m 정배열(240>480>960)에서 장기 수트 하락→상승 전환 — ⚡ 🎯과 같은 정의
+        tags.append(f"🎯15m눌림목타점 🕒{_kst(e.bar_time)}")
+        tags.append(f"급등 🕒{_kst(d['spike_time'])} 몸통 {_pct(d['body'])}")
+        if d.get("since") is not None:
+            tags.append(f"급등 후 {_pct(d['since'])}")
     elif e.signal == "spike_bar":
         # **봉이 언제 터졌는지를 맨 앞에 적는다.** 스캔이 매시 한 번이라 이
         # 줄은 최대 한 시간 묵은 소식이고, 15분봉이라 네 봉 중 어느 봉인지에
