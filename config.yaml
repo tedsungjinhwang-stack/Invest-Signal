@@ -98,7 +98,13 @@ signal:
     #   24h 필터 끔:          24h 신규 78회 · 지금 조건 안 21종
     #   ±1%:                  24h 신규 21회
     enabled: true
-    bear_align: [240, 480, 960] # ① 15m 역배열 판정선 (짧은 것부터)
+    # ① 역배열 쪽 (10-11 요청으로 바꿈): 15m MA240 < MA480이고 **종가가 그 사이**,
+    #    그리고 15m 장기 수퍼트렌드(30×6)가 상승(상승 전환 뒤). bear_mode: align이면 예전 240<480<960.
+    bear_mode: band
+    bear_band: [240, 480]
+    bear_st_up: true
+    bear_st: [30, 6.0]
+    bear_align: [240, 480, 960] # ① 15m 역배열 판정선 (bear_mode: align일 때만)
     bull_align: [120, 240, 480] # ① 15m 정배열 판정선 — 둘 중 하나면 된다
     band_anchor: M              # ② 이 앵커드 VWAP의 상단밴드 (M=월)
     band_mult: 1.0              # ② 표준편차 배수 (사진의 밴드 배수 #1)

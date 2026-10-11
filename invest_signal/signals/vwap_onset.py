@@ -37,7 +37,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from ..indicators import anchored_vwap_bands
+from ..indicators import anchored_vwap_bands, supertrend_full
 from . import SignalEvent
 
 NAME = "vwap_onset"
@@ -52,7 +52,13 @@ KLINE_LIMIT = 1000
 
 @dataclass(frozen=True)
 class Params:
-    bear_align: tuple = (240, 480, 960)  # ① 15m 역배열 판정선 (짧은 것부터)
+    # ① 역배열 쪽(10-11~ band): 15m MA240 < MA480이고 **종가가 그 사이**, 그리고 15m 장기 수퍼트렌드
+    #    (30×6)가 상승(상승 전환 뒤). bear_mode="align"이면 예전 240 < 480 < 960 쌓임.
+    bear_mode: str = "band"
+    bear_band: tuple = (240, 480)
+    bear_st_up: bool = True
+    bear_st: tuple = (30, 6.0)           # 15m 장기 수퍼트렌드 (ATR 기간, 배수)
+    bear_align: tuple = (240, 480, 960)  # ① 15m 역배열 판정선 (bear_mode="align"일 때)
     bull_align: tuple = (120, 240, 480)  # ① 15m 정배열 판정선 — 둘 중 하나면 된다
     band_anchor: str = "M"              # ② 이 앵커드 VWAP의 상단밴드 (M=월)
     band_mult: float = 1.0              # ② 표준편차 배수
@@ -103,6 +109,23 @@ def _stacked(c: pd.Series, periods: tuple, rising: bool) -> tuple:
     return ok & known, known
 
 
+def _between(df15: pd.DataFrame, params: Params) -> tuple:
+    """(역배열 사이 + 장기 수트 상승, 잴 수 있는가) — 10-11~ 역배열 쪽 판정.
+
+    MA(짧은) < MA(긴)이고 종가가 두 선 사이, bear_st_up이면 15m 장기 수퍼트렌드가 상승.
+    """
+    c = df15["Close"]
+    a, b = params.bear_band
+    ma_a, ma_b = c.rolling(a).mean(), c.rolling(b).mean()
+    ok = (ma_a < ma_b) & (c > ma_a) & (c < ma_b)
+    known = ma_b.notna()
+    if params.bear_st_up:
+        d = supertrend_full(df15, int(params.bear_st[0]), float(params.bear_st[1]))["dir"]
+        ok &= d > 0
+        known &= d.notna()
+    return ok & known, known
+
+
 def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
            params: Params) -> pd.DataFrame | None:
     """15m 봉마다 ①②③ 판정 — 못 재면 None.
@@ -110,14 +133,18 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
     정배열은 MA480까지만 보므로 역배열(MA960)보다 일찍 잴 수 있다. 어느
     한쪽이라도 잴 수 있으면 판정한다.
     """
-    need = min(max(params.bear_align), max(params.bull_align))
+    bear_need = max(params.bear_band) if params.bear_mode == "band" else max(params.bear_align)
+    need = min(bear_need, max(params.bull_align))
     if len(df15) < need + 2 or df4h is None or len(df4h) < 10:
         return None
     band = _band_on_15m(df15, df4h, params.band_anchor, params.band_mult)
     if band is None:
         return None
     c = df15["Close"]
-    bear, bear_known = _stacked(c, params.bear_align, rising=False)
+    if params.bear_mode == "band":
+        bear, bear_known = _between(df15, params)
+    else:
+        bear, bear_known = _stacked(c, params.bear_align, rising=False)
     bull, _ = _stacked(c, params.bull_align, rising=True)
     dist = c / band.upper - 1
     rest = dist.abs() <= params.near_pct

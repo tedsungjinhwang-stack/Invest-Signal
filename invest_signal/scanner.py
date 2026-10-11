@@ -887,6 +887,10 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         log("[binance] 상승초입 건너뜀 — 4h 프레임이 없다(밴드를 못 낸다)")
         return [], []
     params = vwap_onset.Params(
+        bear_mode=str(s.get("bear_mode", "band")),
+        bear_band=tuple(s.get("bear_band", (240, 480))),
+        bear_st_up=bool(s.get("bear_st_up", True)),
+        bear_st=tuple(s.get("bear_st", (30, 6.0))),
         bear_align=tuple(s.get("bear_align", (240, 480, 960))),
         bull_align=tuple(s.get("bull_align", (120, 240, 480))),
         band_anchor=str(s.get("band_anchor", "M")),
@@ -944,8 +948,11 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         log(f"[binance] 상승초입 {len(events)}건 · 추적 {len(ongoing)}건"
             + (f" · 거래대금 하한 미달 {thin}건 제외" if thin else "")
             + (f" · 24h 하락 {falling}건 제외" if falling else "")
-            + f" (15m {'<'.join(str(x) for x in params.bear_align)} 역배열 또는 "
-              f"{'>'.join(str(x) for x in params.bull_align)} 정배열 · "
+            + (f" (15m {params.bear_band[0]}<종가<{params.bear_band[1]} 역배열 사이"
+               + ("·장기 수트 상승" if params.bear_st_up else "") + " 또는 "
+               if params.bear_mode == "band" else
+               f" (15m {'<'.join(str(x) for x in params.bear_align)} 역배열 또는 ")
+            + f"{'>'.join(str(x) for x in params.bull_align)} 정배열 · "
               f"종가가 {params.band_anchor} 상단 ±{params.near_pct:.0%}"
               + (f" · 24h {params.min_ret_24h:+.0%} 이상"
                  if params.min_ret_24h is not None else "") + ")")

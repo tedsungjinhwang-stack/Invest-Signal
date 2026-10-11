@@ -15,6 +15,7 @@ from invest_signal.signals.vwap_onset import tracking as _tracking
 
 def Params(**kw):
     kw.setdefault("upper_above_ma", None)
+    kw.setdefault("bear_mode", "align")        # 아래 픽스처는 예전 240<480<960 역배열 기준
     return _Params(**kw)
 
 
@@ -243,7 +244,8 @@ def test_scanner_drops_lines_whose_ticker_24h_is_negative():
     df4h = _f4h()
     up = _upper(_bear(), df4h)
     df15 = _tail(_bear(), up)
-    cfg = {"signal": {"vwap_onset": {"enabled": True, "upper_above_ma": None}}}
+    cfg = {"signal": {"vwap_onset": {"enabled": True, "upper_above_ma": None,
+                                     "bear_mode": "align"}}}
     rising = {"XUSDT": {"quote_volume": 5e6, "change_pct": 0.03}}
     falling = {"XUSDT": {"quote_volume": 5e6, "change_pct": -0.004}}
     logs = []
@@ -314,7 +316,29 @@ def test_upper_band_must_be_above_ma960():
     df15 = _tail(_bear(), up)
     assert _stack(df15, (960,))[0] > up
     assert len(detect(df15, df4h, "XUSDT")) == 1                         # 조건 끄면 뜬다
-    assert _detect(df15, df4h, "XUSDT") == []                            # 기본(960) — 안 뜬다
+    assert _detect(df15, df4h, "XUSDT", _Params(bear_mode="align")) == []  # 960 — 안 뜬다
     # 정배열(20 → 60, MA960 ≈ 40)은 상단선(≈140)이 MA960 위라 그대로 뜬다
     bull = _tail(_bull(), _upper(_bull(), df4h) * 1.01)
-    assert len(_detect(bull, df4h, "XUSDT")) == 1
+    assert len(_detect(bull, df4h, "XUSDT", _Params(bear_mode="align"))) == 1
+
+
+def test_bear_band_close_between_240_480_with_long_st_up():
+    """10-11 — 역배열 쪽: 15m MA240 < 종가 < MA480(MA240 < MA480) + 15m 장기 수트(30×6) 상승."""
+    from invest_signal.indicators import supertrend_full
+    # 길게 하락(MA480 > MA240) 뒤 반등해서 240선 위 · 480선 아래, 단기 반등으로 장기 수트도 상승
+    c = np.r_[np.linspace(300.0, 100.0, 900), np.linspace(100.0, 120.0, 200)]
+    df15 = _f15(c)
+    ma240, ma480 = df15.Close.rolling(240).mean().iloc[-1], df15.Close.rolling(480).mean().iloc[-1]
+    assert ma240 < df15.Close.iloc[-1] < ma480
+    assert supertrend_full(df15, 30, 6.0)["dir"].iloc[-1] > 0
+    ok, known = vo._between(df15, _Params())
+    assert ok.iloc[-1] and known.iloc[-1]
+    assert not vo._between(df15, _Params(bear_band=(240, 480)))[0].iloc[-500]   # MA 못 잼/조건 밖
+    # 장기 수트가 하락이면 안 된다
+    down = _f15(np.r_[np.linspace(300.0, 100.0, 900), np.linspace(100.0, 125.0, 150),
+                      np.linspace(125.0, 112.0, 50)])
+    if supertrend_full(down, 30, 6.0)["dir"].iloc[-1] < 0:
+        assert not vo._between(down, _Params())[0].iloc[-1]
+    assert vo._between(down, _Params(bear_st_up=False))[0].iloc[-1] == bool(
+        down.Close.rolling(240).mean().iloc[-1] < down.Close.iloc[-1]
+        < down.Close.rolling(480).mean().iloc[-1])
