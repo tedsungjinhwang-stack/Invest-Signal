@@ -888,7 +888,7 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         return [], []
     params = vwap_onset.Params(
         bear_mode=str(s.get("bear_mode", "band")),
-        bear_band=tuple(s.get("bear_band", (240, 480))),
+        bear_band=tuple(s.get("bear_band", (240, 960))),
         bear_st_up=bool(s.get("bear_st_up", True)),
         bear_st=tuple(s.get("bear_st", (30, 6.0))),
         bear_st_flip_bars=int(s.get("bear_st_flip_bars", 96)),

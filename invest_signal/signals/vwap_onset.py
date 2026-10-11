@@ -52,10 +52,10 @@ KLINE_LIMIT = 1000
 
 @dataclass(frozen=True)
 class Params:
-    # ① 역배열 쪽(10-11~ band): 15m MA240 < MA480이고 **종가가 그 사이**, 그리고 15m 장기 수퍼트렌드
+    # ① 역배열 쪽(10-11~ band): 15m MA240 < MA960이고 **종가가 그 사이**, 그리고 15m 장기 수퍼트렌드
     #    (30×6)가 상승(상승 전환 뒤). bear_mode="align"이면 예전 240 < 480 < 960 쌓임.
     bear_mode: str = "band"
-    bear_band: tuple = (240, 480)
+    bear_band: tuple = (240, 960)        # 10-11: 480 → 960 (요청)
     bear_st_up: bool = True
     bear_st: tuple = (30, 6.0)           # 15m 장기 수퍼트렌드 (ATR 기간, 배수)
     # 장기 수트가 **최근 bear_st_flip_bars봉 안에** 하락→상승으로 돌파·전환했어야 한다(10-11). 0이면
