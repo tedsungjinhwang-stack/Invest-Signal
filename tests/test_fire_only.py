@@ -178,3 +178,13 @@ def test_leader_only_triggers_keeps_just_pullback_rows(monkeypatch, tmp_path):
     assert ">F<" not in msg and "↳ H " not in msg and "24h 상승률 TOP" not in msg
     st = AlertState(state_path)
     assert not st.is_new(pb.dedup_key) and st.is_new(fire_lb.dedup_key)
+
+
+def test_onset_in_always_show_passes_without_fire():
+    """10-11 — 🟢상승초입은 🔥 없이도 싣고 🔥는 표시만."""
+    plain = _ev("OUSDT", "vwap_onset")
+    fire = _ev("PUSDT", "vwap_onset", fire=True)
+    always = ("spike_bar", "vwap_onset")
+    assert [e.symbol for e in notify.fire_only([plain, fire], always)] == ["OUSDT", "PUSDT"]
+    assert notify.fire_only_title([plain], always) == "🟢 <b>상승초입</b>"
+    assert notify.fire_only_title([plain, fire], always) == "🔥 <b>떡상조짐</b> · 🟢 <b>상승초입</b>"

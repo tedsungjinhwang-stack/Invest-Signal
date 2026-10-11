@@ -168,7 +168,8 @@ WARN_TAG = "⚠️"
 # fire_only 모드(설정 notify.fire_only)에서도 🔥 없이 항상 싣는 칸 — 🚀급등봉 · 🚨세력 이탈 ·
 # 🔻하락 CHoCH · 🌊일봉 파동(10-04~). 설정 notify.always_show로 바꿀 수 있다 — 값은
 # 시그널 이름 또는 `시그널:stage`(그 변형만). 값은 머리에 적을 이름.
-ALWAYS_TITLES = {"spike_bar": "🚀 <b>급등봉</b>", "whale_exit": "🚨 <b>세력 이탈</b>",
+ALWAYS_TITLES = {"spike_bar": "🚀 <b>급등봉</b>", "vwap_onset": "🟢 <b>상승초입</b>",
+                 "whale_exit": "🚨 <b>세력 이탈</b>",
                  "choch_warn": "🔻 <b>하락 CHoCH</b>",
                  "wave_setup:일봉ABC": "🌊 <b>일봉 파동</b>",
                  "wave_setup:일봉장기선돌파": "🌊 <b>일봉 파동</b>",

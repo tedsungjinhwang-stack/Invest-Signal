@@ -16,8 +16,9 @@ notify:
   leader_only_triggers: ["🎯눌림목타점"]
   # 🔥 없이도 항상 싣는 칸 — 시그널 이름 또는 `시그널:stage`(그 변형만)
   # (10-01 급등봉 · 10-02 세력 이탈 · 10-04 파동의 일봉 단기·장기 추세선)
-  always_show: [spike_bar, whale_exit, choch_warn, "wave_setup:일봉ABC", "wave_setup:일봉장기선돌파",
+  always_show: [spike_bar, vwap_onset, whale_exit, choch_warn, "wave_setup:일봉ABC", "wave_setup:일봉장기선돌파",
                 "leader_break:🎯눌림목타점"]   # ⚡ • 🆕🎯눌림목타점(10-11)도 🔥 없이
+  # vwap_onset(10-11): 🟢상승초입은 역배열 자리면 🔥 없이도 다 싣는다 — 🔥는 줄 앞 표시로만
 
 signal:
   spike_bar:                # 급등봉 (15m봉, 크립토 전용): 장대양봉 하나를 잡는다
