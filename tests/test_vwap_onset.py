@@ -322,36 +322,26 @@ def test_upper_band_must_be_above_ma960():
     assert len(_detect(bull, df4h, "XUSDT", _Params(bear_mode="align"))) == 1
 
 
-def test_bear_band_close_between_240_480_with_long_st_up():
-    """10-11 — 역배열 쪽: 15m MA240 < 종가 < MA480(MA240 < MA480) + 15m 장기 수트(30×6) 상승."""
-    from invest_signal.indicators import supertrend_full
-    # 길게 하락(MA480 > MA240) 뒤 반등해서 240선 위 · 480선 아래, 단기 반등으로 장기 수트도 상승
-    c = np.r_[np.linspace(300.0, 100.0, 900), np.linspace(100.0, 120.0, 200)]
-    df15 = _f15(c)
-    ma240, ma480 = df15.Close.rolling(240).mean().iloc[-1], df15.Close.rolling(480).mean().iloc[-1]
-    assert ma240 < df15.Close.iloc[-1] < ma480
-    assert supertrend_full(df15, 30, 6.0)["dir"].iloc[-1] > 0
-    ok, known = vo._between(df15, _Params(bear_st_flip_bars=0))
-    assert ok.iloc[-1] and known.iloc[-1]
-    assert not vo._between(df15, _Params(bear_band=(240, 480)))[0].iloc[-500]   # MA 못 잼/조건 밖
-    # 장기 수트가 하락이면 안 된다
-    down = _f15(np.r_[np.linspace(300.0, 100.0, 900), np.linspace(100.0, 125.0, 150),
-                      np.linspace(125.0, 112.0, 50)])
-    if supertrend_full(down, 30, 6.0)["dir"].iloc[-1] < 0:
-        assert not vo._between(down, _Params())[0].iloc[-1]
-    assert vo._between(down, _Params(bear_st_up=False, bear_st_flip_bars=0))[0].iloc[-1] == bool(
-        down.Close.rolling(240).mean().iloc[-1] < down.Close.iloc[-1]
-        < down.Close.rolling(480).mean().iloc[-1])
-
-
-def test_bear_band_needs_recent_long_st_flip():
-    """10-11 — 장기 수트가 지금 상승이어도 전환이 bear_st_flip_bars봉보다 오래면 안 된다."""
+def test_bear_band_close_between_240_and_upper_with_30m_long_st_flip():
+    """10-11 최종 — 역배열 쪽: 15m MA240 < 종가 < 월 VWAP 상단선 + 30m 장기 수트(30×6) 최근 상승 전환."""
     from invest_signal.indicators import supertrend_full
     c = np.r_[np.linspace(300.0, 100.0, 900), np.linspace(100.0, 120.0, 200)]
     df15 = _f15(c)
-    d = supertrend_full(df15, 30, 6.0)["dir"].to_numpy()
+    upper = pd.Series(125.0, index=df15.index)
+    ma240 = df15.Close.rolling(240).mean().iloc[-1]
+    assert ma240 < df15.Close.iloc[-1] < 125.0
+    f30 = df15.resample("30min").agg({"Open": "first", "High": "max", "Low": "min",
+                                      "Close": "last", "Volume": "sum"})
+    d = supertrend_full(f30, 30, 6.0)["dir"].to_numpy()
     flips = [i for i in range(1, len(d)) if d[i] > 0 and d[i - 1] < 0]
+    assert d[-1] > 0 and flips
     age = len(d) - 1 - flips[-1]
-    assert vo._between(df15, _Params(bear_st_flip_bars=age + 1))[0].iloc[-1]
-    assert not vo._between(df15, _Params(bear_st_flip_bars=max(1, age - 1)))[0].iloc[-1]
-    assert vo._between(df15, _Params(bear_st_flip_bars=0))[0].iloc[-1]
+    ok, known = vo._between(df15, _Params(bear_st_flip_bars=age + 1), upper)
+    assert ok.iloc[-1] and known.iloc[-1]
+    assert not vo._between(df15, _Params(bear_st_flip_bars=max(1, age - 1)), upper)[0].iloc[-1]
+    # 종가가 상단선 위면 사이가 아니다
+    assert not vo._between(df15, _Params(bear_st_flip_bars=0),
+                           pd.Series(110.0, index=df15.index))[0].iloc[-1]
+    # 상단선 대신 MA960(예전 설정)도 그대로 된다
+    assert vo._between(df15, _Params(bear_st_flip_bars=0, bear_upper=960))[0].iloc[-1] == bool(
+        ma240 < df15.Close.iloc[-1] < df15.Close.rolling(960).mean().iloc[-1])

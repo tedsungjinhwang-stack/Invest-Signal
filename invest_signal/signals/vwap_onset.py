@@ -52,15 +52,17 @@ KLINE_LIMIT = 1000
 
 @dataclass(frozen=True)
 class Params:
-    # ① 역배열 쪽(10-11~ band): 15m MA240 < MA960이고 **종가가 그 사이**, 그리고 15m 장기 수퍼트렌드
+    # ① 역배열 쪽(10-11~ band): 15m MA240 < **종가 < 월 VWAP 상단선**, 그리고 30m 장기 수퍼트렌드
     #    (30×6)가 상승(상승 전환 뒤). bear_mode="align"이면 예전 240 < 480 < 960 쌓임.
     bear_mode: str = "band"
-    bear_band: tuple = (240, 960)        # 10-11: 480 → 960 (요청)
+    bear_lower_ma: int = 240             # 아래 선 — 15m MA240
+    bear_upper: object = "band"          # 위 선 — "band"(월 VWAP 상단선, 10-11 최종) 또는 MA 기간
     bear_st_up: bool = True
-    bear_st: tuple = (30, 6.0)           # 15m 장기 수퍼트렌드 (ATR 기간, 배수)
+    bear_st: tuple = (30, 6.0)           # 장기 수퍼트렌드 (ATR 기간, 배수)
+    bear_st_tf: str = "30m"              # 장기 수트를 볼 봉 — 30m(10-11 최종, 15m를 묶는다) 또는 15m
     # 장기 수트가 **최근 bear_st_flip_bars봉 안에** 하락→상승으로 돌파·전환했어야 한다(10-11). 0이면
     # 지금 상승이기만 하면 된다.
-    bear_st_flip_bars: int = 96          # 15m × 96 = 24시간
+    bear_st_flip_bars: int = 48          # bear_st_tf 봉 수 — 30m × 48 = 24시간
     bear_align: tuple = (240, 480, 960)  # ① 15m 역배열 판정선 (bear_mode="align"일 때)
     bull_align: tuple = (120, 240, 480)  # ① 15m 정배열 판정선 — 둘 중 하나면 된다
     band_anchor: str = "M"              # ② 이 앵커드 VWAP의 상단밴드 (M=월)
@@ -112,24 +114,55 @@ def _stacked(c: pd.Series, periods: tuple, rising: bool) -> tuple:
     return ok & known, known
 
 
-def _between(df15: pd.DataFrame, params: Params) -> tuple:
-    """(역배열 사이 + 장기 수트 상승, 잴 수 있는가) — 10-11~ 역배열 쪽 판정.
+def _st_on_15m(df15: pd.DataFrame, params: Params) -> tuple:
+    """장기 수퍼트렌드를 bear_st_tf(15m/30m) 봉으로 재서 15m 봉마다 (상승이고 최근 전환, 잴 수 있나).
 
-    MA(짧은) < MA(긴)이고 종가가 두 선 사이, bear_st_up이면 15m 장기 수퍼트렌드가 상승이고
-    최근 bear_st_flip_bars봉 안에 하락→상승으로 전환(캔들이 장기선을 돌파)했다.
+    30m는 15m 둘을 묶는다(다 찬 봉만). 15m 봉에는 그 봉 마감 시각까지 **마감된** 30m봉 값을 붙인다.
+    """
+    p, m = int(params.bear_st[0]), float(params.bear_st[1])
+    if params.bear_st_tf == "30m":
+        g = df15.resample("30min")
+        f = g.agg({"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"})
+        f = f[g["Close"].count() == 2].dropna()
+        step = pd.Timedelta(minutes=30)
+    else:
+        f, step = df15, pd.Timedelta(minutes=15)
+    if len(f) < p + 2:
+        nan = pd.Series(False, index=df15.index)
+        return nan, nan
+    d = supertrend_full(f, p, m)["dir"]
+    ok = d > 0
+    if params.bear_st_flip_bars > 0:
+        flip = ((d > 0) & (d.shift(1) < 0)).astype(float)
+        ok &= flip.rolling(params.bear_st_flip_bars, min_periods=1).max() > 0
+    known = d.notna()
+    close_t = df15.index + pd.Timedelta(minutes=15)
+    ok = pd.Series(ok.to_numpy(), index=f.index + step).reindex(close_t, method="ffill")
+    known = pd.Series(known.to_numpy(), index=f.index + step).reindex(close_t, method="ffill")
+    return (pd.Series(ok.fillna(False).astype(bool).to_numpy(), index=df15.index),
+            pd.Series(known.fillna(False).astype(bool).to_numpy(), index=df15.index))
+
+
+def _between(df15: pd.DataFrame, params: Params, upper: pd.Series | None = None) -> tuple:
+    """(역배열 쪽 자리, 잴 수 있는가) — 10-11~.
+
+    bear_upper="band"(기본): MA(bear_lower_ma) < 종가 < 월 VWAP 상단선.
+    bear_upper=정수: MA(bear_lower_ma) < 종가 < MA(그 정수)(예전 240~960 · 240~480).
+    bear_st_up이면 장기 수퍼트렌드(bear_st, bear_st_tf 봉)가 상승이고 최근 bear_st_flip_bars봉 안에
+    하락→상승으로 전환(캔들이 장기선을 돌파)했다.
     """
     c = df15["Close"]
-    a, b = params.bear_band
-    ma_a, ma_b = c.rolling(a).mean(), c.rolling(b).mean()
-    ok = (ma_a < ma_b) & (c > ma_a) & (c < ma_b)
-    known = ma_b.notna()
+    lo = c.rolling(params.bear_lower_ma).mean()
+    if params.bear_upper == "band":
+        hi = upper if upper is not None else pd.Series(np.nan, index=c.index)
+    else:
+        hi = c.rolling(int(params.bear_upper)).mean()
+    ok = (lo < hi) & (c > lo) & (c < hi)
+    known = lo.notna() & hi.notna()
     if params.bear_st_up:
-        d = supertrend_full(df15, int(params.bear_st[0]), float(params.bear_st[1]))["dir"]
-        ok &= d > 0
-        known &= d.notna()
-        if params.bear_st_flip_bars > 0:
-            flip = ((d > 0) & (d.shift(1) < 0)).astype(float)
-            ok &= flip.rolling(params.bear_st_flip_bars, min_periods=1).max() > 0
+        st_ok, st_known = _st_on_15m(df15, params)
+        ok &= st_ok
+        known &= st_known
     return ok & known, known
 
 
@@ -140,7 +173,7 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
     정배열은 MA480까지만 보므로 역배열(MA960)보다 일찍 잴 수 있다. 어느
     한쪽이라도 잴 수 있으면 판정한다.
     """
-    bear_need = max(params.bear_band) if params.bear_mode == "band" else max(params.bear_align)
+    bear_need = (params.bear_lower_ma if params.bear_mode == "band" else max(params.bear_align))
     need = min(bear_need, max(params.bull_align))
     if len(df15) < need + 2 or df4h is None or len(df4h) < 10:
         return None
@@ -149,7 +182,7 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
         return None
     c = df15["Close"]
     if params.bear_mode == "band":
-        bear, bear_known = _between(df15, params)
+        bear, bear_known = _between(df15, params, band.upper)
     else:
         bear, bear_known = _stacked(c, params.bear_align, rising=False)
     bull, _ = _stacked(c, params.bull_align, rising=True)
