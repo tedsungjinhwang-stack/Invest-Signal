@@ -113,6 +113,7 @@ def test_bullish_near_the_month_band_fires():
     assert len(got) == 1
     d = got[0].detail
     assert d["trend"] == "정배열"
+    assert detect(df15, df4h, "XUSDT", Params(bull_enabled=False)) == []   # 10-11 — 역배열 자리만
     assert 0 < d["band_dist"] <= 0.02
 
 

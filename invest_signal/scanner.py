@@ -902,6 +902,7 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         bear_st_flip_bars=int(s.get("bear_st_flip_bars", 96)),
         bear_align=tuple(s.get("bear_align", (240, 480, 960))),
         bull_align=tuple(s.get("bull_align", (120, 240, 480))),
+        bull_enabled=bool(s.get("bull_enabled", True)),
         band_anchor=str(s.get("band_anchor", "M")),
         band_mult=float(s.get("band_mult", 1.0)),
         near_pct=float(s.get("near_pct", 0.02)),
@@ -961,11 +962,13 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
                + ("월상단" if params.bear_upper == "band" else f"{params.bear_upper}선")
                + (f"·{params.bear_st_tf} 장기 수트 {params.bear_st_flip_bars}봉 안 상승 전환"
                   if params.bear_st_up else "")
-               + " 또는 "
+               + (" 또는 " if params.bull_enabled else " · ")
                if params.bear_mode == "band" else
-               f" (15m {'<'.join(str(x) for x in params.bear_align)} 역배열 또는 ")
-            + f"{'>'.join(str(x) for x in params.bull_align)} 정배열 · "
-              f"종가가 {params.band_anchor} 상단 ±{params.near_pct:.0%}"
+               f" (15m {'<'.join(str(x) for x in params.bear_align)} 역배열"
+               + (" 또는 " if params.bull_enabled else " · "))
+            + (f"{'>'.join(str(x) for x in params.bull_align)} 정배열 · "
+               if params.bull_enabled else "")
+            + f"종가가 {params.band_anchor} 상단 ±{params.near_pct:.0%}"
               + (f" · 24h {params.min_ret_24h:+.0%} 이상"
                  if params.min_ret_24h is not None else "") + ")")
     return events, ongoing

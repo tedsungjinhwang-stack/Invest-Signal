@@ -113,7 +113,8 @@ signal:
     bear_st_tf: 15m         # 장기 수트를 볼 봉 (15m · 30m)
     bear_st_flip_bars: 96   # 15m × 96 = 24시간 안의 상승 전환
     bear_align: [240, 480, 960] # ① 15m 역배열 판정선 (bear_mode: align일 때만)
-    bull_align: [120, 240, 480] # ① 15m 정배열 판정선 — 둘 중 하나면 된다
+    bull_align: [120, 240, 480] # ① 15m 정배열 판정선 (bull_enabled: true일 때만)
+    bull_enabled: false         # 10-11 요청 — 정배열 쪽은 빼고 역배열 자리만
     band_anchor: M              # ② 이 앵커드 VWAP의 상단밴드 (M=월)
     band_mult: 1.0              # ② 표준편차 배수 (사진의 밴드 배수 #1)
     near_pct: 0.02              # ② '근처' 허용폭 — ±2%

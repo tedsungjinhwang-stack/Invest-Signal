@@ -65,6 +65,7 @@ class Params:
     bear_st_flip_bars: int = 96          # bear_st_tf 봉 수 — 15m × 96 = 24시간
     bear_align: tuple = (240, 480, 960)  # ① 15m 역배열 판정선 (bear_mode="align"일 때)
     bull_align: tuple = (120, 240, 480)  # ① 15m 정배열 판정선 — 둘 중 하나면 된다
+    bull_enabled: bool = True            # False면 정배열 쪽은 안 본다 (역배열 자리만)
     band_anchor: str = "M"              # ② 이 앵커드 VWAP의 상단밴드 (M=월)
     band_mult: float = 1.0              # ② 표준편차 배수
     near_pct: float = 0.02              # ② 종가가 상단밴드의 ±2% 안
@@ -174,7 +175,7 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
     한쪽이라도 잴 수 있으면 판정한다.
     """
     bear_need = (params.bear_lower_ma if params.bear_mode == "band" else max(params.bear_align))
-    need = min(bear_need, max(params.bull_align))
+    need = min(bear_need, max(params.bull_align)) if params.bull_enabled else bear_need
     if len(df15) < need + 2 or df4h is None or len(df4h) < 10:
         return None
     band = _band_on_15m(df15, df4h, params.band_anchor, params.band_mult)
@@ -185,7 +186,10 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
         bear, bear_known = _between(df15, params, band.upper)
     else:
         bear, bear_known = _stacked(c, params.bear_align, rising=False)
-    bull, _ = _stacked(c, params.bull_align, rising=True)
+    if params.bull_enabled:
+        bull, _ = _stacked(c, params.bull_align, rising=True)
+    else:
+        bull = pd.Series(False, index=c.index)
     dist = c / band.upper - 1
     rest = dist.abs() <= params.near_pct
     if params.band_gap:
