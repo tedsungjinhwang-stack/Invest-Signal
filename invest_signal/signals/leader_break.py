@@ -68,6 +68,7 @@ class Params:
     exhausted_mas: tuple = (120, 240, 480)   # 1h봉 정배열 판정선
     # ② 4h 장기 수퍼트렌드가 상승이어야 한다 — 선은 turn_slow_* 를 같이 쓴다
     # '조용한' 종목 표시 기준 — 거르지 않고 태그만 붙인다(quiet() 참고)
+    quiet_enabled: bool = True               # 🍃조용 표시 (10-11 config에서 끔)
     quiet_turnover_usd: float = 6_000_000    # 24h 거래대금이 이 아래이고
     quiet_atr_pct: float = 0.073             # 4h ATR÷종가가 이 아래면 조용
     quiet_atr_period: int = 14
@@ -319,6 +320,8 @@ def quiet(stat: dict | None, df4h: pd.DataFrame | None,
 
     판단에 필요한 값이 없으면 None — 조용하다고도, 아니라고도 하지 않는다.
     """
+    if not params.quiet_enabled:
+        return None
     turnover = (stat or {}).get("quote_volume")
     if turnover is None or df4h is None or len(df4h) <= params.quiet_atr_period:
         return None
