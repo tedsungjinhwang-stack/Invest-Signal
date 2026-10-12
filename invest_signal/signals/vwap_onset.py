@@ -76,6 +76,12 @@ class Params:
     # ② 추가(10-10 요청) — 월 VWAP 상단선이 15m MA(upper_above_ma) **위**여야 한다. None이면 안 본다.
     # MA960은 1,000봉 중 마지막 41봉에서만 서므로, 못 재는 앞쪽 봉은 통과로 둔다(재알림 판정용).
     upper_above_ma: int | None = 960
+    # ④ 바닥 근처(10-12) — 종가가 15m 7일(672봉) 최저가 대비 +max_from_low 이내. None이면 안 본다.
+    # 퍼프 백테스트(07-20~10-10, 620종): 지금 조건 전체 '+30%가 −15%보다 먼저' 44%(보통 45%와 같음) →
+    # +10% 이내 58%(앞/뒤 56/59%) · ±10% 65%(보통 60%) · 하루 88 → 48건. +5% 이내는 71%지만
+    # 움직임이 작아(7일 최고 중앙 +6.8%) 힘 없는 종목이 많다며 +10%로(10-12 요청).
+    max_from_low: float | None = 0.10
+    low_bars: int = 672
     rearm_bars: int = 96                # 나갔다 이만큼 안에 다시 들어오면 새로 안 알린다
     grace_bars: int = 4                 # 15m × 4 = 1시간(스캔 주기)
     min_turnover_usd: float = 1_000_000
@@ -202,6 +208,11 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
         rest &= (band.upper > ma) | ma.isna()
     if params.near_enabled or params.bear_mode != "band":
         rest &= near                    # ② 상단밴드 근처 — 끄면 정배열만 따로 본다
+    # ④ 15m 7일 최저가 대비 — 바닥에서 아직 안 떠난 자리만
+    low15 = df15["Low"].rolling(params.low_bars).min()
+    from_low = c / low15 - 1
+    if params.max_from_low is not None:
+        rest &= from_low <= params.max_from_low
     # ③ 24h = 15m 96봉 전 종가 대비. 봉마다 재야 진입 봉을 정할 수 있다
     # (스캔 시점의 티커 값은 스캐너가 한 번 더 거른다).
     d1 = c / c.shift(96) - 1
@@ -218,7 +229,7 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
                          "bear_known": bear_known, "upper": band.upper,
                          "vwap": band.vwap, "dist": dist,
                          "ret_24h": d1, "ret_7d": d7, "rest": rest,
-                         "ma1h20": ma1h20, "from_7d_low": f7l,
+                         "ma1h20": ma1h20, "from_7d_low": f7l, "from_low15": from_low,
                          "ok": (bear | (bull & near)) & rest})
 
 
@@ -233,6 +244,8 @@ def _detail(row, params: Params) -> dict:
         d["ret_24h"] = float(row.ret_24h)   # 티커 값(gain_24h)이 있으면 그게 우선
     if pd.notna(row.ret_7d):
         d["ret_7d"] = float(row.ret_7d)
+    if pd.notna(row.from_low15):
+        d["from_low"] = float(row.from_low15)  # 15m 7일 최저가 대비
     f = fire(row, params)
     if f is not None:
         d["fire"] = f

@@ -938,6 +938,9 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
                         else int(s.get("upper_above_ma", 960))),
         min_ret_24h=(None if s.get("min_ret_24h", 0.0) is None
                      else float(s.get("min_ret_24h", 0.0))),
+        max_from_low=(None if s.get("max_from_low", 0.10) is None
+                      else float(s.get("max_from_low", 0.10))),
+        low_bars=int(s.get("low_bars", 672)),
         rearm_bars=int(s.get("rearm_bars", 96)),
         grace_bars=int(s.get("grace_bars", 4)),
         min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
@@ -995,6 +998,7 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
             + (f"종가가 {params.band_anchor} 상단 ±{params.near_pct:.0%}"
                if params.near_enabled or params.bull_enabled
                else f"{params.band_anchor} 상단 > {params.upper_above_ma}선")
+              + (f" · 7d저점 +{params.max_from_low:.0%} 이내" if params.max_from_low is not None else "")
               + (f" · 24h {params.min_ret_24h:+.0%} 이상"
                  if params.min_ret_24h is not None else "") + ")")
     return events, ongoing

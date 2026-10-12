@@ -304,6 +304,8 @@ def _band_tags(d: dict) -> list[str]:
     if d.get("band_dist") is not None:
         name = BAND_NAME.get(d.get("near_band"), d.get("near_band") or "상단")
         tags.append(f"{name} {_pct(d['band_dist'])}")
+    if d.get("from_low") is not None:
+        tags.append(f"7d저점 {_pct(d['from_low'])}")
     return tags
 
 
