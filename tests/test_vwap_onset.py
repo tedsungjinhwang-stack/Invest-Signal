@@ -16,7 +16,6 @@ from invest_signal.signals.vwap_onset import tracking as _tracking
 def Params(**kw):
     kw.setdefault("upper_above_ma", None)
     kw.setdefault("bear_mode", "align")        # 아래 픽스처는 예전 240<480<960 역배열 기준
-    kw.setdefault("max_from_low", None)        # 7일 저점 근처(10-12)는 따로 본다
     return _Params(**kw)
 
 
@@ -247,7 +246,7 @@ def test_scanner_drops_lines_whose_ticker_24h_is_negative():
     up = _upper(_bear(), df4h)
     df15 = _tail(_bear(), up)
     cfg = {"signal": {"vwap_onset": {"enabled": True, "upper_above_ma": None,
-                                     "bear_mode": "align", "max_from_low": None}}}
+                                     "bear_mode": "align"}}}
     rising = {"XUSDT": {"quote_volume": 5e6, "change_pct": 0.03}}
     falling = {"XUSDT": {"quote_volume": 5e6, "change_pct": -0.004}}
     logs = []
@@ -318,10 +317,10 @@ def test_upper_band_must_be_above_ma960():
     df15 = _tail(_bear(), up)
     assert _stack(df15, (960,))[0] > up
     assert len(detect(df15, df4h, "XUSDT")) == 1                         # 조건 끄면 뜬다
-    assert _detect(df15, df4h, "XUSDT", _Params(bear_mode="align", max_from_low=None)) == []  # 960 — 안 뜬다
+    assert _detect(df15, df4h, "XUSDT", _Params(bear_mode="align")) == []  # 960 — 안 뜬다
     # 정배열(20 → 60, MA960 ≈ 40)은 상단선(≈140)이 MA960 위라 그대로 뜬다
     bull = _tail(_bull(), _upper(_bull(), df4h) * 1.01)
-    assert len(_detect(bull, df4h, "XUSDT", _Params(bear_mode="align", max_from_low=None))) == 1
+    assert len(_detect(bull, df4h, "XUSDT", _Params(bear_mode="align"))) == 1
 
 
 def test_bear_band_close_between_240_and_upper_with_long_st_flip():
@@ -367,29 +366,7 @@ def test_near_disabled_lets_bear_band_rows_far_below_upper(monkeypatch):
     yes = pd.Series(True, index=df15.index)
     monkeypatch.setattr(vo, "_between", lambda *a: (yes, yes))
     df4h = _f4h()
-    p = _Params(upper_above_ma=None, min_ret_24h=None, max_from_low=None)
+    p = _Params(upper_above_ma=None, min_ret_24h=None)
     assert not vo._state(df15, df4h, p).ok.iloc[-1]
-    assert vo._state(df15, df4h, _Params(upper_above_ma=None, min_ret_24h=None, max_from_low=None,
+    assert vo._state(df15, df4h, _Params(upper_above_ma=None, min_ret_24h=None,
                                          near_enabled=False, bull_enabled=False)).ok.iloc[-1]
-
-
-
-def test_near_7d_low_filter(monkeypatch):
-    """10-12 — 종가가 15m 7일(672봉) 최저가 대비 +max_from_low(기본 +10%) 이내일 때만."""
-    n = 1100
-    c = np.r_[np.linspace(150.0, 100.0, 900), np.linspace(100.0, 104.0, 200)]   # 저점 100 → 104(+4%)
-    df15 = _f15(c)
-    band = pd.DataFrame({"upper": 150.0, "vwap": 100.0}, index=df15.index)
-    monkeypatch.setattr(vo, "_band_on_15m", lambda *a: band)
-    yes = pd.Series(True, index=df15.index)
-    monkeypatch.setattr(vo, "_between", lambda *a: (yes, yes))
-    base = dict(upper_above_ma=None, min_ret_24h=None, near_enabled=False, bull_enabled=False)
-    st = vo._state(df15, _f4h(), _Params(**base))
-    assert st.ok.iloc[-1] and abs(st.from_low15.iloc[-1] - (104 / df15.Low.iloc[-672:].min() - 1)) < 1e-9
-    assert not vo._state(df15, _f4h(), _Params(**base, max_from_low=0.03)).ok.iloc[-1]
-    assert vo._state(df15, _f4h(), _Params(**base, max_from_low=0.10)).ok.iloc[-1]
-    assert vo._state(df15, _f4h(), _Params(**base, max_from_low=None)).ok.iloc[-1]
-    d = vo._detail(st.iloc[-1], _Params(**base))
-    out = notify.format_events([vo.SignalEvent(symbol="XUSDT", signal="vwap_onset",
-                                               bar_time=df15.index[-1], price=104.0, detail=d)], [], {})
-    assert "7d저점 +4." in out
