@@ -918,7 +918,7 @@ def test_to_30m_keeps_only_complete_bars():
 
 
 def test_pullback_flip_in_15m_uptrend_alignment():
-    """10-11 — 🎯눌림목타점: 15m 240>480>960 정배열에서 장기 수트(30×6) 하락→상승 전환 봉."""
+    """10-11 — 🎯눌림목돌파타점(10-12 이름 바꿈): 15m 240>480>960 정배열에서 장기 수트(30×6) 하락→상승 전환 봉."""
     from invest_signal.indicators import supertrend_full
     # 길게 오르다(정배열) 짧게 눌리고 다시 오른다 — 눌림 끝에서 장기 수트가 다시 상승 전환
     closes = np.r_[np.linspace(100, 300, 1100), np.linspace(300, 255, 60), np.linspace(255, 290, 60)]
@@ -931,9 +931,9 @@ def test_pullback_flip_in_15m_uptrend_alignment():
     assert leader_break.pullback_flips(part, P, 4) == [t0]
     now = part.index[-1] + pd.Timedelta(minutes=15)
     trig = leader_break.entry_triggers(None, None, None, P, now, part)
-    assert (leader_break.ENTRY_PULLBACK, now) in trig
-    off = dataclasses_replace(P, entry_pullback=False)
-    assert leader_break.ENTRY_PULLBACK not in [n for n, _ in
+    assert (leader_break.ENTRY_PULLBACK_BREAK, now) in trig
+    off = dataclasses_replace(P, entry_pullback_break=False)
+    assert leader_break.ENTRY_PULLBACK_BREAK not in [n for n, _ in
                                               leader_break.entry_triggers(None, None, None, off, now, part)]
     # 역배열(하락 추세)에서의 전환은 아니다
     down = _bars(np.r_[np.linspace(300, 100, 1100), np.linspace(100, 80, 60), np.linspace(80, 95, 60)],
@@ -954,3 +954,35 @@ def test_pullback_align_accepts_or_groups():
     assert stacked_any(c, ((240, 480, 960), (480, 960)))[t[0]]
     assert stacked_any(c, (480, 960))[t[0]]
     assert not stacked_any(c, (480, 960))[100]                     # 기간 모자라면 False
+
+
+def _touch_frame():
+    """오래 오르다(120>240>480) 상승 장기 수트까지 내려와 닿고 종가는 지킨 봉이 있는 15m."""
+    from invest_signal.indicators import supertrend_full
+    n = 900
+    c = np.linspace(100, 200, n)
+    df = _bars(c, "15min", spread=0.002)
+    st = supertrend_full(df, 30, 6.0)
+    line = st["line"].to_numpy()
+    t0 = n - 1
+    df = df.copy()
+    df.iloc[t0, df.columns.get_loc("Low")] = line[t0] * 0.999
+    df.iloc[t0, df.columns.get_loc("Close")] = line[t0] * 1.01
+    return df, t0
+
+
+def test_pullback_touch_on_rising_long_st_above_240():
+    """10-12 — 🎯눌림목타점: 15m 120>240>480 · 캔들이 240선 위 · 상승 장기 수트(30×6) 터치."""
+    df, t0 = _touch_frame()
+    c = df["Close"]
+    m120, m240 = c.rolling(120).mean().iloc[t0], c.rolling(240).mean().iloc[t0]
+    assert df["Low"].iloc[t0] > m240 and m120 > m240
+    assert leader_break.pullback_touches(df, P, 4) == [t0]
+    now = df.index[-1] + pd.Timedelta(minutes=15)
+    names = [n for n, _ in leader_break.entry_triggers(None, None, None, P, now, df)]
+    assert leader_break.ENTRY_PULLBACK in names
+    # 캔들이 240선까지 내려오면(저가 ≤ MA240) 아니다
+    assert leader_break.pullback_touches(df, dataclasses_replace(P, entry_touch_above=60), 4) == []
+    off = dataclasses_replace(P, entry_pullback=False)
+    assert leader_break.ENTRY_PULLBACK not in [
+        n for n, _ in leader_break.entry_triggers(None, None, None, off, now, df)]

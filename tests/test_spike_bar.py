@@ -192,15 +192,39 @@ def test_pullback_entry_after_spike_on_aligned_long_st_flip():
     t0 = flips[-1]
     spike = SignalEvent(symbol="XUSDT", signal="spike_bar", bar_time=idx[t0 - 50], price=c[t0 - 50],
                         detail={"label": "급등봉", "body": 0.1, "vol_mult": 12.0})
-    ev = spike_bar.pullback_entry(df.iloc[:t0 + 1], "XUSDT", spike=spike)
+    ev = spike_bar.pullback_break(df.iloc[:t0 + 1], "XUSDT", spike=spike)
     assert ev is not None and ev.bar_time == idx[t0]
-    assert ev.detail["stage"] == "눌림목타점" and ev.dedup_key.endswith("|눌림목타점")
-    assert spike_bar.pullback_entry(df.iloc[:t0 + 10], "XUSDT", spike=spike) is None      # grace 밖
+    assert ev.detail["stage"] == "눌림목돌파타점" and ev.dedup_key.endswith("|눌림목돌파타점")
+    assert spike_bar.pullback_break(df.iloc[:t0 + 10], "XUSDT", spike=spike) is None      # grace 밖
     late = SignalEvent(symbol="XUSDT", signal="spike_bar", bar_time=idx[t0], price=c[t0], detail={})
-    assert spike_bar.pullback_entry(df.iloc[:t0 + 1], "XUSDT", spike=late) is None        # 급등 전 전환
-    assert spike_bar.pullback_entry(df.iloc[:t0 + 1], "XUSDT", Params(pullback_enabled=False),
+    assert spike_bar.pullback_break(df.iloc[:t0 + 1], "XUSDT", spike=late) is None        # 급등 전 전환
+    assert spike_bar.pullback_break(df.iloc[:t0 + 1], "XUSDT", Params(pullback_break_enabled=False),
                                     spike=spike) is None
     from invest_signal import notify
     ev.detail["since"] = 0.05
     line = [ln for ln in notify.format_events([ev], [], {}).splitlines() if ">X<" in ln][0]
-    assert "🎯15m눌림목타점 🕒" in line and "급등 후 +5.0%" in line
+    assert "🎯15m눌림목돌파타점 🕒" in line and "급등 후 +5.0%" in line
+
+
+def test_pullback_touch_after_spike():
+    """10-12 — 급등 뒤 🎯눌림목타점(120>240>480 · 240선 위 · 상승 장기 수트 터치)."""
+    from invest_signal.indicators import supertrend_full
+    from invest_signal.signals import SignalEvent
+    n = 900
+    c = np.linspace(100, 200, n)
+    idx = pd.date_range("2026-09-01", periods=n, freq="15min", tz="UTC")
+    df = pd.DataFrame({"Open": c, "High": c * 1.002, "Low": c * 0.998, "Close": c,
+                       "Volume": 1.0}, index=idx)
+    line = supertrend_full(df, 30, 6.0)["line"].to_numpy()
+    t0 = n - 1
+    df.iloc[t0, df.columns.get_loc("Low")] = line[t0] * 0.999
+    df.iloc[t0, df.columns.get_loc("Close")] = line[t0] * 1.01
+    spike = SignalEvent(symbol="XUSDT", signal="spike_bar", bar_time=idx[t0 - 30], price=c[t0 - 30],
+                        detail={"label": "급등봉", "body": 0.1, "vol_mult": 12.0})
+    ev = spike_bar.pullback_touch(df, "XUSDT", spike=spike)
+    assert ev is not None and ev.bar_time == idx[t0]
+    assert ev.detail["stage"] == "눌림목타점" and ev.dedup_key.endswith("|눌림목타점")
+    assert spike_bar.pullback_touch(df, "XUSDT", Params(pullback_enabled=False), spike=spike) is None
+    from invest_signal import notify
+    line_s = [ln for ln in notify.format_events([ev], [], {}).splitlines() if ">X<" in ln][0]
+    assert "🎯15m눌림목타점 🕒" in line_s

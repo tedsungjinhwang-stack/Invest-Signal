@@ -36,7 +36,8 @@ CRYPTO_ONLY = True          # ETF·주식 스캔에서는 돌리지 않는다
 INTERVAL = "15m"
 KLINE_LIMIT = 500           # vol_ma(96) + 추적 3일(288) + 여유
 TOUCH = "장기선터치"          # 급등 뒤 상승 중인 15m 장기 수트(30×6)를 내려와 터치 — stage(dedup 키가 갈린다)
-PULLBACK = "눌림목타점"       # 급등 뒤 15m 정배열에서 장기 수트 하락→상승 전환(⚡ 🎯과 같은 정의, 10-11~)
+PULLBACK_BREAK = "눌림목돌파타점"  # 급등 뒤 15m 정배열에서 장기 수트 하락→상승 전환(10-11~, 10-12 이름 바꿈)
+PULLBACK = "눌림목타점"            # 급등 뒤 15m 120>240>480 · 240선 위 · 상승 장기 수트 터치(10-12~)
 
 
 @dataclass(frozen=True)
@@ -57,10 +58,15 @@ class Params:
     touch_enabled: bool = True
     touch_period: int = 30
     touch_mult: float = 6.0
-    # 🎯 15m 눌림목타점(10-11~) — 급등 뒤 15m 240>480>960 또는 480>960 정배열에서 장기 수트(touch_period×
-    # touch_mult)가 하락→상승으로 바뀐 봉을 • 로. ⚡ 🎯눌림목타점과 같은 정의.
+    # 🎯 15m 눌림목돌파타점(10-11~, 10-12 이름 바꿈) — 급등 뒤 15m 240>480>960 또는 480>960 정배열에서
+    # 장기 수트(touch_period×touch_mult)가 하락→상승으로 바뀐 봉을 • 로. ⚡ 🎯눌림목돌파타점과 같은 정의.
+    pullback_break_enabled: bool = True
+    pullback_break_align: tuple = ((240, 480, 960), (480, 960))   # 정배열 묶음 — 여럿이면 OR
+    # 🎯 15m 눌림목타점(10-12~) — 급등 뒤 15m 120>240>480 정배열 · 캔들이 240선 위에서 상승 중인 장기
+    # 수트를 내려와 터치(종가는 선 위)한 봉을 • 로. ⚡ 🎯눌림목타점과 같은 정의.
     pullback_enabled: bool = True
-    pullback_align: tuple = ((240, 480, 960), (480, 960))   # 정배열 묶음 — 여럿이면 OR
+    pullback_align: tuple = (120, 240, 480)
+    pullback_above: int = 240
 
 
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
@@ -183,37 +189,44 @@ def long_touch(df: pd.DataFrame, symbol: str, params: Params = Params(),
                 "since": close / sp.price - 1 if sp.price else None})
 
 
-def pullback_entry(df: pd.DataFrame, symbol: str, params: Params = Params(),
-                   spike: SignalEvent | None = None) -> SignalEvent | None:
-    """🎯 급등 뒤 15m **정배열(240>480>960 또는 480>960)**에서 장기 수트(30×6)가 **하락→상승 전환**한 봉.
-
-    spike(10일 추적 저장분) 뒤, 마지막 grace_bars+1봉 안에서 가장 최근 것. 해당 없으면 None.
-    """
-    from ..indicators import supertrend_full
-
-    if not params.pullback_enabled or spike is None:
-        return None
-    from ..indicators import stacked_any
-    from .leader_break import _aligns
-
-    aligns = _aligns(params.pullback_align)
-    n = len(df)
-    if n < min(max(al) for al in aligns) + 2:
-        return None
+def _after_spike(df: pd.DataFrame, spike: SignalEvent, params: Params) -> int:
+    """급등봉 다음 봉과 마지막 grace_bars+1봉 중 늦은 쪽 — 🎯 판정을 시작할 위치."""
     i0 = int(df.index.searchsorted(spike.bar_time, "right")) - 1
-    c = df["Close"]
-    ok = stacked_any(c, aligns)
-    d = supertrend_full(df, params.touch_period, params.touch_mult)["dir"].to_numpy(float)
-    hit = None
-    for t in range(max(i0 + 1, n - 1 - params.grace_bars, 1), n):
-        if ok[t] and d[t] > 0 and d[t - 1] < 0:
-            hit = t
-    if hit is None:
-        return None
-    close = float(c.iloc[hit])
+    return max(i0 + 1, len(df) - 1 - params.grace_bars, 1)
+
+
+def _pb_event(df: pd.DataFrame, symbol: str, hit: int, stage: str,
+              spike: SignalEvent) -> SignalEvent:
+    close = float(df["Close"].iloc[hit])
     return SignalEvent(
         symbol=symbol, signal=NAME, bar_time=df.index[hit], price=close,
-        detail={"label": LABEL, "stage": PULLBACK, "interval": INTERVAL,
+        detail={"label": LABEL, "stage": stage, "interval": INTERVAL,
                 "spike_time": spike.bar_time, "spike_price": spike.price,
                 "body": spike.detail.get("body"), "vol_mult": spike.detail.get("vol_mult"),
                 "since": close / spike.price - 1 if spike.price else None})
+
+
+def pullback_break(df: pd.DataFrame, symbol: str, params: Params = Params(),
+                   spike: SignalEvent | None = None) -> SignalEvent | None:
+    """🎯 눌림목돌파타점 — 급등 뒤 15m **정배열(240>480>960 또는 480>960)**에서 장기 수트(30×6)가
+    **하락→상승 전환**한 봉. spike 뒤, 마지막 grace_bars+1봉 안에서 가장 최근 것. 없으면 None."""
+    from .leader_break import st_flip_bars
+
+    if not params.pullback_break_enabled or spike is None:
+        return None
+    hits = st_flip_bars(df, params.pullback_break_align,
+                        (params.touch_period, params.touch_mult), _after_spike(df, spike, params))
+    return _pb_event(df, symbol, hits[-1], PULLBACK_BREAK, spike) if hits else None
+
+
+def pullback_touch(df: pd.DataFrame, symbol: str, params: Params = Params(),
+                   spike: SignalEvent | None = None) -> SignalEvent | None:
+    """🎯 눌림목타점 — 급등 뒤 15m **120>240>480 정배열 · 캔들이 240선 위**에서 **상승 중인** 장기
+    수트(30×6)를 내려와 터치(종가는 선 위)한 봉. spike 뒤, 마지막 grace_bars+1봉 안. 없으면 None."""
+    from .leader_break import st_touch_bars
+
+    if not params.pullback_enabled or spike is None:
+        return None
+    hits = st_touch_bars(df, params.pullback_align, params.pullback_above,
+                         (params.touch_period, params.touch_mult), _after_spike(df, spike, params))
+    return _pb_event(df, symbol, hits[-1], PULLBACK, spike) if hits else None

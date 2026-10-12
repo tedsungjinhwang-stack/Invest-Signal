@@ -173,7 +173,8 @@ ALWAYS_TITLES = {"spike_bar": "🚀 <b>급등봉</b>", "vwap_onset": "🟢 <b>�
                  "choch_warn": "🔻 <b>하락 CHoCH</b>",
                  "wave_setup:일봉ABC": "🌊 <b>일봉 파동</b>",
                  "wave_setup:일봉장기선돌파": "🌊 <b>일봉 파동</b>",
-                 "leader_break:🎯눌림목타점": "🎯 <b>눌림목 타점</b>"}
+                 "leader_break:🎯눌림목타점": "🎯 <b>눌림목 타점</b>",
+                 "leader_break:🎯눌림목돌파타점": "🎯 <b>눌림목 돌파 타점</b>"}
 ALWAYS_SIGNALS = tuple(ALWAYS_TITLES)
 
 
@@ -583,9 +584,10 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tags.append(f"급등 🕒{_kst(d['spike_time'])} 몸통 {_pct(d['body'])}")
         if d.get("since") is not None:
             tags.append(f"급등 후 {_pct(d['since'])}")
-    elif e.signal == "spike_bar" and d.get("stage") == "눌림목타점":
-        # 🎯 급등 뒤 15m 정배열(240>480>960)에서 장기 수트 하락→상승 전환 — ⚡ 🎯과 같은 정의
-        tags.append(f"🎯15m눌림목타점 🕒{_kst(e.bar_time)}")
+    elif e.signal == "spike_bar" and d.get("stage") in ("눌림목타점", "눌림목돌파타점"):
+        # 🎯 급등 뒤 — 눌림목타점: 120>240>480 · 240선 위 · 상승 장기 수트 터치,
+        # 눌림목돌파타점: 240>480>960(또는 480>960)에서 장기 수트 하락→상승 전환. ⚡ 🎯과 같은 정의
+        tags.append(f"🎯15m{d['stage']} 🕒{_kst(e.bar_time)}")
         tags.append(f"급등 🕒{_kst(d['spike_time'])} 몸통 {_pct(d['body'])}")
         if d.get("since") is not None:
             tags.append(f"급등 후 {_pct(d['since'])}")

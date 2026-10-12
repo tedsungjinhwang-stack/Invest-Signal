@@ -229,6 +229,9 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         entry_1h_fast=bool(s.get("entry_1h_fast", True)),
         entry_4h_fast=bool(s.get("entry_4h_fast", True)),
         entry_pullback=bool(s.get("entry_pullback", True)),
+        entry_touch_align=tuple(s.get("entry_touch_align", (120, 240, 480))),
+        entry_touch_above=int(s.get("entry_touch_above", 240)),
+        entry_pullback_break=bool(s.get("entry_pullback_break", True)),
         entry_pullback_align=tuple(tuple(x) if isinstance(x, list) else x
                                    for x in s.get("entry_pullback_align",
                                                   ((240, 480, 960), (480, 960)))),
@@ -655,7 +658,8 @@ def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | Non
     days_by = {k: float(v) for k, v in (s.get("days_by") or {}).items()}
     now = pd.Timestamp.now(tz="UTC")
     for e in events:
-        if e.signal in sigs and e.detail.get("stage") not in (spike_bar.TOUCH, spike_bar.PULLBACK):
+        if e.signal in sigs and e.detail.get("stage") not in (
+                spike_bar.TOUCH, spike_bar.PULLBACK, spike_bar.PULLBACK_BREAK):
             state.track(e)
     fresh = {(e.symbol, e.signal) for e in events}
     holds = [e for e in ongoing if e.signal not in sigs]
@@ -683,7 +687,8 @@ def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | Non
         ev = SignalEvent(symbol=sym, signal=sig, bar_time=t, price=float(it["price"]), detail=d)
         if sig == "spike_bar":
             for tev in (spike_bar.long_touch(df, sym, sp, spike=ev),
-                        spike_bar.pullback_entry(df, sym, sp, spike=ev)):
+                        spike_bar.pullback_touch(df, sym, sp, spike=ev),
+                        spike_bar.pullback_break(df, sym, sp, spike=ev)):
                 if tev is not None:
                     for k in ("gain_24h", "turnover_24h"):
                         if k in d:
@@ -694,7 +699,9 @@ def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | Non
     n_by = collections.Counter(e.signal for e in holds if e.signal in sigs)
     log(f"[track] {days:g}일 추적 — " + " · ".join(f"{k} {n_by.get(k, 0)}" for k in sigs)
         + f" · 🧱15m 장기선 터치 {sum(e.detail.get('stage') == spike_bar.TOUCH for e in touches)}건"
-        + f" · 🎯15m 눌림목타점 {sum(e.detail.get('stage') == spike_bar.PULLBACK for e in touches)}건")
+        + f" · 🎯15m 눌림목타점 {sum(e.detail.get('stage') == spike_bar.PULLBACK for e in touches)}건"
+        + f" · 🎯15m 눌림목돌파타점 "
+          f"{sum(e.detail.get('stage') == spike_bar.PULLBACK_BREAK for e in touches)}건")
     return events + touches, holds
 
 
@@ -883,9 +890,13 @@ def _spike_params(cfg: dict) -> "spike_bar.Params":
         touch_enabled=bool(s.get("touch_enabled", True)),
         touch_period=int(s.get("touch_period", 30)),
         touch_mult=float(s.get("touch_mult", 6.0)),
+        pullback_break_enabled=bool(s.get("pullback_break_enabled", True)),
+        pullback_break_align=tuple(tuple(x) if isinstance(x, list) else x
+                                   for x in s.get("pullback_break_align",
+                                                  ((240, 480, 960), (480, 960)))),
         pullback_enabled=bool(s.get("pullback_enabled", True)),
-        pullback_align=tuple(tuple(x) if isinstance(x, list) else x
-                             for x in s.get("pullback_align", ((240, 480, 960), (480, 960)))),
+        pullback_align=tuple(s.get("pullback_align", (120, 240, 480))),
+        pullback_above=int(s.get("pullback_above", 240)),
     )
 
 

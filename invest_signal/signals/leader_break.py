@@ -119,12 +119,18 @@ class Params:
     entry_mode: str = "wave"
     entry_1h_bars: int = 2          # 마감된 1h봉 중 최근 몇 개까지 볼지 (스캔 한 번 놓쳐도 잡게)
     entry_4h_bars: int = 1          # 마감된 4h봉 중 최근 몇 개 (4h봉 하나를 매시 스캔 넷이 본다)
-    # 🎯 눌림목타점(10-11~) — 15m MA240 > MA480 > MA960 또는 MA480 > MA960 정배열에서 15m 장기 수퍼트렌드(30×6)가
-    # 하락→상승으로 전환한 마감 15m봉. 최근 entry_15m_bars봉(4 = 1시간 = 스캔 간격) 안.
+    # 🎯 눌림목돌파타점(10-11~, 10-12 이름 바꿈) — 15m MA240 > MA480 > MA960 또는 MA480 > MA960
+    # 정배열에서 15m 장기 수퍼트렌드(30×6)가 하락→상승으로 전환한 마감 15m봉.
+    # 🎯 눌림목타점(10-12~) — 15m MA120 > MA240 > MA480 정배열 · 캔들이 MA240 위(저가 > 선)에서
+    # 상승 중인 15m 장기 수트를 내려와 터치(종가는 선 위, 직전 봉은 안 닿음)한 마감 15m봉.
+    # 둘 다 최근 entry_15m_bars봉(4 = 1시간 = 스캔 간격) 안.
     entry_w3: bool = True           # 🆕3파진입 •
     entry_1h_fast: bool = True      # 🆕1h단기선터치/돌파 •
     entry_4h_fast: bool = True      # 🆕4h단기선터치/돌파 •
-    entry_pullback: bool = True
+    entry_pullback: bool = True             # 🎯눌림목타점(터치)
+    entry_touch_align: tuple = (120, 240, 480)
+    entry_touch_above: int = 240
+    entry_pullback_break: bool = True       # 🎯눌림목돌파타점(전환)
     # 정배열 묶음 — 하나 또는 여럿(OR). 10-11: 240>480>960 또는 480>960
     entry_pullback_align: tuple = ((240, 480, 960), (480, 960))
     entry_pullback_st: tuple = (30, 6.0)
@@ -462,7 +468,8 @@ def third_wave(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
 
 ENTRY_W3 = "3파진입"
 ENTRY_FIRE = "🔥진입"
-ENTRY_PULLBACK = "🎯눌림목타점"
+ENTRY_PULLBACK = "🎯눌림목타점"          # 10-12 — 정배열 · 240선 위 · 상승 장기 수트 터치
+ENTRY_PULLBACK_BREAK = "🎯눌림목돌파타점"  # 10-11의 🎯눌림목타점(장기 수트 상승 전환) — 10-12 이름 바꿈
 
 
 def fire_series(df4h: pd.DataFrame | None, params: Params = Params()) -> np.ndarray | None:
@@ -557,20 +564,51 @@ def _aligns(al) -> tuple:
     return (tuple(al),) if al and not isinstance(al[0], (tuple, list)) else tuple(tuple(x) for x in al)
 
 
-def pullback_flips(df15: pd.DataFrame | None, params: Params, bars: int) -> list[int]:
-    """🎯 눌림목타점 — 마지막 bars봉 중 '15m 정배열(240>480>960 또는 480>960) + 장기 수트
-    하락→상승 전환' 봉 위치."""
-    aligns = _aligns(params.entry_pullback_align)
+def st_flip_bars(df15: pd.DataFrame | None, aligns, st, lo: int) -> list[int]:
+    """lo번째 봉부터 '15m 정배열(aligns 중 하나) + 장기 수트 하락→상승 전환' 봉 위치."""
+    aligns = _aligns(aligns)
     if df15 is None or len(df15) < min(max(al) for al in aligns) + 2:
         return []
     ok = stacked_any(df15["Close"], aligns)
-    d = supertrend_full(df15, int(params.entry_pullback_st[0]),
-                        float(params.entry_pullback_st[1]))["dir"].to_numpy(float)
-    out = []
-    for t in range(max(1, len(df15) - max(1, bars)), len(df15)):
-        if ok[t] and d[t] > 0 and d[t - 1] < 0:
-            out.append(t)
-    return out
+    d = supertrend_full(df15, int(st[0]), float(st[1]))["dir"].to_numpy(float)
+    return [t for t in range(max(1, lo), len(df15)) if ok[t] and d[t] > 0 and d[t - 1] < 0]
+
+
+def st_touch_bars(df15: pd.DataFrame | None, align, above: int, st, lo: int) -> list[int]:
+    """lo번째 봉부터 '15m 정배열(align) · 캔들이 MA(above) 위(저가 > 선) · **상승 중인** 장기 수트를
+    내려와 터치(저가 ≤ 선 ≤ 고가, 종가는 선 위, 직전 봉은 안 닿음)' 봉 위치."""
+    align = tuple(align)
+    if df15 is None or len(df15) < max(max(align), above) + 2:
+        return []
+    c = df15["Close"]
+    ok = stacked_any(c, align)
+    ma = c.rolling(int(above)).mean().to_numpy(float)
+    full = supertrend_full(df15, int(st[0]), float(st[1]))
+    line, d = full["line"].to_numpy(float), full["dir"].to_numpy(float)
+    hi, low, cl = (df15[k].to_numpy(float) for k in ("High", "Low", "Close"))
+
+    def touch(t: int) -> bool:
+        return not np.isnan(line[t]) and low[t] <= line[t] <= hi[t]
+
+    return [t for t in range(max(1, lo), len(df15))
+            if ok[t] and low[t] > ma[t] and d[t] > 0 and d[t - 1] > 0
+            and touch(t) and cl[t] > line[t] and not touch(t - 1)]
+
+
+def pullback_flips(df15: pd.DataFrame | None, params: Params, bars: int) -> list[int]:
+    """🎯 눌림목돌파타점 — 마지막 bars봉 중 '15m 정배열(240>480>960 또는 480>960) + 장기 수트
+    하락→상승 전환' 봉 위치."""
+    n = 0 if df15 is None else len(df15)
+    return st_flip_bars(df15, params.entry_pullback_align, params.entry_pullback_st,
+                        n - max(1, bars))
+
+
+def pullback_touches(df15: pd.DataFrame | None, params: Params, bars: int) -> list[int]:
+    """🎯 눌림목타점 — 마지막 bars봉 중 '15m 120>240>480 정배열 · 캔들이 240선 위 · 상승 장기
+    수트(30×6) 터치' 봉 위치."""
+    n = 0 if df15 is None else len(df15)
+    return st_touch_bars(df15, params.entry_touch_align, params.entry_touch_above,
+                         params.entry_pullback_st, n - max(1, bars))
 
 
 def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
@@ -585,7 +623,10 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
       1h단기선터치/돌파  마감된 1h봉이 단기선(22×3)을 걸쳤거나 단기가 뒤집혔다
       4h단기선터치/돌파  마감된 4h봉에서 같은 사건
       🔥진입          마감된 4h봉에서 🔥 조건(fire_mark)이 새로 섰다(직전 봉은 아님)
-      🎯눌림목타점     15m 240>480>960 정배열에서 15m 장기 수트(30×6)가 하락→상승 전환(10-11~)
+      🎯눌림목돌파타점  15m 240>480>960(또는 480>960) 정배열에서 15m 장기 수트(30×6)가
+                     하락→상승 전환(10-11~, 10-12 이름 바꿈)
+      🎯눌림목타점     15m 120>240>480 정배열 · 캔들이 240선 위 · 상승 중인 15m 장기 수트를
+                     내려와 터치(종가는 선 위)(10-12~)
 
     1h는 최근 entry_1h_bars개(기본 2 — 스캔 한 번을 놓쳐도 잡게), 4h는 최근
     entry_4h_bars개(기본 1 — 4h봉 하나를 매시 스캔 넷이 본다)를 본다. 같은 봉이
@@ -593,11 +634,15 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
     """
     out: list[tuple[str, pd.Timestamp]] = []
     hour, four = pd.Timedelta(hours=1), pd.Timedelta(hours=4)
-    if params.entry_pullback:
-        q = pd.Timedelta(minutes=15)
+    q = pd.Timedelta(minutes=15)
+    if params.entry_pullback_break or params.entry_pullback:
         h15 = _closed(df15, 0.25, now)
-        for t in pullback_flips(h15, params, params.entry_15m_bars):
-            out.append((ENTRY_PULLBACK, h15.index[t] + q))
+        if params.entry_pullback_break:
+            for t in pullback_flips(h15, params, params.entry_15m_bars):
+                out.append((ENTRY_PULLBACK_BREAK, h15.index[t] + q))
+        if params.entry_pullback:
+            for t in pullback_touches(h15, params, params.entry_15m_bars):
+                out.append((ENTRY_PULLBACK, h15.index[t] + q))
     h1 = _closed(df1h, 1, now)
     if h1 is not None and len(h1) > 2:
         if params.entry_1h_fast:
@@ -631,7 +676,7 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
     return out
 
 
-ENTRY_ORDER = (ENTRY_FIRE, ENTRY_PULLBACK, ENTRY_W3, "1h단기선돌파", "1h단기선터치", "4h단기선돌파", "4h단기선터치")
+ENTRY_ORDER = (ENTRY_FIRE, ENTRY_PULLBACK, ENTRY_PULLBACK_BREAK, ENTRY_W3, "1h단기선돌파", "1h단기선터치", "4h단기선돌파", "4h단기선터치")
 
 
 def entry_event(symbol: str, triggers: list, df15: pd.DataFrame,
