@@ -156,7 +156,7 @@ def test_pullback_trigger_passes_fire_only_without_fire():
 
 
 def test_leader_only_triggers_keeps_just_pullback_rows(monkeypatch, tmp_path):
-    """10-11 — ⚡는 🎯눌림목타점 새 줄만. ⚡ 추적 줄·순위표는 빼고 다른 칸은 그대로."""
+    """10-11 — ⚡는 🎯눌림목타점 새 줄만. ⚡ 추적 줄은 빼고 다른 칸은 그대로. 순위표는 싣는다(10-12)."""
     pb = _ev("PUSDT", "leader_break", triggers=["🎯눌림목타점", "3파진입"])
     fire_lb = _ev("FUSDT", "leader_break", fire=True, triggers=["4h단기선터치"])
     wave = _ev("WUSDT", "wave_setup", fire=True)
@@ -175,7 +175,8 @@ def test_leader_only_triggers_keeps_just_pullback_rows(monkeypatch, tmp_path):
     scanner.run("x.yaml", state_path, log=lambda *x: None)
     msg = sent[0]
     assert ">P<" in msg and ">W<" in msg
-    assert ">F<" not in msg and "↳ H " not in msg and "24h 상승률 TOP" not in msg
+    assert ">F<" not in msg and "↳ H " not in msg
+    assert "24h 상승률 TOP" in msg and ">Z<" in msg
     st = AlertState(state_path)
     assert not st.is_new(pb.dedup_key) and st.is_new(fire_lb.dedup_key)
 

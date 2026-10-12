@@ -1629,7 +1629,7 @@ def run(config_path: str, state_path: str, only: str | None = None,
         if n0 != len(crypto_ongoing):
             log(f"[notify] 추적 줄 {n0 - len(crypto_ongoing)}건 뺌 ({' · '.join(hide)})")
     # ⚡ 감시 종목은 이 사건만(notify.leader_only_triggers, 10-11 요청: "눌림목타점만, 너무 많아서").
-    # ⚡ 새 줄은 그 사건이 있는 것만, ⚡ 추적 줄과 24h 순위표는 뺀다. 다른 칸은 그대로.
+    # ⚡ 새 줄은 그 사건이 있는 것만, ⚡ 추적 줄은 뺀다. 24h 순위표(TOP 5)는 싣는다(10-12 요청).
     only = tuple((cfg.get("notify") or {}).get("leader_only_triggers") or ())
     if only:
         def _hit(e):
@@ -1640,7 +1640,6 @@ def run(config_path: str, state_path: str, only: str | None = None,
             hidden += [e for e in _collapse(drop) if id(e) not in {id(h) for h in hidden}]
             fresh_crypto = [e for e in fresh_crypto if id(e) not in dropped]
         crypto_ongoing = [e for e in crypto_ongoing if e.signal != "leader_break"]
-        crypto_board = []
         if drop:
             log(f"[notify] ⚡ {'·'.join(only)}만 — 그 밖의 ⚡ 새 줄 {len(drop)}건 알림에서 뺌")
     # 같은 종목·같은 시그널이 grace 소급으로 두 봉에서 잡히면 최신 봉만 표시
