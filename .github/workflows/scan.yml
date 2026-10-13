@@ -1,6 +1,5 @@
 # 매시 1회 스캔 — 실행 시각의 UTC 시(hour)를 보고 모드를 스스로 고른다.
-# (수동 실행 트리거: 2026-10-11 — 상승초입 역배열 자리만·추적 하루 · 4h 파동 끔 ·
-#  급등봉 ↳ 대신 🎯·🧱 • 만 · 🎯눌림목타점 15m 480>960 OR 확인)
+# (수동 실행 트리거: 2026-10-13 — 캔들 캐시 첫 실행(처음부터 받아 캐시 생성))
 #
 #   UTC 00/04/08/12/16/20시 (= KST 09/13/17/21/01/05) → 마감 스캔
 #     4h봉이 막 닫힌 시각. 전 시그널을 마감된 봉으로 판정한다.
@@ -76,6 +75,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # 캔들 캐시(10-13) — 지난 실행이 받은 봉을 이어 받아, 이번엔 그 뒤에 생긴 봉만 받는다.
+      # 캐시 키는 실행마다 새로(run_id) 만들고, 불러올 땐 가장 최근 것을 쓴다. 없으면 처음부터 다 받는다.
+      - name: Restore kline cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .kline_cache
+          key: klines-v1-${{ github.run_id }}
+          restore-keys: klines-v1-
+
       - name: Run scan
         env:
           # 입력값은 셸에 직접 보간하지 않고 환경변수로 받는다(스크립트 주입 방지).
@@ -100,10 +108,17 @@ jobs:
           fi
           echo "UTC $(date -u '+%Y-%m-%d %H:%M') · 모드 $MODE"
           if [ "$MODE" = "close" ]; then
-            python -m invest_signal --state state/alerts_state.json
+            python -m invest_signal --state state/alerts_state.json --kline-cache .kline_cache/klines.pkl.gz
           else
-            python -m invest_signal --state state/alerts_state.json --intrabar
+            python -m invest_signal --state state/alerts_state.json --intrabar --kline-cache .kline_cache/klines.pkl.gz
           fi
+
+      - name: Save kline cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .kline_cache
+          key: klines-v1-${{ github.run_id }}
 
       - name: Commit alert state
         if: always()

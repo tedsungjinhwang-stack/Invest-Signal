@@ -223,14 +223,122 @@ def resolve_source(session: requests.Session, requested: str,
     return "spot_mirror", syms
 
 
+# ── 캔들 캐시(10-13) ────────────────────────────────────────────────────────
+# 매시간 같은 과거 봉을 처음부터 다시 받지 않는다. 마감된 봉은 바뀌지 않으므로 지난 실행에서
+# 받은 봉을 파일로 남겨 두고(load_cache/save_cache — 워크플로가 actions/cache로 이어 준다),
+# 다음 실행은 **그 뒤에 생긴 봉 + 진행 중 봉만** 받아 이어 붙인다. 돌려주는 값은 처음부터
+# limit개를 받았을 때와 같다(마지막 limit개 · 진행 중 봉 처리 동일).
+# 캐시가 없거나(첫 실행·새 종목), 요청 길이보다 짧거나, 빈 구간이 길거나, 이어 붙인 자리가
+# 안 맞으면 처음부터 다 받는다.
+_STEP_MS = {"1m": 60_000, "3m": 180_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000,
+            "1h": 3_600_000, "2h": 7_200_000, "4h": 14_400_000, "6h": 21_600_000,
+            "8h": 28_800_000, "12h": 43_200_000, "1d": 86_400_000}
+TAIL_MAX = 99                   # 이어 받기 요청 상한 — 100 미만이면 가중치 1
+_cache: dict[tuple, "np.ndarray"] = {}     # (source, symbol, interval) → 마감된 봉 [open_ms, o, h, l, c, v, close_ms]
+_cache_lock = threading.Lock()
+_cache_on = False
+cache_stats = {"tail": 0, "full": 0}
+
+
+def _rows_arr(rows: list):
+    import numpy as np
+    if not rows:
+        return np.empty((0, 7))
+    return np.array([[float(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]),
+                      float(r[5]), float(r[6])] for r in rows])
+
+
+def _arr_df(arr, include_live: bool, now_ms: int) -> pd.DataFrame:
+    """parse_klines와 같은 결과 — 배열판."""
+    keep = arr if include_live else arr[arr[:, 6] <= now_ms]
+    if not len(keep):
+        return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
+    df = pd.DataFrame({"Open": keep[:, 1], "High": keep[:, 2], "Low": keep[:, 3],
+                       "Close": keep[:, 4], "Volume": keep[:, 5]},
+                      index=pd.to_datetime(keep[:, 0].astype("int64"), unit="ms", utc=True))
+    df.index.name = "OpenTime"
+    return df
+
+
+def load_cache(path: str) -> int:
+    """캐시 파일을 읽고 캐시를 켠다. 읽은 항목 수(없거나 깨졌으면 0 — 처음부터 받는다)."""
+    import gzip
+    import pickle
+    global _cache_on
+    _cache_on = True
+    try:
+        with gzip.open(path, "rb") as f:
+            got = pickle.load(f)
+        if isinstance(got, dict):
+            _cache.update(got)
+    except Exception:                           # noqa: BLE001 — 캐시는 없어도 된다
+        return 0
+    return len(_cache)
+
+
+def save_cache(path: str) -> int:
+    """캐시를 파일로 쓴다. 쓴 항목 수."""
+    import gzip
+    import pickle
+    d = os.path.dirname(path)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    with _cache_lock:
+        snap = dict(_cache)
+    tmp = f"{path}.tmp"
+    with gzip.open(tmp, "wb", compresslevel=6) as f:
+        pickle.dump(snap, f, protocol=pickle.HIGHEST_PROTOCOL)
+    os.replace(tmp, path)
+    return len(snap)
+
+
+def _cached_klines(session, base, path, symbol, source, interval, limit, include_live):
+    import numpy as np
+    step = _STEP_MS[interval]
+    key = (source, symbol, interval)
+    now_ms = int(time.time() * 1000)
+    with _cache_lock:
+        old = _cache.get(key)
+    if old is not None and len(old) >= limit - 1:
+        missing = int((now_ms - (old[-1, 0] + step)) // step) + 1   # 비는 마감 봉 + 진행 중 봉
+        if 0 <= missing <= TAIL_MAX - 2:
+            rows = _get(session, base, path, {"symbol": symbol, "interval": interval,
+                                              "limit": missing + 2}).json()   # 1봉 겹쳐 받아 이음매 확인
+            new = _rows_arr(rows)
+            now_ms = int(time.time() * 1000)        # 마감 여부는 응답 받은 뒤 시각으로(parse_klines와 같게)
+            if len(new) and new[0, 0] <= old[-1, 0] and np.isin(new[0, 0], old[:, 0]):
+                merged = np.vstack([old[old[:, 0] < new[0, 0]], new])
+                closed = merged[merged[:, 6] <= now_ms]
+                with _cache_lock:
+                    _cache[key] = closed[-max(len(old), limit):]
+                    cache_stats["tail"] += 1
+                return _arr_df(merged[-limit:], include_live, now_ms)
+    rows = _get(session, base, path, {"symbol": symbol, "interval": interval,
+                                      "limit": limit}).json()
+    now_ms = int(time.time() * 1000)
+    arr = _rows_arr(rows)
+    closed = arr[arr[:, 6] <= now_ms] if len(arr) else arr
+    with _cache_lock:
+        if old is None or len(closed) >= len(old):
+            _cache[key] = closed
+        cache_stats["full"] += 1
+    return _arr_df(arr, include_live, now_ms)
+
+
 def klines(session: requests.Session, symbol: str, source: str,
            interval: str = KLINE_INTERVAL, limit: int = 600,
            include_live: bool = False) -> pd.DataFrame:
-    """임의 인터벌 캔들 — 4h 시그널 외에 15m 크립토 모멘텀 눌림목/이탈 판정에도 쓴다."""
+    """임의 인터벌 캔들 — 4h 시그널 외에 15m 크립토 모멘텀 눌림목/이탈 판정에도 쓴다.
+
+    캐시가 켜져 있으면(load_cache) 지난번 뒤에 생긴 봉만 받아 이어 붙인다 — 결과는 같다.
+    """
     if source == "fapi":
         base, path = fapi_base(), "/fapi/v1/klines"
     else:
         base, path = SPOT_MIRROR_BASE, "/api/v3/klines"
+    if _cache_on and interval in _STEP_MS and limit <= 1500:
+        return _cached_klines(session, base, path, symbol, source, interval, limit,
+                              include_live)
     rows = _get(session, base, path,
                 {"symbol": symbol, "interval": interval, "limit": limit}).json()
     return parse_klines(rows, include_live=include_live)

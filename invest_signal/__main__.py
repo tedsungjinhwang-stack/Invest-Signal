@@ -51,11 +51,24 @@ def main(argv=None) -> int:
     p.add_argument("--history", nargs="?", type=int, const=5, default=None,
                    metavar="N", help="스캔 대신 최근 발송 알림 N건 출력 (기본 5)")
     p.add_argument("--raw", action="store_true", help="--history에서 HTML 태그 그대로")
+    p.add_argument("--kline-cache", default=None, metavar="PATH",
+                   help="캔들 캐시 파일 — 지난 실행 뒤에 생긴 봉만 받아 이어 붙인다(결과 동일)")
     args = p.parse_args(argv)
     if args.history is not None:
         return show_history(args.state, args.history, args.raw)
-    return scanner.run(args.config, args.state, only=args.only,
-                       dry_run=args.dry_run, intrabar=args.intrabar)
+    if args.kline_cache:
+        from . import data_binance
+        n = data_binance.load_cache(args.kline_cache)
+        print(f"[cache] 캔들 캐시 {n}개 불러옴 — {args.kline_cache}")
+    try:
+        return scanner.run(args.config, args.state, only=args.only,
+                           dry_run=args.dry_run, intrabar=args.intrabar)
+    finally:
+        if args.kline_cache:
+            from . import data_binance
+            st = data_binance.cache_stats
+            n = data_binance.save_cache(args.kline_cache)
+            print(f"[cache] 이어 받기 {st['tail']}회 · 처음부터 {st['full']}회 · {n}개 저장")
 
 
 if __name__ == "__main__":
