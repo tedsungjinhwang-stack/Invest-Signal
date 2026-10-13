@@ -236,6 +236,9 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                                    for x in s.get("entry_pullback_align",
                                                   ((240, 480, 960), (480, 960)))),
         entry_15m_bars=int(s.get("entry_15m_bars", 4)),
+        entry_1h_slow=bool(s.get("entry_1h_slow", True)),
+        entry_1h_slow_st=tuple(s.get("entry_1h_slow_st", (30, 6.0))),
+        rearm_exempt=tuple(s.get("rearm_exempt", ("🧱1h장기선터치", "💔1h장기선이탈"))),
         rearm_hours=int(s.get("rearm_hours", 24)),
         fire_enabled=bool(s.get("fire_enabled", True)),
         fire_low_bars=int(s.get("fire_low_bars", 18)),
@@ -551,8 +554,14 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
             cands = [ev] if ev is not None else []
         if (cands and state is not None and params.rearm_hours > 0
                 and state.alerted_within(sym, leader_break.NAME, params.rearm_hours)):
-            rearmed += 1
-            cands = []          # 하루 안에 이미 알린 종목 — 아래 ↳ 추적 줄로만 남는다
+            # 하루 안에 이미 알린 종목 — 아래 ↳ 추적 줄로만 남는다. 단 rearm_exempt 사건
+            # (1h 장기선 터치·이탈, 10-13)은 하루 안이라도 또 낸다.
+            keep = ([x for x in trig if x[0] in params.rearm_exempt]
+                    if params.entry_mode != "15m" else [])
+            ev = leader_break.entry_event(sym, keep, df, params) if keep else None
+            cands = [ev] if ev is not None else []
+            if not cands:
+                rearmed += 1
         for ev in cands:
             annotate(ev.detail)
             if params.require_resist and not _has_resist(ev.detail):

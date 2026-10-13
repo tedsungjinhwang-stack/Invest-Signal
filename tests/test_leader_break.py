@@ -986,3 +986,29 @@ def test_pullback_touch_on_rising_long_st_above_240():
     off = dataclasses_replace(P, entry_pullback=False)
     assert leader_break.ENTRY_PULLBACK not in [
         n for n, _ in leader_break.entry_triggers(None, None, None, off, now, df)]
+
+
+def test_1h_slow_line_touch_and_break():
+    """10-13 — 상승 중인 1h 장기 수트(30×6)로 내려온 첫 봉: 터치(종가 위) · 이탈(수트 하락 전환)."""
+    from invest_signal.indicators import supertrend_full
+    c = np.linspace(100, 200, 300)
+    h1 = _bars(c, "1h", spread=0.002)
+    line = supertrend_full(h1, 30, 6.0)["line"].to_numpy()
+    touch = h1.copy()
+    t = len(touch) - 1
+    touch.iloc[t, touch.columns.get_loc("Low")] = line[t - 1] * 0.999
+    touch.iloc[t, touch.columns.get_loc("Close")] = line[t - 1] * 1.02
+    assert leader_break.slow_line_events(touch, (30, 6.0), 2) == [(t, "터치")]
+    brk = h1.copy()
+    brk.iloc[t, brk.columns.get_loc("Low")] = line[t - 1] * 0.95
+    brk.iloc[t, brk.columns.get_loc("Close")] = line[t - 1] * 0.97
+    assert leader_break.slow_line_events(brk, (30, 6.0), 2) == [(t, "이탈")]
+    assert leader_break.slow_line_events(h1, (30, 6.0), 2) == []          # 선에 안 닿음
+    now = h1.index[-1] + pd.Timedelta(hours=1)
+    names = [n for n, _ in leader_break.entry_triggers(touch, None, None, P, now)]
+    assert leader_break.ENTRY_1H_SLOW_TOUCH in names
+    names = [n for n, _ in leader_break.entry_triggers(brk, None, None, P, now)]
+    assert leader_break.ENTRY_1H_SLOW_BREAK in names
+    off = dataclasses_replace(P, entry_1h_slow=False)
+    assert not [n for n, _ in leader_break.entry_triggers(touch, None, None, off, now)
+                if n.startswith(("🧱1h", "💔1h"))]

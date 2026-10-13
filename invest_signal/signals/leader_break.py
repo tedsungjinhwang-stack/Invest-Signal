@@ -135,7 +135,14 @@ class Params:
     entry_pullback_align: tuple = ((240, 480, 960), (480, 960))
     entry_pullback_st: tuple = (30, 6.0)
     entry_15m_bars: int = 4
+    # 🧱1h장기선터치 · 💔1h장기선이탈(10-13~) — 1h 장기 수퍼트렌드(30×6)가 **상승**인데 캔들이 내려와
+    # 선을 터치(종가는 선 위)하거나 뚫은(종가가 선 아래 → 수트 하락 전환) 마감 1h봉. 직전 봉은 선에
+    # 안 닿았어야 한다(내려오는 첫 봉). 최근 entry_1h_bars봉 안.
+    entry_1h_slow: bool = True
+    entry_1h_slow_st: tuple = (30, 6.0)
     rearm_hours: int = 24           # 같은 종목은 이 시간 안에 • 로 다시 안 알린다
+    # rearm_hours 안이라도 또 내는 사건(10-13: 1h 장기선 터치·이탈 — 내려오는 첫 봉이라 반복이 적다)
+    rearm_exempt: tuple = ("🧱1h장기선터치", "💔1h장기선이탈")
     # 🔥 재떡상 조짐 — 장기 강세 코인(4h MA480 +40% 위)이 단기 과열이 식고(4h MA120
     # 대비 +20% 이하) 3일 저점 근처(+10% 이내)까지 눌린 자리(fire_mark()).
     fire_enabled: bool = True
@@ -470,6 +477,8 @@ ENTRY_W3 = "3파진입"
 ENTRY_FIRE = "🔥진입"
 ENTRY_PULLBACK = "🎯눌림목타점"          # 10-12 — 정배열 · 240선 위 · 상승 장기 수트 터치
 ENTRY_PULLBACK_BREAK = "🎯눌림목돌파타점"  # 10-11의 🎯눌림목타점(장기 수트 상승 전환) — 10-12 이름 바꿈
+ENTRY_1H_SLOW_TOUCH = "🧱1h장기선터치"     # 10-13 — 상승 1h 장기 수트로 내려와 터치(종가는 선 위)
+ENTRY_1H_SLOW_BREAK = "💔1h장기선이탈"     # 10-13 — 상승 1h 장기 수트를 종가로 뚫음(수트 하락 전환)
 
 
 def fire_series(df4h: pd.DataFrame | None, params: Params = Params()) -> np.ndarray | None:
@@ -541,6 +550,29 @@ def _fast_events(df: pd.DataFrame, params: Params, bars: int):
             out.append((t, "돌파"))
         elif not np.isnan(line[t]) and lo[t] <= line[t] <= hi[t]:
             out.append((t, "터치"))
+    return out
+
+
+def slow_line_events(df: pd.DataFrame, st, bars: int) -> list[tuple[int, str]]:
+    """마지막 bars개 봉에서 **상승 중인** 장기 수트로 내려온 첫 봉 — (위치, '터치'|'이탈').
+
+    직전 봉 수트가 상승이고 그 봉은 선에 안 닿았는데(저가 > 선), 이번 봉이 선까지 내려왔다.
+    이번 봉도 상승이면 터치(종가는 선 위), 하락으로 뒤집혔으면 이탈(종가가 선 아래).
+    이탈 봉의 선은 뒤집혀 위로 올라가므로 직전 봉의 선(지지선)으로 본다.
+    """
+    if df is None or len(df) < int(st[0]) + 3:
+        return []
+    full = supertrend_full(df, int(st[0]), float(st[1]))
+    d, line = full["dir"].to_numpy(float), full["line"].to_numpy(float)
+    hi, lo = df["High"].to_numpy(float), df["Low"].to_numpy(float)
+    out = []
+    for t in range(max(2, len(df) - max(1, bars)), len(df)):
+        if not d[t - 1] > 0 or np.isnan(line[t - 1]) or not lo[t - 1] > line[t - 1]:
+            continue
+        if d[t] > 0 and lo[t] <= line[t] <= hi[t]:
+            out.append((t, "터치"))
+        elif d[t] < 0:
+            out.append((t, "이탈"))
     return out
 
 
@@ -627,6 +659,8 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
                      하락→상승 전환(10-11~, 10-12 이름 바꿈)
       🎯눌림목타점     15m 120>240>480 정배열 · 캔들이 240선 위 · 상승 중인 15m 장기 수트를
                      내려와 터치(종가는 선 위)(10-12~)
+      🧱1h장기선터치   상승 중인 1h 장기 수트(30×6)로 내려와 터치, 종가는 선 위(10-13~)
+      💔1h장기선이탈   상승 중인 1h 장기 수트를 종가로 뚫음 — 수트 하락 전환(10-13~)
 
     1h는 최근 entry_1h_bars개(기본 2 — 스캔 한 번을 놓쳐도 잡게), 4h는 최근
     entry_4h_bars개(기본 1 — 4h봉 하나를 매시 스캔 넷이 본다)를 본다. 같은 봉이
@@ -645,6 +679,10 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
                 out.append((ENTRY_PULLBACK, h15.index[t] + q))
     h1 = _closed(df1h, 1, now)
     if h1 is not None and len(h1) > 2:
+        if params.entry_1h_slow:
+            for t, kind in slow_line_events(h1, params.entry_1h_slow_st, params.entry_1h_bars):
+                out.append((ENTRY_1H_SLOW_TOUCH if kind == "터치" else ENTRY_1H_SLOW_BREAK,
+                            h1.index[t] + hour))
         if params.entry_1h_fast:
             for t, kind in _fast_events(h1, params, params.entry_1h_bars):
                 out.append((f"1h단기선{kind}", h1.index[t] + hour))
@@ -676,7 +714,8 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
     return out
 
 
-ENTRY_ORDER = (ENTRY_FIRE, ENTRY_PULLBACK, ENTRY_PULLBACK_BREAK, ENTRY_W3, "1h단기선돌파", "1h단기선터치", "4h단기선돌파", "4h단기선터치")
+ENTRY_ORDER = (ENTRY_FIRE, ENTRY_PULLBACK, ENTRY_PULLBACK_BREAK, ENTRY_1H_SLOW_BREAK,
+               ENTRY_1H_SLOW_TOUCH, ENTRY_W3, "1h단기선돌파", "1h단기선터치", "4h단기선돌파", "4h단기선터치")
 
 
 def entry_event(symbol: str, triggers: list, df15: pd.DataFrame,
