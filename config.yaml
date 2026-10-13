@@ -16,7 +16,7 @@ notify:
   leader_only_triggers: ["🎯눌림목타점", "🎯눌림목돌파타점", "🧱1h장기선터치", "💔1h장기선이탈"]
   # 🔥 없이도 항상 싣는 칸 — 시그널 이름 또는 `시그널:stage`(그 변형만)
   # (10-01 급등봉 · 10-02 세력 이탈 · 10-04 파동의 일봉 단기·장기 추세선)
-  always_show: [spike_bar, vwap_onset, whale_exit, choch_warn, "wave_setup:일봉ABC", "wave_setup:일봉장기선돌파",
+  always_show: [big_bar, spike_bar, vwap_onset, whale_exit, choch_warn, "wave_setup:일봉ABC", "wave_setup:일봉장기선돌파",
                 "leader_break:🎯눌림목타점", "leader_break:🎯눌림목돌파타점",
                 "leader_break:🧱1h장기선터치", "leader_break:💔1h장기선이탈"]   # ⚡ • 🆕🎯 둘(10-11·10-12)도 🔥 없이
   # 추적 줄(↳)을 안 싣는 칸 — 시그널 이름 또는 `시그널:stage`. 추적 자체(상태)는 그대로라
@@ -27,6 +27,12 @@ notify:
   # vwap_onset(10-11): 🟢상승초입은 역배열 자리면 🔥 없이도 다 싣는다 — 🔥는 줄 앞 표시로만
 
 signal:
+  big_bar:                  # 🧨 하따봉 (15m봉, 크립토 전용, 10-13~) — 봉 하나의 고가가 시가 +25% 이상
+    # 종가가 아니라 **고가**로 잰다(봉 안에서 한 번이라도 +25%를 찍었으면). 거래량·종가위치는 안 본다.
+    # 24h 거래대금 하한은 급등봉과 같은 값(spike_bar.min_turnover_usd). 마감된 15m봉 최근 4개(1시간) 소급.
+    # 퍼프 07-20~10-10(634종): 132봉 · 하루 ≈1.6 · 76종. 추적 없이 • 한 번.
+    enabled: true
+    min_rise: 0.25
   spike_bar:                # 급등봉 (15m봉, 크립토 전용): 장대양봉 하나를 잡는다
     # 다른 시그널이 '자리'(눌림·터치·배열)를 보는 것과 달리 **봉 하나의
     # 모양만** 본다 — 조용하던 종목에 갑자기 매수가 쏟아진 순간이다.

@@ -228,3 +228,28 @@ def test_pullback_touch_after_spike():
     from invest_signal import notify
     line_s = [ln for ln in notify.format_events([ev], [], {}).splitlines() if ">X<" in ln][0]
     assert "🎯15m눌림목타점 🕒" in line_s
+
+
+def test_big_bar_uses_high_not_close():
+    """10-13 — 🧨 하따봉: 15m봉 고가가 시가 +25% 이상(종가 무관)."""
+    n = 120
+    idx = pd.date_range("2026-10-01", periods=n, freq="15min", tz="UTC")
+    o = np.full(n, 1.0)
+    df = pd.DataFrame({"Open": o, "High": o * 1.01, "Low": o * 0.99, "Close": o,
+                       "Volume": 100.0}, index=idx)
+    df.iloc[-1, df.columns.get_loc("High")] = 1.30          # 고가 +30%
+    df.iloc[-1, df.columns.get_loc("Close")] = 1.05         # 종가는 +5%
+    df.iloc[-1, df.columns.get_loc("Volume")] = 2000.0
+    got = spike_bar.big_bars(df, "XUSDT")
+    assert len(got) == 1 and got[0].signal == "big_bar"
+    d = got[0].detail
+    assert abs(d["rise_high"] - 0.30) < 1e-9 and abs(d["body"] - 0.05) < 1e-9 and d["vol_mult"] == 20
+    assert spike_bar.big_bars(df, "XUSDT", min_rise=0.35) == []
+    assert spike_bar.big_bars(df.iloc[:-1], "XUSDT") == []
+    from invest_signal import notify
+    out = notify.format_events(got, [], {})
+    assert "🧨 <b>하따봉</b>" in out
+    line = [ln for ln in out.splitlines() if ">X<" in ln][0]
+    assert "고가 +30%" in line and "종가 +5.0%" in line and "거래량 20배" in line
+    assert notify.fire_only(got, ("big_bar",)) == got
+    assert notify.fire_only_title(got, ("big_bar",)) == "🧨 <b>하따봉</b>"

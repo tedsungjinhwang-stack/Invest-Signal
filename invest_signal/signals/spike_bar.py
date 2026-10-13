@@ -230,3 +230,35 @@ def pullback_touch(df: pd.DataFrame, symbol: str, params: Params = Params(),
     hits = st_touch_bars(df, params.pullback_align, params.pullback_above,
                          (params.touch_period, params.touch_mult), _after_spike(df, spike, params))
     return _pb_event(df, symbol, hits[-1], PULLBACK, spike) if hits else None
+
+
+BIG_NAME = "big_bar"
+BIG_LABEL = "하따봉"
+
+
+def big_bars(df: pd.DataFrame, symbol: str, min_rise: float = 0.25,
+             grace_bars: int = 4) -> list[SignalEvent]:
+    """🧨 하따봉(10-13~) — 마감된 15m봉 하나가 **고가 기준** 시가 대비 +min_rise(25%) 이상.
+
+    종가가 아니라 고가로 잰다(봉 안에서 한 번이라도 +25%를 찍었으면). 거래량·종가위치는 안 본다.
+    마지막 grace_bars+1봉을 본다(스캔 1시간 소급). 같은 봉은 dedup 키로 한 번만 나간다.
+    퍼프 07-20~10-10(634종, 24h 거래대금 $1M+): 132봉 · 하루 ≈1.6 · 76종.
+    """
+    n = len(df)
+    if n < 2:
+        return []
+    o, h, c, v = (df[k].to_numpy(float) for k in ("Open", "High", "Close", "Volume"))
+    volma = pd.Series(v).shift(1).rolling(96, min_periods=8).mean().to_numpy()
+    out = []
+    for t in range(max(0, n - 1 - grace_bars), n):
+        if not o[t] > 0:
+            continue
+        rise = h[t] / o[t] - 1
+        if rise < min_rise:
+            continue
+        out.append(SignalEvent(
+            symbol=symbol, signal=BIG_NAME, bar_time=df.index[t], price=float(c[t]),
+            detail={"label": BIG_LABEL, "interval": INTERVAL, "rise_high": float(rise),
+                    "body": float(c[t] / o[t] - 1), "bar_high": float(h[t]),
+                    "vol_mult": float(v[t] / volma[t]) if volma[t] and volma[t] > 0 else None}))
+    return out

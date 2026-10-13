@@ -843,7 +843,8 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
     까다로워서, 유동성 필터가 빠져도 잡음이 쏟아지지는 않는다.
     """
     s = (cfg.get("signal") or {}).get("spike_bar") or {}
-    if not s.get("enabled", False):
+    big_cfg = (cfg.get("signal") or {}).get("big_bar") or {}
+    if not s.get("enabled", False) and not big_cfg.get("enabled", False):
         return [], []
     params = _spike_params(cfg)
     track10 = bool(((cfg.get("signal") or {}).get("track10") or {}).get("enabled", False))
@@ -863,7 +864,17 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
         return True
 
     touches = 0
+    bs = (cfg.get("signal") or {}).get("big_bar") or {}
+    big_on, big_rise = bool(bs.get("enabled", False)), float(bs.get("min_rise", 0.25))
+    bigs = 0
     for sym, df in frames15.items():
+        if big_on:
+            for ev in spike_bar.big_bars(df, sym, big_rise, params.grace_bars):
+                if stamp(ev):
+                    events.append(ev)
+                    bigs += 1
+        if not s.get("enabled", False):
+            continue
         for ev in spike_bar.detect(df, sym, params):
             if stamp(ev):
                 events.append(ev)
@@ -881,8 +892,10 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
         old_ev = spike_bar.recent(df, sym, params)
         if old_ev is not None and stamp(old_ev):
             ongoing.append(old_ev)
+    if big_on:
+        log(f"[binance] 🧨 하따봉 {bigs}건 (15m 고가가 시가 +{big_rise:.0%} 이상)")
     if events or ongoing or thin:
-        log(f"[binance] 급등봉 {len(events) - touches}건 · 15m 장기선 터치 {touches}건 · 추적 {len(ongoing)}건"
+        log(f"[binance] 급등봉 {len(events) - touches - bigs}건 · 15m 장기선 터치 {touches}건 · 추적 {len(ongoing)}건"
             + (f" · 거래대금 하한 미달 {thin}건 제외" if thin else "")
             + f" (몸통 {params.body:.0%} · 거래량 {params.vol_mult:.0f}배 · "
               f"종가위치 {params.close_pos} · 추적 {params.track_bars}봉)")
@@ -1126,6 +1139,13 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         frames15, need15 = {}, 0
         if (scfg.get("spike_bar") or {}).get("enabled", False):
             need15 = max(need15, spike_bar.KLINE_LIMIT)
+        if (scfg.get("big_bar") or {}).get("enabled", False):
+            need15 = max(need15, 120)                       # 🧨 하따봉 — 거래량 평균(96봉)까지
+        # 🎯눌림목돌파타점(급등봉 10일 추적·⚡)은 15m MA960을 본다 — 1,000봉을 받는다.
+        # 예전엔 상승초입이 1,000봉을 받아 둬서 같이 썼는데, 상승초입을 끄면(10-13) 500봉만 남는다.
+        if ((scfg.get("spike_bar") or {}).get("enabled", False)
+                or (scfg.get("leader_break") or {}).get("enabled", False)):
+            need15 = max(need15, vwap_onset.KLINE_LIMIT)
         if (scfg.get("vwap_onset") or {}).get("enabled", False):
             # 상승초입은 MA960을 봐야 해서 훨씬 길다 — 둘 중 긴 쪽에 맞춰
             # 한 번만 받는다(요청 수는 그대로, 페이로드만 커진다).
