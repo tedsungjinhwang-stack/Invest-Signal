@@ -424,6 +424,10 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
                 choch_cache[sym] = None
         return choch_cache[sym]
 
+    # ⚡ 감시 종목은 15m을 1,000봉으로 — 🎯눌림목돌파타점이 MA960을 본다(전 종목은 짧게 받았다)
+    if frames15:
+        _deepen(session, source, frames15, [w for w, _ in watch],
+                int((cfg.get("crypto") or {}).get("fetch_workers", 6)), log)
     choch_n, choch_rearmed, choch_below = 0, 0, 0
     muted = 0                   # require_resist로 걸러낸 신규·추적 줄 수
     rearmed = 0                 # rearm_hours 안에 이미 • 로 보낸 종목이라 ↳ 로 둔 수
@@ -611,6 +615,22 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
               "price": t.get("last"), "turnover_24h": t.get("quote_volume")}
              for i, (sym, t) in enumerate(top[:max(0, params.board_top)])]
     return events, ongoing, board
+
+
+SHORT15 = 200               # 전 종목 15m — 급등봉·하따봉·세력 이탈(직전 24h + 소급)에 넉넉하다
+DEEP15 = 1000               # MA960·장기 수트를 보는 종목(급등봉 추적 · ⚡ 감시)
+
+
+def _deepen(session, source: str, frames15: dict, symbols, workers: int, log=print) -> int:
+    """frames15 중 DEEP15봉보다 짧게 받은 종목을 DEEP15봉으로 다시 받아 바꿔 넣는다. 받은 수."""
+    need = sorted(sym for sym in symbols if sym in frames15 and len(frames15[sym]) < DEEP15
+                  and len(frames15[sym]) >= SHORT15)
+    if not need:
+        return 0
+    got = _fetch_15m(session, source, need, DEEP15, workers, log)
+    frames15.update(got)
+    log(f"[binance] 15m {DEEP15}봉 다시 받음 {len(got)}종 (급등봉 추적·⚡ 감시)")
+    return len(got)
 
 
 def _fetch_15m(session, source: str, symbols: list, limit: int,
@@ -1136,16 +1156,15 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         ticker = _crypto_ticker(s, source, log)
         # 🚀급등봉 — 유니버스 전체의 15m이 필요하다. 받아 둔 프레임은 ⚡에도
         # 넘겨 겹치는 종목을 다시 받지 않게 한다.
+        # 전 종목은 짧게(SHORT15) 받고, MA960·장기 수트를 보는 종목만 길게(DEEP15) 다시 받는다
+        # (10-13 최적화 — 판정 결과는 같다). 급등봉·하따봉·세력 이탈은 마지막 몇 봉과 직전
+        # 24h(96봉)만 본다. 1,000봉이 필요한 건 급등봉 10일 추적 종목(🧱·🎯)과 ⚡ 감시 종목뿐이다.
         frames15, need15 = {}, 0
+        track10_on = bool((scfg.get("track10") or {}).get("enabled", False))
         if (scfg.get("spike_bar") or {}).get("enabled", False):
-            need15 = max(need15, spike_bar.KLINE_LIMIT)
+            need15 = max(need15, SHORT15 if track10_on else spike_bar.KLINE_LIMIT)
         if (scfg.get("big_bar") or {}).get("enabled", False):
-            need15 = max(need15, 120)                       # 🧨 하따봉 — 거래량 평균(96봉)까지
-        # 🎯눌림목돌파타점(급등봉 10일 추적·⚡)은 15m MA960을 본다 — 1,000봉을 받는다.
-        # 예전엔 상승초입이 1,000봉을 받아 둬서 같이 썼는데, 상승초입을 끄면(10-13) 500봉만 남는다.
-        if ((scfg.get("spike_bar") or {}).get("enabled", False)
-                or (scfg.get("leader_break") or {}).get("enabled", False)):
-            need15 = max(need15, vwap_onset.KLINE_LIMIT)
+            need15 = max(need15, SHORT15)                   # 🧨 하따봉 — 거래량 평균(96봉)까지
         if (scfg.get("vwap_onset") or {}).get("enabled", False):
             # 상승초입은 MA960을 봐야 해서 훨씬 길다 — 둘 중 긴 쪽에 맞춰
             # 한 번만 받는다(요청 수는 그대로, 페이로드만 커진다).
@@ -1156,6 +1175,12 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
             frames15 = _fetch_15m(s, source, symbols, need15, workers, log)
         spike_events, spike_ongoing = _scan_spike(cfg, frames15, ticker, log)
         spike_events += _scan_whale_exit(cfg, source, frames15, ticker, state, workers, log)
+        # 급등봉 10일 추적 종목(이번에 새로 잡힌 것 포함)은 1,000봉으로 다시 받는다 — 🧱·🎯 판정용
+        if track10_on and state is not None and need15 and need15 < DEEP15:
+            days = float((scfg.get("track10") or {}).get("days", 10))
+            deep = {it["symbol"] for it in state.tracked(("spike_bar",), days)}
+            deep |= {e.symbol for e in spike_events if e.signal == "spike_bar"}
+            _deepen(s, source, frames15, deep, workers, log)
         vo_events, vo_ongoing = _scan_vwap_onset(cfg, frames15, frames, ticker, log)
         # 15m 판정이라 마감·인트라바 양쪽에서 매번 돈다. 4h 프레임은 제외 조건
         # (정배열 + 480선 아래) 판정에만 쓰고, 없으면 대상 종목만 따로 받는다.
