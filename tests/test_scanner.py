@@ -531,3 +531,8 @@ def test_track10_records_and_rebuilds_holds_for_ten_days(tmp_path):
                        "spike_bar": {"touch_enabled": False}}}
     _, holds3 = scanner._track10(cfg1, st, [], [], frames, {}, log=lambda *a: None)
     assert {e.symbol for e in holds3} == {"NUSDT"}
+    # 10-13 — 꺼진 시그널은 추적 줄도 없다
+    cfg2 = {"signal": {"track10": {"enabled": True}, "vwap_onset": {"enabled": False},
+                       "spike_bar": {"touch_enabled": False}}}
+    _, holds4 = scanner._track10(cfg2, st, [], [], frames, {}, log=lambda *a: None)
+    assert {e.symbol for e in holds4} == {"NUSDT"}

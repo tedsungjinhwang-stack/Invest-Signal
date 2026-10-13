@@ -662,6 +662,9 @@ def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | Non
     if not s.get("enabled", False) or state is None:
         return events, ongoing
     sigs = tuple(s.get("signals", TRACK10_SIGNALS))
+    # 꺼진 시그널은 추적 줄도 안 만든다(10-13: 상승초입을 껐는데 ↳가 계속 나갔다)
+    scfg = cfg.get("signal") or {}
+    sigs = tuple(x for x in sigs if (scfg.get(x) or {}).get("enabled", True))
     days = float(s.get("days", 10))
     # 시그널별 추적 기간(10-11: 상승초입은 하루) — 없으면 days
     days_by = {k: float(v) for k, v in (s.get("days_by") or {}).items()}
