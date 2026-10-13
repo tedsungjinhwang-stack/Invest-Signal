@@ -1012,3 +1012,30 @@ def test_1h_slow_line_touch_and_break():
     off = dataclasses_replace(P, entry_1h_slow=False)
     assert not [n for n, _ in leader_break.entry_triggers(touch, None, None, off, now)
                 if n.startswith(("🧱1h", "💔1h"))]
+
+
+def test_vwap_upper_touch_from_above():
+    """10-13 — 🎯눌림목타점2: 월 VWAP **상단선**(+1σ) 위의 15m 캔들이 내려와 닿거나 하회."""
+    from invest_signal.indicators import anchored_vwap_bands
+    idx4 = pd.date_range("2026-10-01", periods=60, freq="4h", tz="UTC")
+    c4 = np.where(np.arange(60) % 2 == 0, 100.0, 110.0)          # 월 VWAP 105 · 상단 ≈110
+    d4 = pd.DataFrame({"Open": c4, "High": c4, "Low": c4, "Close": c4, "Volume": 1.0}, index=idx4)
+    upper = anchored_vwap_bands(d4, "M", 1.0)[2].iloc[-1]
+    vwap = anchored_vwap_bands(d4, "M", 1.0)[0].iloc[-1]
+    assert upper > vwap + 4
+    idx = pd.date_range(idx4[-1], periods=8, freq="15min")
+    c = np.full(8, upper * 1.05)
+    df15 = pd.DataFrame({"Open": c, "High": c * 1.002, "Low": c * 0.998, "Close": c,
+                         "Volume": 1.0}, index=idx)
+    df15.iloc[-1, df15.columns.get_loc("Low")] = upper * 0.999       # 상단선까지 내려와 닿음
+    assert leader_break.vwap_upper_touches(df15, d4, P, 4) == [7]
+    below = df15.copy()
+    below.iloc[-1, below.columns.get_loc("Close")] = upper * 0.98     # 하회해도 같다
+    below.iloc[-1, below.columns.get_loc("Low")] = upper * 0.97
+    assert leader_break.vwap_upper_touches(below, d4, P, 4) == [7]
+    vw = df15.copy()                                                  # VWAP선까지가 아니라 상단선 기준
+    vw["Low"] = upper * 1.01
+    assert leader_break.vwap_upper_touches(vw, d4, P, 4) == []
+    now = idx[-1] + pd.Timedelta(minutes=15)
+    names = [n for n, _ in leader_break.entry_triggers(None, d4, None, P, now, df15)]
+    assert leader_break.ENTRY_VWAP_UPPER in names

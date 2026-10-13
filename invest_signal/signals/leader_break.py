@@ -23,7 +23,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from ..indicators import alignment, atr, pct_over, sma, stacked_any, supertrend_full
+from ..indicators import (alignment, anchored_vwap_bands, atr, pct_over, sma, stacked_any,
+                          supertrend_full)
 from . import SignalEvent
 
 NAME = "leader_break"
@@ -139,10 +140,15 @@ class Params:
     # 선을 터치(종가는 선 위)하거나 뚫은(종가가 선 아래 → 수트 하락 전환) 마감 1h봉. 직전 봉은 선에
     # 안 닿았어야 한다(내려오는 첫 봉). 최근 entry_1h_bars봉 안.
     entry_1h_slow: bool = True
+    # 🎯눌림목타점2(10-13~) — 15m 캔들이 **월 앵커드 VWAP 상단선(+1σ)** 위에 있다가 내려와 닿거나
+    # 아래로 하회한 마감 15m봉(직전 봉은 저가가 선 위). 밴드는 4h로 재서 15m에 얹는다(상승초입과 같은 선).
+    entry_vwap_upper: bool = True
+    entry_vwap_anchor: str = "M"
+    entry_vwap_mult: float = 1.0
     entry_1h_slow_st: tuple = (30, 6.0)
     rearm_hours: int = 24           # 같은 종목은 이 시간 안에 • 로 다시 안 알린다
     # rearm_hours 안이라도 또 내는 사건(10-13: 1h 장기선 터치·이탈 — 내려오는 첫 봉이라 반복이 적다)
-    rearm_exempt: tuple = ("🧱1h장기선터치", "💔1h장기선이탈")
+    rearm_exempt: tuple = ("🧱1h장기선터치", "💔1h장기선이탈", "🎯눌림목타점2")
     # 🔥 재떡상 조짐 — 장기 강세 코인(4h MA480 +40% 위)이 단기 과열이 식고(4h MA120
     # 대비 +20% 이하) 3일 저점 근처(+10% 이내)까지 눌린 자리(fire_mark()).
     fire_enabled: bool = True
@@ -477,6 +483,7 @@ ENTRY_W3 = "3파진입"
 ENTRY_FIRE = "🔥진입"
 ENTRY_PULLBACK = "🎯눌림목타점"          # 10-12 — 정배열 · 240선 위 · 상승 장기 수트 터치
 ENTRY_PULLBACK_BREAK = "🎯눌림목돌파타점"  # 10-11의 🎯눌림목타점(장기 수트 상승 전환) — 10-12 이름 바꿈
+ENTRY_VWAP_UPPER = "🎯눌림목타점2"       # 10-13 — 월 VWAP 상단선(+1σ)으로 내려와 터치·하회
 ENTRY_1H_SLOW_TOUCH = "🧱1h장기선터치"     # 10-13 — 상승 1h 장기 수트로 내려와 터치(종가는 선 위)
 ENTRY_1H_SLOW_BREAK = "💔1h장기선이탈"     # 10-13 — 상승 1h 장기 수트를 종가로 뚫음(수트 하락 전환)
 
@@ -551,6 +558,25 @@ def _fast_events(df: pd.DataFrame, params: Params, bars: int):
         elif not np.isnan(line[t]) and lo[t] <= line[t] <= hi[t]:
             out.append((t, "터치"))
     return out
+
+
+def vwap_upper_touches(df15: pd.DataFrame | None, df4h: pd.DataFrame | None, params: Params,
+                       bars: int) -> list[int]:
+    """🎯눌림목타점2 — 마지막 bars봉 중 '직전 봉은 월 VWAP 상단선 위(저가 > 선), 이번 봉은 저가가
+    선까지 내려옴(터치 또는 하회)' 15m봉 위치. 상단선은 4h로 낸 값을 15m에 얹는다."""
+    if df15 is None or df4h is None or len(df15) < 3 or len(df4h) < 10:
+        return []
+    got = anchored_vwap_bands(df4h, params.entry_vwap_anchor, params.entry_vwap_mult)
+    if got is None:
+        return []
+    upper = got[2].dropna()
+    if upper.empty:
+        return []
+    up = upper.reindex(df15.index, method="ffill").to_numpy(float)
+    lo = df15["Low"].to_numpy(float)
+    return [t for t in range(max(1, len(df15) - max(1, bars)), len(df15))
+            if not np.isnan(up[t]) and not np.isnan(up[t - 1])
+            and lo[t - 1] > up[t - 1] and lo[t] <= up[t]]
 
 
 def slow_line_events(df: pd.DataFrame, st, bars: int) -> list[tuple[int, str]]:
@@ -659,6 +685,7 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
                      하락→상승 전환(10-11~, 10-12 이름 바꿈)
       🎯눌림목타점     15m 120>240>480 정배열 · 캔들이 240선 위 · 상승 중인 15m 장기 수트를
                      내려와 터치(종가는 선 위)(10-12~)
+      🎯눌림목타점2    월 VWAP 상단선(+1σ) 위에 있던 15m 캔들이 내려와 선에 닿거나 하회(10-13~)
       🧱1h장기선터치   상승 중인 1h 장기 수트(30×6)로 내려와 터치, 종가는 선 위(10-13~)
       💔1h장기선이탈   상승 중인 1h 장기 수트를 종가로 뚫음 — 수트 하락 전환(10-13~)
 
@@ -677,6 +704,10 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
         if params.entry_pullback:
             for t in pullback_touches(h15, params, params.entry_15m_bars):
                 out.append((ENTRY_PULLBACK, h15.index[t] + q))
+    if params.entry_vwap_upper and df15 is not None:
+        h15v = _closed(df15, 0.25, now)
+        for t in vwap_upper_touches(h15v, df4h, params, params.entry_15m_bars):
+            out.append((ENTRY_VWAP_UPPER, h15v.index[t] + q))
     h1 = _closed(df1h, 1, now)
     if h1 is not None and len(h1) > 2:
         if params.entry_1h_slow:
@@ -714,7 +745,7 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
     return out
 
 
-ENTRY_ORDER = (ENTRY_FIRE, ENTRY_PULLBACK, ENTRY_PULLBACK_BREAK, ENTRY_1H_SLOW_BREAK,
+ENTRY_ORDER = (ENTRY_FIRE, ENTRY_PULLBACK, ENTRY_VWAP_UPPER, ENTRY_PULLBACK_BREAK, ENTRY_1H_SLOW_BREAK,
                ENTRY_1H_SLOW_TOUCH, ENTRY_W3, "1h단기선돌파", "1h단기선터치", "4h단기선돌파", "4h단기선터치")
 
 
