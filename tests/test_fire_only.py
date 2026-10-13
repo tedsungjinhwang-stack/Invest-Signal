@@ -211,3 +211,18 @@ def test_hide_holds_drops_tracked_lines_only(monkeypatch, tmp_path):
     msg = sent[0]
     assert ">N<" in msg and "↳ D " in msg and "↳ S " in msg
     assert "↳ H " not in msg and "↳ W " not in msg
+
+
+
+def test_board_sent_alone_when_no_signal(monkeypatch, tmp_path):
+    """10-13 — board_always면 새 시그널이 없어도 순위표만 보낸다."""
+    cfg = {"notify": {"fire_only": True, "board_always": True}}
+    monkeypatch.setattr(scanner.cfg_mod, "load", lambda p: cfg)
+    monkeypatch.setattr(scanner, "scan_crypto",
+                        lambda *a, **k: ([], [], [{"symbol": "ZUSDT", "rank": 1, "gain_24h": 0.5}]))
+    monkeypatch.setattr(scanner, "scan_yfinance", lambda *a, **k: ([], [], {}, {}))
+    monkeypatch.setattr(scanner, "_scan_community", lambda *a, **k: {})
+    sent = []
+    monkeypatch.setattr(notify, "send_telegram", lambda msg, log=print: sent.append(msg) or True)
+    scanner.run("x.yaml", str(tmp_path / "state" / "alerts_state.json"), log=lambda *x: None)
+    assert len(sent) == 1 and "24h 상승률 TOP" in sent[0] and ">Z<" in sent[0]

@@ -1716,7 +1716,17 @@ def run(config_path: str, state_path: str, only: str | None = None,
         # 시그널이 없어도 커뮤니티 칸은 4시간마다 보낸다 — 그게 이 칸을 만든
         # 이유다. 유지 중 목록까지 딸려 나가면 조용한 스캔이 긴 알림으로
         # 바뀌므로, 여기서는 **커뮤니티 칸만** 따로 만들어 보낸다.
-        if community:
+        # 24h 상승률 순위표는 새 시그널이 없어도 매번 보낸다(notify.board_always, 10-13 요청)
+        if crypto_board and ncfg.get("board_always", False):
+            msg = notify.format_events([], [], {}, crypto_board=crypto_board, community=community,
+                                       title="📈 <b>24h 상승률 TOP</b>")
+            if dry_run:
+                log("[dry-run] 발송 생략 — 순위표 미리보기:")
+                log(msg)
+            elif notify.send_telegram(msg, log=log):
+                sent_log.append(sent_log.default_path(state_path), msg,
+                                mode="board", counts={})
+        elif community:
             msg = notify.format_events([], [], {}, community=community)
             if dry_run:
                 log("[dry-run] 발송 생략 — 커뮤니티 칸 미리보기:")
