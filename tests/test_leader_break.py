@@ -1039,3 +1039,79 @@ def test_vwap_upper_touch_from_above():
     now = idx[-1] + pd.Timedelta(minutes=15)
     names = [n for n, _ in leader_break.entry_triggers(None, d4, None, P, now, df15)]
     assert leader_break.ENTRY_VWAP_UPPER in names
+
+
+def test_15m_slow_line_touch_is_pullback3():
+    """10-14 — 🎯눌림목타점3: 상승 15m 장기 수트(30×6)로 내려와 터치(종가 위). 이탈은 아니다."""
+    from invest_signal.indicators import supertrend_full
+    c = np.linspace(100, 200, 300)
+    h15 = _bars(c, "15min", spread=0.002)
+    line = supertrend_full(h15, 30, 6.0)["line"].to_numpy()
+    t = len(h15) - 1
+    touch = h15.copy()
+    touch.iloc[t, touch.columns.get_loc("Low")] = line[t - 1] * 0.999
+    touch.iloc[t, touch.columns.get_loc("Close")] = line[t - 1] * 1.02
+    now = h15.index[-1] + pd.Timedelta(minutes=15)
+    P0 = dataclasses_replace(P, entry_15m_slow_fvg=False)          # FVG는 아래 테스트에서 따로
+    names = [n for n, _ in leader_break.entry_triggers(None, None, None, P0, now, touch)]
+    assert leader_break.ENTRY_15M_SLOW_TOUCH in names
+    brk = h15.copy()
+    brk.iloc[t, brk.columns.get_loc("Low")] = line[t - 1] * 0.95
+    brk.iloc[t, brk.columns.get_loc("Close")] = line[t - 1] * 0.97
+    names = [n for n, _ in leader_break.entry_triggers(None, None, None, P0, now, brk)]
+    assert leader_break.ENTRY_15M_SLOW_TOUCH not in names
+    off = dataclasses_replace(P0, entry_15m_slow_touch=False)
+    assert leader_break.ENTRY_15M_SLOW_TOUCH not in [
+        n for n, _ in leader_break.entry_triggers(None, None, None, off, now, touch)]
+
+
+def test_fvg_2h_zones_and_requirement(monkeypatch):
+    """10-14 — 2h 상승 FVG: 첫 봉 고가 < 셋째 봉 저가. 2h 종가가 아래 끝 밑이면 무효. 타점3은 그 구간에서만."""
+    idx = pd.date_range("2026-10-01", periods=48, freq="15min", tz="UTC")     # 2h봉 6개
+    # 2h봉: 100~101 · 102~104 · 105~106(갭 101~105) · 104~105 · 100~101(종가 100.5 < 101 → 무효) · 100~101
+    rng = [(100, 101), (102, 104), (105, 106), (104, 105), (100, 101), (100, 101)]
+    lows, highs = [], []
+    for lo, hi in rng:
+        lows += [lo] * 8
+        highs += [hi] * 8
+    c = (np.array(lows) + np.array(highs)) / 2
+    df = pd.DataFrame({"Open": c, "High": highs, "Low": lows, "Close": c, "Volume": 1.0}, index=idx)
+    z = leader_break.fvg_zones(df, "2h")
+    assert len(z) == 1
+    made, bot, top, dead, left = z[0]
+    assert (bot, top) == (101, 105) and made == idx[0] + pd.Timedelta(hours=6)
+    assert dead == idx[0] + pd.Timedelta(hours=10)
+    assert left is None                         # 위 끝(105) 위로 완전히 떠난 2h봉이 없다
+    # FVG가 없으면(빈 목록) 장기선 터치만으로는 타점3이 아니다
+    from invest_signal.indicators import supertrend_full
+    cc = np.linspace(100, 200, 300)
+    h15 = _bars(cc, "15min", spread=0.002)
+    line = supertrend_full(h15, 30, 6.0)["line"].to_numpy()
+    t = len(h15) - 1
+    h15.iloc[t, h15.columns.get_loc("Low")] = line[t - 1] * 0.999
+    h15.iloc[t, h15.columns.get_loc("Close")] = line[t - 1] * 1.02
+    now = h15.index[-1] + pd.Timedelta(minutes=15)
+    bar_open, bar_end = h15.index[t], h15.index[t] + pd.Timedelta(minutes=15)
+    lo_t = float(h15["Low"].iloc[t])
+    zone = (bar_open - pd.Timedelta(hours=10), lo_t * 0.99, lo_t * 1.001)
+    # 이전에 생겨서 위로 떠났다가 되돌아온 FVG → 타점3
+    monkeypatch.setattr(leader_break, "fvg_zones",
+                        lambda *a, **k: [(*zone, None, bar_open - pd.Timedelta(hours=6))])
+    assert leader_break.ENTRY_15M_SLOW_TOUCH in [
+        n for n, _ in leader_break.entry_triggers(None, None, None, P, now, h15)]
+    # 생긴 뒤 위로 떠난 적이 없으면(방금 생긴 구간) 아니다
+    monkeypatch.setattr(leader_break, "fvg_zones", lambda *a, **k: [(*zone, None, None)])
+    assert leader_break.ENTRY_15M_SLOW_TOUCH not in [
+        n for n, _ in leader_break.entry_triggers(None, None, None, P, now, h15)]
+    # 무효된 구간도 아니다
+    monkeypatch.setattr(leader_break, "fvg_zones",
+                        lambda *a, **k: [(*zone, bar_open - pd.Timedelta(hours=2),
+                                          bar_open - pd.Timedelta(hours=6))])
+    assert leader_break.ENTRY_15M_SLOW_TOUCH not in [
+        n for n, _ in leader_break.entry_triggers(None, None, None, P, now, h15)]
+    monkeypatch.setattr(leader_break, "fvg_zones", lambda *a, **k: [])
+    assert leader_break.ENTRY_15M_SLOW_TOUCH not in [
+        n for n, _ in leader_break.entry_triggers(None, None, None, P, now, h15)]
+    nofvg = dataclasses_replace(P, entry_15m_slow_fvg=False)
+    assert leader_break.ENTRY_15M_SLOW_TOUCH in [
+        n for n, _ in leader_break.entry_triggers(None, None, None, nofvg, now, h15)]

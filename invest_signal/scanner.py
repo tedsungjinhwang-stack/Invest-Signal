@@ -238,7 +238,11 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         entry_15m_bars=int(s.get("entry_15m_bars", 4)),
         entry_1h_slow=bool(s.get("entry_1h_slow", True)),
         entry_1h_slow_st=tuple(s.get("entry_1h_slow_st", (30, 6.0))),
-        rearm_exempt=tuple(s.get("rearm_exempt", ("🧱1h장기선터치", "💔1h장기선이탈", "🎯눌림목타점2"))),
+        rearm_exempt=tuple(s.get("rearm_exempt", ("🧱1h장기선터치", "💔1h장기선이탈", "🎯눌림목타점2",
+                                                  "🎯눌림목타점3"))),
+        entry_15m_slow_touch=bool(s.get("entry_15m_slow_touch", True)),
+        entry_15m_slow_fvg=bool(s.get("entry_15m_slow_fvg", True)),
+        fvg_tf=str(s.get("fvg_tf", "2h")),
         entry_vwap_upper=bool(s.get("entry_vwap_upper", True)),
         entry_vwap_anchor=str(s.get("entry_vwap_anchor", "M")),
         entry_vwap_mult=float(s.get("entry_vwap_mult", 1.0)),
@@ -626,8 +630,10 @@ DEEP15 = 1000               # MA960·장기 수트를 보는 종목(급등봉 �
 
 def _deepen(session, source: str, frames15: dict, symbols, workers: int, log=print) -> int:
     """frames15 중 DEEP15봉보다 짧게 받은 종목을 DEEP15봉으로 다시 받아 바꿔 넣는다. 받은 수."""
-    need = sorted(sym for sym in symbols if sym in frames15 and len(frames15[sym]) < DEEP15
-                  and len(frames15[sym]) >= SHORT15)
+    # 진행 중 봉을 빼고 받으므로 SHORT15개를 요청하면 SHORT15−1개가 온다(10-14 버그: >= SHORT15로 봐서
+    # 한 종목도 다시 안 받았다). 그보다 짧은 건 상장이 짧아 이미 전부인 종목이다.
+    need = sorted(sym for sym in symbols if sym in frames15
+                  and SHORT15 - 2 <= len(frames15[sym]) < DEEP15 - 2)
     if not need:
         return 0
     got = _fetch_15m(session, source, need, DEEP15, workers, log)

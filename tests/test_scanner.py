@@ -536,3 +536,21 @@ def test_track10_records_and_rebuilds_holds_for_ten_days(tmp_path):
                        "spike_bar": {"touch_enabled": False}}}
     _, holds4 = scanner._track10(cfg2, st, [], [], frames, {}, log=lambda *a: None)
     assert {e.symbol for e in holds4} == {"NUSDT"}
+
+
+def test_deepen_refetches_short_frames(monkeypatch):
+    """10-14 — 200봉 요청은 진행 봉을 빼 199봉이 온다. 그래도 1,000봉으로 다시 받아야 한다."""
+    import pandas as pd
+    short = pd.DataFrame({"Close": range(scanner.SHORT15 - 1)})
+    young = pd.DataFrame({"Close": range(50)})                 # 상장 짧음 — 이미 전부
+    deep = pd.DataFrame({"Close": range(scanner.DEEP15 - 1)})
+    frames = {"A": short, "B": young, "C": deep}
+    asked = []
+
+    def fake(session, source, syms, limit, workers, log=print):
+        asked.append((tuple(syms), limit))
+        return {s: pd.DataFrame({"Close": range(limit - 1)}) for s in syms}
+
+    monkeypatch.setattr(scanner, "_fetch_15m", fake)
+    assert scanner._deepen(None, "fapi", frames, ["A", "B", "C", "Z"], 2, log=lambda *a: None) == 1
+    assert asked == [(("A",), scanner.DEEP15)] and len(frames["A"]) == scanner.DEEP15 - 1
