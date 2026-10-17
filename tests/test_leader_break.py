@@ -1042,7 +1042,7 @@ def test_vwap_upper_touch_from_above():
 
 
 def test_15m_slow_line_touch_is_pullback3():
-    """10-14 — 🎯눌림목타점3: 상승 15m 장기 수트(30×6)로 내려와 터치(종가 위). 이탈은 아니다."""
+    """10-14 — 🎯눌림목타점3: 상승 15m 장기 수트(30×6)로 내려와 터치(종가 위). 10-17부터 이탈도."""
     from invest_signal.indicators import supertrend_full
     c = np.linspace(100, 200, 300)
     h15 = _bars(c, "15min", spread=0.002)
@@ -1059,7 +1059,7 @@ def test_15m_slow_line_touch_is_pullback3():
     brk.iloc[t, brk.columns.get_loc("Low")] = line[t - 1] * 0.95
     brk.iloc[t, brk.columns.get_loc("Close")] = line[t - 1] * 0.97
     names = [n for n, _ in leader_break.entry_triggers(None, None, None, P0, now, brk)]
-    assert leader_break.ENTRY_15M_SLOW_TOUCH not in names
+    assert leader_break.ENTRY_15M_SLOW_TOUCH in names          # 10-17 — 뚫려도 타점3
     off = dataclasses_replace(P0, entry_15m_slow_touch=False)
     assert leader_break.ENTRY_15M_SLOW_TOUCH not in [
         n for n, _ in leader_break.entry_triggers(None, None, None, off, now, touch)]

@@ -144,7 +144,8 @@ class Params:
     # 아래로 하회한 마감 15m봉(직전 봉은 저가가 선 위). 밴드는 4h로 재서 15m에 얹는다(상승초입과 같은 선).
     entry_vwap_upper: bool = True
     # 🎯눌림목타점3(10-14~) — 15m 장기 수퍼트렌드(entry_pullback_st, 30×6)가 상승인데 캔들이 내려와 선을
-    # 터치하고 종가는 선 위로 지킨 마감 15m봉(직전 봉은 선에 안 닿음). 최근 entry_15m_bars봉 안.
+    # 터치하거나(종가는 선 위) 뚫은(종가가 선 아래, 10-17~) 마감 15m봉(직전 봉은 선에 안 닿음).
+    # 최근 entry_15m_bars봉 안.
     entry_15m_slow_touch: bool = True
     # 그 터치 봉이 **이전에 생긴 2h 상승 FVG** 구간이어야 한다(10-14). FVG = 마감된 2h봉 셋에서 첫 봉
     # 고가 < 셋째 봉 저가인 빈 구간 [첫 봉 고가, 셋째 봉 저가]. 생긴 뒤 가격이 구간 위로 떠났다가(2h봉
@@ -493,7 +494,7 @@ ENTRY_FIRE = "🔥진입"
 ENTRY_PULLBACK = "🎯눌림목타점"          # 10-12 — 정배열 · 240선 위 · 상승 장기 수트 터치
 ENTRY_PULLBACK_BREAK = "🎯눌림목돌파타점"  # 10-11의 🎯눌림목타점(장기 수트 상승 전환) — 10-12 이름 바꿈
 ENTRY_VWAP_UPPER = "🎯눌림목타점2"       # 10-13 — 월 VWAP 상단선(+1σ)으로 내려와 터치·하회
-ENTRY_15M_SLOW_TOUCH = "🎯눌림목타점3"   # 10-14 — 상승 15m 장기 수트(30×6)로 내려와 터치(종가는 선 위)
+ENTRY_15M_SLOW_TOUCH = "🎯눌림목타점3"   # 10-14 — 상승 15m 장기 수트(30×6)로 내려와 터치·이탈 + 이전 2h FVG 자리
 ENTRY_1H_SLOW_TOUCH = "🧱1h장기선터치"     # 10-13 — 상승 1h 장기 수트로 내려와 터치(종가는 선 위)
 ENTRY_1H_SLOW_BREAK = "💔1h장기선이탈"     # 10-13 — 상승 1h 장기 수트를 종가로 뚫음(수트 하락 전환)
 
@@ -733,8 +734,8 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
       🎯눌림목타점     15m 120>240>480 정배열 · 캔들이 240선 위 · 상승 중인 15m 장기 수트를
                      내려와 터치(종가는 선 위)(10-12~)
       🎯눌림목타점2    월 VWAP 상단선(+1σ) 위에 있던 15m 캔들이 내려와 선에 닿거나 하회(10-13~)
-      🎯눌림목타점3    상승 중인 15m 장기 수트(30×6)로 내려와 터치, 종가는 선 위, 그 봉이 살아 있는
-                     2h 상승 FVG 구간에 걸침(10-14~)
+      🎯눌림목타점3    상승 중인 15m 장기 수트(30×6)로 내려와 터치하거나 뚫은 봉이, 이전에 생겨 살아
+                     있는 2h 상승 FVG 구간에 걸침(10-14~, 이탈은 10-17~)
       🧱1h장기선터치   상승 중인 1h 장기 수트(30×6)로 내려와 터치, 종가는 선 위(10-13~)
       💔1h장기선이탈   상승 중인 1h 장기 수트를 종가로 뚫음 — 수트 하락 전환(10-13~)
 
@@ -755,8 +756,9 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
                 out.append((ENTRY_PULLBACK, h15.index[t] + q))
     if params.entry_15m_slow_touch and df15 is not None:
         h15s = _closed(df15, 0.25, now)
-        hits = [t for t, kind in slow_line_events(h15s, params.entry_pullback_st,
-                                                   params.entry_15m_bars) if kind == "터치"]
+        # 터치든 이탈(종가가 선 아래 → 수트 하락 전환)이든 — 2h FVG 자리면 타점(10-17)
+        hits = [t for t, _ in slow_line_events(h15s, params.entry_pullback_st,
+                                               params.entry_15m_bars)]
         zones = fvg_zones(h15s, params.fvg_tf) if hits and params.entry_15m_slow_fvg else []
         for t in hits:
             bar_end = h15s.index[t] + q
