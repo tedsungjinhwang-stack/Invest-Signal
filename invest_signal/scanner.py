@@ -676,8 +676,32 @@ def _fetch_15m(session, source: str, symbols: list, limit: int,
 TRACK10_SIGNALS = ("spike_bar", "vwap_onset", "wave_setup")
 
 
+def _spike_extra_params(cfg: dict):
+    """급등봉 추적에서 ⚡ 사건을 볼 때 쓸 leader_break.Params — 그 사건들만 켠다(10-17)."""
+    s = (cfg.get("signal") or {}).get("leader_break") or {}
+    sp = (cfg.get("signal") or {}).get("spike_bar") or {}
+    names = tuple(sp.get("extra_triggers", ()))
+    d = leader_break.Params()
+    p = leader_break.Params(
+        entry_w3=False, entry_1h_fast=False, entry_4h_fast=False, fire_trigger=False,
+        entry_pullback=False, entry_pullback_break=False,
+        entry_vwap_upper="🎯눌림목타점2" in names,
+        entry_15m_slow_touch="🎯눌림목타점3" in names,
+        entry_1h_slow=bool({"🧱1h장기선터치", "💔1h장기선이탈"} & set(names)),
+        entry_15m_slow_fvg=bool(s.get("entry_15m_slow_fvg", True)),
+        fvg_tf=str(s.get("fvg_tf", "2h")),
+        entry_pullback_st=tuple(s.get("entry_pullback_st", d.entry_pullback_st)),
+        entry_1h_slow_st=tuple(s.get("entry_1h_slow_st", d.entry_1h_slow_st)),
+        entry_vwap_anchor=str(s.get("entry_vwap_anchor", "M")),
+        entry_vwap_mult=float(s.get("entry_vwap_mult", 1.0)),
+        entry_15m_bars=int(sp.get("grace_bars", 4)),
+        entry_1h_bars=int(s.get("entry_1h_bars", 2)))
+    return p, names
+
+
 def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | None,
-             ticker: dict | None, log=print) -> tuple[list, list]:
+             ticker: dict | None, log=print, source: str | None = None,
+             frames4h: dict | None = None) -> tuple[list, list]:
     """급등봉·상승초입·파동 10일 추적(10-06~, signal.track10).
 
     ① 이번 스캔에서 잡힌 이 시그널들의 이벤트를 상태(tracks)에 적는다 — 보냈든 30m만
@@ -699,12 +723,13 @@ def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | Non
     days_by = {k: float(v) for k, v in (s.get("days_by") or {}).items()}
     now = pd.Timestamp.now(tz="UTC")
     for e in events:
-        if e.signal in sigs and e.detail.get("stage") not in (
-                spike_bar.TOUCH, spike_bar.PULLBACK, spike_bar.PULLBACK_BREAK):
+        if e.signal in sigs and e.detail.get("stage") not in spike_bar.EVENT_STAGES:
             state.track(e)
     fresh = {(e.symbol, e.signal) for e in events}
     holds = [e for e in ongoing if e.signal not in sigs]
     sp = _spike_params(cfg)
+    xp, xnames = _spike_extra_params(cfg)
+    xsess = requests.Session() if (xnames and source) else None
     touches = []
     for it in state.tracked(sigs, max([days, *days_by.values()]), now=now.to_pydatetime()):
         sym, sig = it["symbol"], it["signal"]
@@ -727,9 +752,20 @@ def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | Non
             d["turnover_24h"] = stat["quote_volume"]
         ev = SignalEvent(symbol=sym, signal=sig, bar_time=t, price=float(it["price"]), detail=d)
         if sig == "spike_bar":
+            extra = []
+            if xsess is not None:
+                # ⚡와 같은 사건(10-17) — 1h·4h는 이 종목만 받는다(캐시가 있으면 새 봉만)
+                try:
+                    df1h = data_binance.klines(xsess, sym, source, "1h", limit=300)
+                    df4h = (frames4h or {}).get(sym)
+                    if df4h is None or len(df4h) < 200:
+                        df4h = data_binance.klines(xsess, sym, source, "4h", limit=600)
+                    extra = spike_bar.extra_events(df, df1h, df4h, sym, ev, xp, xnames, now)
+                except Exception as e:          # noqa: BLE001 — 종목별 실패는 건너뛴다
+                    log(f"[track] {sym} 1h·4h 수집 실패: {data_binance._safe(e)}")
             for tev in (spike_bar.long_touch(df, sym, sp, spike=ev),
                         spike_bar.pullback_touch(df, sym, sp, spike=ev),
-                        spike_bar.pullback_break(df, sym, sp, spike=ev)):
+                        spike_bar.pullback_break(df, sym, sp, spike=ev), *extra):
                 if tev is not None:
                     for k in ("gain_24h", "turnover_24h"):
                         if k in d:
@@ -742,7 +778,11 @@ def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | Non
         + f" · 🧱15m 장기선 터치 {sum(e.detail.get('stage') == spike_bar.TOUCH for e in touches)}건"
         + f" · 🎯15m 눌림목타점 {sum(e.detail.get('stage') == spike_bar.PULLBACK for e in touches)}건"
         + f" · 🎯15m 눌림목돌파타점 "
-          f"{sum(e.detail.get('stage') == spike_bar.PULLBACK_BREAK for e in touches)}건")
+          f"{sum(e.detail.get('stage') == spike_bar.PULLBACK_BREAK for e in touches)}건"
+        + "".join(f" · {nm} {sum(e.detail.get('stage') == st for e in touches)}건"
+                  for nm, st in spike_bar.EXTRA_STAGES.items() if nm in xnames))
+    if xsess is not None:
+        xsess.close()
     return events + touches, holds
 
 
@@ -1200,7 +1240,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         leader_ongoing = spike_ongoing + vo_ongoing + leader_ongoing
         if not detectors:           # 인트라바인데 4h 대상 시그널이 없을 때
             leader_events, leader_ongoing = _track10(cfg, state, leader_events, leader_ongoing,
-                                                     frames15, ticker, log)
+                                                     frames15, ticker, log, source, frames)
             _mark_fire2(cfg, source, leader_events + leader_ongoing, frames15, workers, log)
             return leader_events, leader_ongoing, board
     events, ongoing = _detect_all(frames, detectors, log)
@@ -1248,7 +1288,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
     # 크립토 모멘텀 눌림목/이탈은 자체 선정(24h 상승률 상위)이라 위 랭크 필터를 타지 않는다
     events.extend(leader_events)
     ongoing.extend(leader_ongoing)
-    events, ongoing = _track10(cfg, state, events, ongoing, frames15, ticker, log)
+    events, ongoing = _track10(cfg, state, events, ongoing, frames15, ticker, log, source, frames)
     _mark_fire2(cfg, source, events + ongoing, frames15, workers, log)
     log(f"[binance] 시그널 {len(events)}건 · 유지 중 {len(ongoing)}건")
     return events, ongoing, board

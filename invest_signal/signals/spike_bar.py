@@ -38,6 +38,10 @@ KLINE_LIMIT = 500           # vol_ma(96) + 추적 3일(288) + 여유
 TOUCH = "장기선터치"          # 급등 뒤 상승 중인 15m 장기 수트(30×6)를 내려와 터치 — stage(dedup 키가 갈린다)
 PULLBACK_BREAK = "눌림목돌파타점"  # 급등 뒤 15m 정배열에서 장기 수트 하락→상승 전환(10-11~, 10-12 이름 바꿈)
 PULLBACK = "눌림목타점"            # 급등 뒤 15m 120>240>480 · 240선 위 · 상승 장기 수트 터치(10-12~)
+# 급등 뒤 ⚡와 같은 사건(10-17~) — leader_break.entry_triggers 이름 → stage
+EXTRA_STAGES = {"🎯눌림목타점2": "눌림목타점2", "🎯눌림목타점3": "눌림목타점3",
+                "🧱1h장기선터치": "1h장기선터치", "💔1h장기선이탈": "1h장기선이탈"}
+EVENT_STAGES = (TOUCH, PULLBACK, PULLBACK_BREAK, *EXTRA_STAGES.values())   # 추적 저장에서 뺄 • 사건
 
 
 @dataclass(frozen=True)
@@ -261,4 +265,30 @@ def big_bars(df: pd.DataFrame, symbol: str, min_rise: float = 0.25,
             detail={"label": BIG_LABEL, "interval": INTERVAL, "rise_high": float(rise),
                     "body": float(c[t] / o[t] - 1), "bar_high": float(h[t]),
                     "vol_mult": float(v[t] / volma[t]) if volma[t] and volma[t] > 0 else None}))
+    return out
+
+
+def extra_events(df15: pd.DataFrame, df1h, df4h, symbol: str, spike: SignalEvent,
+                 lparams, names, now: pd.Timestamp) -> list[SignalEvent]:
+    """급등 뒤 ⚡와 같은 사건(🎯눌림목타점2·3, 🧱1h장기선터치, 💔1h장기선이탈 — 10-17~).
+
+    leader_break.entry_triggers를 그대로 부르고 names에 든 것, **급등봉 뒤에 마감한 봉**만 남긴다.
+    bar_time은 그 봉의 시작 시각(다른 급등봉 줄과 같은 규약)."""
+    from .leader_break import entry_triggers
+    out = []
+    for name, close_t in entry_triggers(df1h, df4h, None, lparams, now, df15):
+        if name not in names or name not in EXTRA_STAGES:
+            continue
+        step = pd.Timedelta(hours=1) if name.startswith(("🧱1h", "💔1h")) else pd.Timedelta(minutes=15)
+        start = close_t - step
+        if start <= spike.bar_time:
+            continue
+        last = float(df15["Close"].iloc[-1])
+        out.append(SignalEvent(
+            symbol=symbol, signal=NAME, bar_time=start, price=last,
+            detail={"label": LABEL, "stage": EXTRA_STAGES[name], "tag": name,
+                    "interval": "1h" if step == pd.Timedelta(hours=1) else INTERVAL,
+                    "spike_time": spike.bar_time, "spike_price": spike.price,
+                    "body": spike.detail.get("body"), "vol_mult": spike.detail.get("vol_mult"),
+                    "since": last / spike.price - 1 if spike.price else None}))
     return out

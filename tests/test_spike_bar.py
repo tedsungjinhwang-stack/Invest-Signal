@@ -253,3 +253,25 @@ def test_big_bar_uses_high_not_close():
     assert "고가 +30%" in line and "종가 +5.0%" in line and "거래량 20배" in line
     assert notify.fire_only(got, ("big_bar",)) == got
     assert notify.fire_only_title(got, ("big_bar",)) == "🧨 <b>하따봉</b>"
+
+
+def test_extra_events_after_spike(monkeypatch):
+    """10-17 — 급등봉 추적에도 ⚡ 사건(타점2·3, 1h 장기선 터치·이탈). 급등봉 뒤 봉만."""
+    from invest_signal.signals import SignalEvent, leader_break
+    idx = pd.date_range("2026-10-16", periods=40, freq="15min", tz="UTC")
+    df = pd.DataFrame({"Open": 1.0, "High": 1.0, "Low": 1.0, "Close": 1.2, "Volume": 1.0}, index=idx)
+    spike = SignalEvent(symbol="XUSDT", signal="spike_bar", bar_time=idx[10], price=1.0,
+                        detail={"label": "급등봉", "body": 0.2, "vol_mult": 30.0})
+    q, h = pd.Timedelta(minutes=15), pd.Timedelta(hours=1)
+    fake = [("🎯눌림목타점2", idx[5] + q),            # 급등 전 — 빼야 한다
+            ("🎯눌림목타점3", idx[38] + q), ("💔1h장기선이탈", idx[36] + h),
+            ("🎯눌림목돌파타점", idx[38] + q)]          # names에 없다
+    monkeypatch.setattr(leader_break, "entry_triggers", lambda *a, **k: fake)
+    names = ("🎯눌림목타점2", "🎯눌림목타점3", "🧱1h장기선터치", "💔1h장기선이탈")
+    got = spike_bar.extra_events(df, None, None, "XUSDT", spike, None, names, idx[-1])
+    assert [(e.detail["stage"], e.bar_time) for e in got] == [
+        ("눌림목타점3", idx[38]), ("1h장기선이탈", idx[36])]
+    assert got[0].dedup_key.endswith("|눌림목타점3") and abs(got[0].detail["since"] - 0.2) < 1e-9
+    from invest_signal import notify
+    out = notify.format_events(got, [], {})
+    assert "🎯눌림목타점3 🕒" in out and "💔1h장기선이탈 🕒" in out and "급등 후 +20%" in out
