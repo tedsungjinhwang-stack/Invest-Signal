@@ -274,9 +274,11 @@ def extra_events(df15: pd.DataFrame, df1h, df4h, symbol: str, spike: SignalEvent
 
     leader_break.entry_triggers를 그대로 부르고 names에 든 것, **급등봉 뒤에 마감한 봉**만 남긴다.
     bar_time은 그 봉의 시작 시각(다른 급등봉 줄과 같은 규약)."""
-    from .leader_break import entry_triggers
+    from .leader_break import FVG_MARK, entry_triggers
     out = []
-    for name, close_t in entry_triggers(df1h, df4h, None, lparams, now, df15):
+    trig = entry_triggers(df1h, df4h, None, lparams, now, df15)
+    fvg_at = {t for n, t in trig if n == FVG_MARK}
+    for name, close_t in trig:
         if name not in names or name not in EXTRA_STAGES:
             continue
         step = pd.Timedelta(hours=1) if name.startswith(("🧱1h", "💔1h")) else pd.Timedelta(minutes=15)
@@ -286,7 +288,8 @@ def extra_events(df15: pd.DataFrame, df1h, df4h, symbol: str, spike: SignalEvent
         last = float(df15["Close"].iloc[-1])
         out.append(SignalEvent(
             symbol=symbol, signal=NAME, bar_time=start, price=last,
-            detail={"label": LABEL, "stage": EXTRA_STAGES[name], "tag": name,
+            detail={"label": LABEL, "stage": EXTRA_STAGES[name],
+                    "tag": name + (f" {FVG_MARK}" if name == "🎯눌림목타점3" and close_t in fvg_at else ""),
                     "interval": "1h" if step == pd.Timedelta(hours=1) else INTERVAL,
                     "spike_time": spike.bar_time, "spike_price": spike.price,
                     "body": spike.detail.get("body"), "vol_mult": spike.detail.get("vol_mult"),

@@ -1094,24 +1094,22 @@ def test_fvg_2h_zones_and_requirement(monkeypatch):
     bar_open, bar_end = h15.index[t], h15.index[t] + pd.Timedelta(minutes=15)
     lo_t = float(h15["Low"].iloc[t])
     zone = (bar_open - pd.Timedelta(hours=10), lo_t * 0.99, lo_t * 1.001)
-    # 이전에 생겨서 위로 떠났다가 되돌아온 FVG → 타점3
+
+    def names():
+        return [n for n, _ in leader_break.entry_triggers(None, None, None, P, now, h15)]
+    # 10-18 — FVG는 거르지 않고 표시만: 이전에 생겨 위로 떠났다 되돌아온 FVG면 📦2hFVG가 같이 붙는다
     monkeypatch.setattr(leader_break, "fvg_zones",
                         lambda *a, **k: [(*zone, None, bar_open - pd.Timedelta(hours=6))])
-    assert leader_break.ENTRY_15M_SLOW_TOUCH in [
-        n for n, _ in leader_break.entry_triggers(None, None, None, P, now, h15)]
-    # 생긴 뒤 위로 떠난 적이 없으면(방금 생긴 구간) 아니다
+    assert leader_break.ENTRY_15M_SLOW_TOUCH in names() and leader_break.FVG_MARK in names()
+    # 생긴 뒤 위로 떠난 적이 없거나(방금 생긴 구간) 무효된 구간이면 타점3만, 표시는 없다
     monkeypatch.setattr(leader_break, "fvg_zones", lambda *a, **k: [(*zone, None, None)])
-    assert leader_break.ENTRY_15M_SLOW_TOUCH not in [
-        n for n, _ in leader_break.entry_triggers(None, None, None, P, now, h15)]
-    # 무효된 구간도 아니다
+    assert leader_break.ENTRY_15M_SLOW_TOUCH in names() and leader_break.FVG_MARK not in names()
     monkeypatch.setattr(leader_break, "fvg_zones",
                         lambda *a, **k: [(*zone, bar_open - pd.Timedelta(hours=2),
                                           bar_open - pd.Timedelta(hours=6))])
-    assert leader_break.ENTRY_15M_SLOW_TOUCH not in [
-        n for n, _ in leader_break.entry_triggers(None, None, None, P, now, h15)]
+    assert leader_break.FVG_MARK not in names()
     monkeypatch.setattr(leader_break, "fvg_zones", lambda *a, **k: [])
-    assert leader_break.ENTRY_15M_SLOW_TOUCH not in [
-        n for n, _ in leader_break.entry_triggers(None, None, None, P, now, h15)]
+    assert leader_break.ENTRY_15M_SLOW_TOUCH in names() and leader_break.FVG_MARK not in names()
     nofvg = dataclasses_replace(P, entry_15m_slow_fvg=False)
     assert leader_break.ENTRY_15M_SLOW_TOUCH in [
         n for n, _ in leader_break.entry_triggers(None, None, None, nofvg, now, h15)]

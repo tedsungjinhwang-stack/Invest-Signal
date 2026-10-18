@@ -275,3 +275,21 @@ def test_extra_events_after_spike(monkeypatch):
     from invest_signal import notify
     out = notify.format_events(got, [], {})
     assert "🎯눌림목타점3 🕒" in out and "💔1h장기선이탈 🕒" in out and "급등 후 +20%" in out
+
+
+def test_extra_event_pullback3_fvg_mark(monkeypatch):
+    """10-18 — 급등봉 타점3 자리가 이전 2h FVG면 줄에 📦2hFVG가 붙는다(거르지는 않는다)."""
+    from invest_signal.signals import SignalEvent, leader_break
+    idx = pd.date_range("2026-10-16", periods=40, freq="15min", tz="UTC")
+    df = pd.DataFrame({"Open": 1.0, "High": 1.0, "Low": 1.0, "Close": 1.1, "Volume": 1.0}, index=idx)
+    spike = SignalEvent(symbol="XUSDT", signal="spike_bar", bar_time=idx[10], price=1.0,
+                        detail={"label": "급등봉", "body": 0.2, "vol_mult": 30.0})
+    q = pd.Timedelta(minutes=15)
+    names = ("🎯눌림목타점3",)
+    monkeypatch.setattr(leader_break, "entry_triggers",
+                        lambda *a, **k: [("🎯눌림목타점3", idx[38] + q), ("📦2hFVG", idx[38] + q)])
+    got = spike_bar.extra_events(df, None, None, "XUSDT", spike, None, names, idx[-1])
+    assert len(got) == 1 and got[0].detail["tag"] == "🎯눌림목타점3 📦2hFVG"
+    monkeypatch.setattr(leader_break, "entry_triggers", lambda *a, **k: [("🎯눌림목타점3", idx[38] + q)])
+    got = spike_bar.extra_events(df, None, None, "XUSDT", spike, None, names, idx[-1])
+    assert got[0].detail["tag"] == "🎯눌림목타점3"

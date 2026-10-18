@@ -148,7 +148,7 @@ class Params:
     # 터치하거나(종가는 선 위) 뚫은(종가가 선 아래, 10-17~) 마감 15m봉(직전 봉은 선에 안 닿음).
     # 최근 entry_15m_bars봉 안.
     entry_15m_slow_touch: bool = True
-    # 그 터치 봉이 **이전에 생긴 2h 상승 FVG** 구간이어야 한다(10-14). FVG = 마감된 2h봉 셋에서 첫 봉
+    # 그 터치 봉이 **이전에 생긴 2h 상승 FVG** 구간이면 📦2hFVG 표시를 같이 단다(10-18~ 표시만, 10-14~17엔 조건). FVG = 마감된 2h봉 셋에서 첫 봉
     # 고가 < 셋째 봉 저가인 빈 구간 [첫 봉 고가, 셋째 봉 저가]. 생긴 뒤 가격이 구간 위로 떠났다가(2h봉
     # 저가 > 위 끝) 되돌아와 터치 봉의 고가~저가가 구간에 걸쳐야 한다. 그 사이 2h 종가가 아래 끝 밑으로
     # 마감했으면 무효. False면 FVG 없이 터치만.
@@ -160,7 +160,7 @@ class Params:
     rearm_hours: int = 24           # 같은 종목은 이 시간 안에 • 로 다시 안 알린다
     # rearm_hours 안이라도 또 내는 사건(10-13: 1h 장기선 터치·이탈 — 내려오는 첫 봉이라 반복이 적다)
     rearm_exempt: tuple = ("🧱1h장기선터치", "💔1h장기선이탈", "🎯눌림목타점2", "🎯눌림목타점3",
-                           "🎯눌림목타점4")
+                           "🎯눌림목타점4", "📦2hFVG")
     # 🔥 재떡상 조짐 — 장기 강세 코인(4h MA480 +40% 위)이 단기 과열이 식고(4h MA120
     # 대비 +20% 이하) 3일 저점 근처(+10% 이내)까지 눌린 자리(fire_mark()).
     fire_enabled: bool = True
@@ -497,6 +497,7 @@ ENTRY_PULLBACK = "🎯눌림목타점"          # 10-12 — 정배열 · 240선 
 ENTRY_PULLBACK_BREAK = "🎯눌림목돌파타점"  # 10-11의 🎯눌림목타점(장기 수트 상승 전환) — 10-12 이름 바꿈
 ENTRY_VWAP_UPPER = "🎯눌림목타점2"       # 10-13 — 월 VWAP 상단선(+1σ)으로 내려와 터치·하회
 ENTRY_VWAP_LOWER = "🎯눌림목타점4"       # 10-18 — 월 VWAP 하단선(−1σ)으로 내려와 터치·하회
+FVG_MARK = "📦2hFVG"                    # 10-18 — 타점3 자리가 이전 2h 상승 FVG면 같이 붙는 표시
 ENTRY_15M_SLOW_TOUCH = "🎯눌림목타점3"   # 10-14 — 상승 15m 장기 수트(30×6)로 내려와 터치·이탈 + 이전 2h FVG 자리
 ENTRY_1H_SLOW_TOUCH = "🧱1h장기선터치"     # 10-13 — 상승 1h 장기 수트로 내려와 터치(종가는 선 위)
 ENTRY_1H_SLOW_BREAK = "💔1h장기선이탈"     # 10-13 — 상승 1h 장기 수트를 종가로 뚫음(수트 하락 전환)
@@ -739,8 +740,8 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
                      내려와 터치(종가는 선 위)(10-12~)
       🎯눌림목타점2    월 VWAP 상단선(+1σ) 위에 있던 15m 캔들이 내려와 선에 닿거나 하회(10-13~)
       🎯눌림목타점4    월 VWAP 하단선(−1σ) 위에 있던 15m 캔들이 내려와 선에 닿거나 하회(10-18~)
-      🎯눌림목타점3    상승 중인 15m 장기 수트(30×6)로 내려와 터치하거나 뚫은 봉이, 이전에 생겨 살아
-                     있는 2h 상승 FVG 구간에 걸침(10-14~, 이탈은 10-17~)
+      🎯눌림목타점3    상승 중인 15m 장기 수트(30×6)로 내려와 터치하거나 뚫은 봉(10-14~, 이탈은 10-17~).
+                     그 봉이 이전에 생겨 살아 있는 2h 상승 FVG에 걸치면 📦2hFVG를 같이 단다(10-18~ 표시만)
       🧱1h장기선터치   상승 중인 1h 장기 수트(30×6)로 내려와 터치, 종가는 선 위(10-13~)
       💔1h장기선이탈   상승 중인 1h 장기 수트를 종가로 뚫음 — 수트 하락 전환(10-13~)
 
@@ -767,16 +768,16 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
         zones = fvg_zones(h15s, params.fvg_tf) if hits and params.entry_15m_slow_fvg else []
         for t in hits:
             bar_end = h15s.index[t] + q
+            out.append((ENTRY_15M_SLOW_TOUCH, bar_end))
             if params.entry_15m_slow_fvg:
                 lo_t, hi_t = float(h15s["Low"].iloc[t]), float(h15s["High"].iloc[t])
                 bar_open = h15s.index[t]
-                # 이전에 생겨서 가격이 위로 떠났다가(left) 되돌아와 닿은 FVG만 — 방금 생긴 건 아니다
-                if not any(left is not None and left <= bar_open
-                           and (dead is None or dead > bar_end)
-                           and lo_t <= top and hi_t >= bot
-                           for made, bot, top, dead, left in zones):
-                    continue
-            out.append((ENTRY_15M_SLOW_TOUCH, bar_end))
+                # 이전에 생겨서 가격이 위로 떠났다가(left) 되돌아와 닿은 FVG — 있으면 📦 표시만(10-18)
+                if any(left is not None and left <= bar_open
+                       and (dead is None or dead > bar_end)
+                       and lo_t <= top and hi_t >= bot
+                       for made, bot, top, dead, left in zones):
+                    out.append((FVG_MARK, bar_end))
     if (params.entry_vwap_upper or params.entry_vwap_lower) and df15 is not None:
         h15v = _closed(df15, 0.25, now)
         if params.entry_vwap_upper:
@@ -822,7 +823,8 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
     return out
 
 
-ENTRY_ORDER = (ENTRY_FIRE, ENTRY_PULLBACK, ENTRY_VWAP_UPPER, ENTRY_15M_SLOW_TOUCH, ENTRY_VWAP_LOWER, ENTRY_PULLBACK_BREAK, ENTRY_1H_SLOW_BREAK,
+ENTRY_ORDER = (ENTRY_FIRE, ENTRY_PULLBACK, ENTRY_VWAP_UPPER, ENTRY_15M_SLOW_TOUCH, FVG_MARK,
+               ENTRY_VWAP_LOWER, ENTRY_PULLBACK_BREAK, ENTRY_1H_SLOW_BREAK,
                ENTRY_1H_SLOW_TOUCH, ENTRY_W3, "1h단기선돌파", "1h단기선터치", "4h단기선돌파", "4h단기선터치")
 
 
