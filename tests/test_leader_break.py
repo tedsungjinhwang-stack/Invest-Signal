@@ -1115,3 +1115,25 @@ def test_fvg_2h_zones_and_requirement(monkeypatch):
     nofvg = dataclasses_replace(P, entry_15m_slow_fvg=False)
     assert leader_break.ENTRY_15M_SLOW_TOUCH in [
         n for n, _ in leader_break.entry_triggers(None, None, None, nofvg, now, h15)]
+
+
+def test_vwap_lower_touch_is_pullback4():
+    """10-18 — 🎯눌림목타점4: 월 VWAP 하단선(−1σ) 위 15m 캔들이 내려와 닿거나 하회."""
+    from invest_signal.indicators import anchored_vwap_bands
+    idx4 = pd.date_range("2026-10-01", periods=60, freq="4h", tz="UTC")
+    c4 = np.where(np.arange(60) % 2 == 0, 100.0, 110.0)
+    d4 = pd.DataFrame({"Open": c4, "High": c4, "Low": c4, "Close": c4, "Volume": 1.0}, index=idx4)
+    lower = anchored_vwap_bands(d4, "M", 1.0)[1].iloc[-1]
+    idx = pd.date_range(idx4[-1], periods=8, freq="15min")
+    c = np.full(8, lower * 1.03)
+    df15 = pd.DataFrame({"Open": c, "High": c * 1.002, "Low": c * 0.998, "Close": c,
+                         "Volume": 1.0}, index=idx)
+    df15.iloc[-1, df15.columns.get_loc("Low")] = lower * 0.995
+    assert leader_break.vwap_upper_touches(df15, d4, P, 4, "lower") == [7]
+    assert leader_break.vwap_upper_touches(df15, d4, P, 4) == []         # 상단선(타점2)은 아니다
+    now = idx[-1] + pd.Timedelta(minutes=15)
+    names = [n for n, _ in leader_break.entry_triggers(None, d4, None, P, now, df15)]
+    assert leader_break.ENTRY_VWAP_LOWER in names
+    off = dataclasses_replace(P, entry_vwap_lower=False)
+    assert leader_break.ENTRY_VWAP_LOWER not in [
+        n for n, _ in leader_break.entry_triggers(None, d4, None, off, now, df15)]
