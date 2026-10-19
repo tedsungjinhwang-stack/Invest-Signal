@@ -19,7 +19,7 @@ import requests
 
 from . import config as cfg_mod
 from . import data_binance, data_community, data_etf, data_qp, indicators, notify
-from .signals import (SignalEvent, choch_warn, fire2, leader_break, spike_bar, vwap_onset,
+from .signals import (SignalEvent, choch_warn, daily_dip, fire2, leader_break, spike_bar, vwap_onset,
                       whale_exit)
 from . import sent_log
 from .state import AlertState
@@ -677,6 +677,66 @@ def _fetch_15m(session, source: str, symbols: list, limit: int,
 TRACK10_SIGNALS = ("spike_bar", "vwap_onset", "wave_setup")
 
 
+def _scan_daily_dip(cfg: dict, source: str, state, spike_events: list, ticker: dict | None,
+                    workers: int = 6, log=print) -> list:
+    """📅 일봉 눌림(10-19~) — ⚡·🚀에 들었던 종목을 풀에 쌓아 두고(50일) 오늘 일봉 눌림을 본다.
+
+    풀에 넣는 것: ⚡ 감시 종목(상태의 leaders — 상위권 등재 시각) · 🚀 급등봉(이번 스캔 + 10일 추적분).
+    일봉은 풀 종목만 받는다(진행 중 오늘 봉 포함 · 캔들 캐시로 새 봉만).
+    """
+    s = (cfg.get("signal") or {}).get("daily_dip") or {}
+    if not s.get("enabled", False) or state is None:
+        return []
+    d = daily_dip.Params()
+    params = daily_dip.Params(
+        enabled=True, pool_days=int(s.get("pool_days", d.pool_days)),
+        bb_period=int(s.get("bb_period", d.bb_period)), bb_mult=float(s.get("bb_mult", d.bb_mult)),
+        st_period=int(s.get("st_period", d.st_period)), st_mult=float(s.get("st_mult", d.st_mult)))
+    seeded = state.seed_pool(params.pool_days)     # 처음 한 번 — 보낸 알림 기록으로 채운다
+    if seeded:
+        log(f"[binance] 📅 일봉 눌림 풀을 알림 기록으로 채움 — {seeded}종")
+    for sym, t in state.recent_leaders(days=10).items():
+        state.pool_add(sym, "⚡", t)
+    for it in state.tracked(("spike_bar",), 10):
+        state.pool_add(it["symbol"], "🚀", it["t"])
+    for e in spike_events:
+        if e.signal == "spike_bar" and not e.detail.get("stage"):
+            state.pool_add(e.symbol, "🚀", e.bar_time.to_pydatetime())
+    pool = state.pool(params.pool_days)
+    if not pool:
+        return []
+    now = pd.Timestamp.now(tz="UTC")
+    tls = threading.local()
+
+    def grab(sym):
+        if getattr(tls, "s", None) is None:
+            tls.s = requests.Session()
+        try:
+            return sym, data_binance.klines(tls.s, sym, source, "1d", limit=params.kline_limit,
+                                            include_live=True)
+        except Exception:                       # noqa: BLE001 — 종목별 실패는 건너뛴다
+            return sym, None
+
+    out = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+        for sym, df in ex.map(grab, sorted(pool)):
+            for ev in daily_dip.detect(df, sym, params):
+                v = pool[sym]
+                ev.detail["pool_kind"] = v.get("kind", "")
+                ev.detail["pool_days"] = max(0, (now - pd.Timestamp(v.get("first", v["t"]))).days)
+                stat = (ticker or {}).get(sym) or {}
+                if stat.get("change_pct") is not None:
+                    ev.detail["gain_24h"] = stat["change_pct"]
+                if stat.get("quote_volume") is not None:
+                    ev.detail["turnover_24h"] = stat["quote_volume"]
+                out.append(ev)
+    by = collections.Counter(e.detail["stage"] for e in out)
+    log(f"[binance] 📅 일봉 눌림 {len(out)}건 (풀 {len(pool)}종 · {params.pool_days}일) — "
+        + " · ".join(f"{k} {by.get(k, 0)}" for k in
+                     (daily_dip.BB_LOWER, daily_dip.ST_TOUCH, daily_dip.ST_BREAK)))
+    return out
+
+
 def _spike_extra_params(cfg: dict):
     """급등봉 추적에서 ⚡ 사건을 볼 때 쓸 leader_break.Params — 그 사건들만 켠다(10-17)."""
     s = (cfg.get("signal") or {}).get("leader_break") or {}
@@ -1238,7 +1298,8 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         leader_events, leader_ongoing, board = _scan_leader_break(
             s, source, symbols, cfg, state, log, frames, ticker,
             intrabar=intrabar, frames15=frames15)
-        leader_events = spike_events + vo_events + leader_events
+        leader_events = (spike_events + vo_events + leader_events
+                         + _scan_daily_dip(cfg, source, state, spike_events, ticker, workers, log))
         leader_ongoing = spike_ongoing + vo_ongoing + leader_ongoing
         if not detectors:           # 인트라바인데 4h 대상 시그널이 없을 때
             leader_events, leader_ongoing = _track10(cfg, state, leader_events, leader_ongoing,

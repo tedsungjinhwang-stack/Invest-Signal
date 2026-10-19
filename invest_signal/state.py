@@ -11,6 +11,8 @@
   · tracks  — 10일 추적(10-06~): `시그널|종목` → 가장 최근 발생의 봉 시각·가격·표시용
               detail. 알림을 보냈든(30m만 보기로) 뺐든 **잡힌 순간** 적는다 — 그 뒤
               10일 안에 30m 단기선 돌파가 붙으면 그때 추적 줄로 보여야 하기 때문이다.
+  · pool    — 📅 일봉 눌림 대상(10-19~): 종목 → {"t": 마지막으로 들어온 시각, "first": 처음, "kind": ⚡/🚀}.
+              POOL_DAYS(50)일 동안 남긴다.
 """
 
 import json
@@ -20,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 RETENTION_DAYS = 30
 LEADER_DAYS = 10         # 상위권에서 밀려난 뒤에도 계속 볼 기간 (config의 watch_days와 같이 둔다)
 TRACK_DAYS = 10          # tracks(급등봉·상승초입·파동 10일 추적, 10-06~) 보존 기간
+POOL_DAYS = 50           # pool(📅 일봉 눌림 대상 — ⚡·🚀에 들었던 종목, 10-19~) 보존 기간
 
 
 class AlertState:
@@ -28,6 +31,7 @@ class AlertState:
         self._alerts: dict[str, str] = {}
         self._leaders: dict[str, str] = {}
         self._tracks: dict[str, dict] = {}
+        self._pool: dict[str, dict] = {}
         self._load()
 
     def _load(self) -> None:
@@ -37,10 +41,12 @@ class AlertState:
             self._alerts = dict(data.get("alerts", {}))
             self._leaders = dict(data.get("leaders", {}))
             self._tracks = dict(data.get("tracks", {}))
+            self._pool = dict(data.get("pool", {}))
         except (FileNotFoundError, json.JSONDecodeError, TypeError):
             self._alerts = {}
             self._leaders = {}
             self._tracks = {}
+            self._pool = {}
 
     @staticmethod
     def _plain(v):
@@ -157,6 +163,42 @@ class AlertState:
                 continue
         return False
 
+    def pool_add(self, symbol: str, kind: str, when: datetime | None = None) -> None:
+        """📅 일봉 눌림 풀에 넣는다 — 이미 있으면 마지막 시각만 갱신하고 종류(⚡/🚀)를 합친다."""
+        stamp = (when or datetime.now(timezone.utc)).isoformat()
+        v = self._pool.get(symbol)
+        if v is None:
+            self._pool[symbol] = {"t": stamp, "first": stamp, "kind": kind}
+            return
+        if stamp > v.get("t", ""):
+            v["t"] = stamp
+        if kind not in v.get("kind", ""):
+            v["kind"] = v.get("kind", "") + kind
+
+    def seed_pool(self, days: float = POOL_DAYS, now: datetime | None = None) -> int:
+        """풀이 비어 있으면 보낸 알림 기록(alerts)으로 채운다 — ⚡(leader_break) · 🚀(spike_bar).
+        키의 봉 시각을 들어온 시각으로 쓴다. 넣은 종목 수."""
+        if self._pool:
+            return 0
+        cut = (now or datetime.now(timezone.utc)) - timedelta(days=days)
+        kinds = {"leader_break": "⚡", "spike_bar": "🚀"}
+        for k in list(self._alerts):
+            parts = k.split("|")
+            if len(parts) < 3 or parts[1] not in kinds:
+                continue
+            try:
+                t = datetime.fromisoformat(parts[2])
+            except ValueError:
+                continue
+            if t >= cut:
+                self.pool_add(parts[0], kinds[parts[1]], t)
+        return len(self._pool)
+
+    def pool(self, days: float = POOL_DAYS, now: datetime | None = None) -> dict[str, dict]:
+        """최근 days일 안에 풀에 들어온 종목 — {종목: {"t", "first", "kind"}}."""
+        cut = ((now or datetime.now(timezone.utc)) - timedelta(days=days)).isoformat()
+        return {s: dict(v) for s, v in self._pool.items() if v.get("t", "") >= cut}
+
     def is_new(self, key: str) -> bool:
         return key not in self._alerts
 
@@ -180,6 +222,8 @@ class AlertState:
         self._leaders = {s: v for s, v in self._leaders.items() if s in fresh}
         tcut = (now - timedelta(days=TRACK_DAYS + 1)).isoformat()
         self._tracks = {k: v for k, v in self._tracks.items() if str(v.get("t", "")) >= tcut}
+        pcut = (now - timedelta(days=POOL_DAYS + 1)).isoformat()
+        self._pool = {k: v for k, v in self._pool.items() if str(v.get("t", "")) >= pcut}
 
     def save(self) -> None:
         self.prune()
@@ -189,6 +233,6 @@ class AlertState:
         tmp = f"{self.path}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"alerts": self._alerts, "leaders": self._leaders,
-                       "tracks": self._tracks},
+                       "tracks": self._tracks, "pool": self._pool},
                       f, ensure_ascii=False, indent=1, sort_keys=True)
         os.replace(tmp, self.path)

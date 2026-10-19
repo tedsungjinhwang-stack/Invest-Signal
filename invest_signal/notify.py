@@ -37,12 +37,12 @@ def chart_url(symbol: str, kind: str, market: str = "US") -> str:
     return f"https://www.tradingview.com/symbols/{symbol}/"
 
 
-SIGNAL_EMOJI = {"하따봉": "🧨", "급등봉": "🚀", "상승초입": "🟢", "눌림목": "🔵", "펌핑초기": "🌱",
+SIGNAL_EMOJI = {"하따봉": "🧨", "급등봉": "🚀", "일봉 눌림": "📅", "상승초입": "🟢", "눌림목": "🔵", "펌핑초기": "🌱",
                 "파동": "🌊", "크립토 모멘텀 눌림목/이탈": "⚡", "세력 이탈": "🚨",
                 "하락 CHoCH": "🔻", "하락전환": "🔻"}
 # 🚀급등봉이 맨 위다 — 방금 터진 봉이라 시의성이 제일 짧다. 나머지는
 # 자리(셋업)라 한두 시간 늦게 읽어도 뜻이 안 변하지만 이건 변한다.
-SIGNAL_ORDER = ["하따봉", "급등봉", "상승초입", "눌림목", "펌핑초기", "파동",
+SIGNAL_ORDER = ["하따봉", "급등봉", "일봉 눌림", "상승초입", "눌림목", "펌핑초기", "파동",
                 "크립토 모멘텀 눌림목/이탈", "세력 이탈", "하락 CHoCH", "하락전환"]
 PULLBACK_STAGES = ("타점", "대기")   # 그 외 stage는 시그널별로 따로 표기한다
 DISPLAY_GROUP = {"MSS": "눌림목", "풀백": "눌림목"}   # MSS는 눌림목 칸에 태그로 표시
@@ -168,7 +168,8 @@ WARN_TAG = "⚠️"
 # fire_only 모드(설정 notify.fire_only)에서도 🔥 없이 항상 싣는 칸 — 🚀급등봉 · 🚨세력 이탈 ·
 # 🔻하락 CHoCH · 🌊일봉 파동(10-04~). 설정 notify.always_show로 바꿀 수 있다 — 값은
 # 시그널 이름 또는 `시그널:stage`(그 변형만). 값은 머리에 적을 이름.
-ALWAYS_TITLES = {"big_bar": "🧨 <b>하따봉</b>", "spike_bar": "🚀 <b>급등봉</b>", "vwap_onset": "🟢 <b>상승초입</b>",
+ALWAYS_TITLES = {"big_bar": "🧨 <b>하따봉</b>", "spike_bar": "🚀 <b>급등봉</b>",
+                 "daily_dip": "📅 <b>일봉 눌림</b>", "vwap_onset": "🟢 <b>상승초입</b>",
                  "whale_exit": "🚨 <b>세력 이탈</b>",
                  "choch_warn": "🔻 <b>하락 CHoCH</b>",
                  "wave_setup:일봉ABC": "🌊 <b>일봉 파동</b>",
@@ -578,6 +579,20 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tags.append(f"현선갭 {_pct(d['gap'])}({side})")
         if d.get("pump_24h") is not None:
             tags.append(f"그때 24h {_pct(d['pump_24h'])}")
+        tv = _turnover_tag(d)
+        if tv:
+            tags.append(tv)
+    if e.signal == "daily_dip":
+        # 📅 일봉 눌림 — 어느 선에 닿았는지 · 그 선 값 · 풀(⚡/🚀) 며칠째
+        tag = {"볼밴하단": "📉볼밴하단터치", "일봉단기선터치": "🔁일봉단기선터치",
+               "일봉단기선이탈": "💔일봉단기선이탈"}.get(d.get("stage"), d.get("stage"))
+        tags.append(tag)
+        if d.get("level") is not None:
+            tags.append(f"{'하단' if d.get('stage') == '볼밴하단' else '선'} {_fmt_price(d['level'])}")
+        if d.get("pool_kind"):
+            tags.append(f"{d['pool_kind']} {d.get('pool_days', 0)}일째")
+        if d.get("gain_24h") is not None:
+            tags.append(f"24h {_pct(d['gain_24h'])}")
         tv = _turnover_tag(d)
         if tv:
             tags.append(tv)

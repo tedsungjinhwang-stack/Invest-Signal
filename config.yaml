@@ -18,7 +18,7 @@ notify:
   leader_only_triggers: ["🎯눌림목타점", "🎯눌림목타점2", "🎯눌림목타점3", "🧱1h장기선터치", "💔1h장기선이탈"]
   # 🔥 없이도 항상 싣는 칸 — 시그널 이름 또는 `시그널:stage`(그 변형만)
   # (10-01 급등봉 · 10-02 세력 이탈 · 10-04 파동의 일봉 단기·장기 추세선)
-  always_show: [big_bar, spike_bar, vwap_onset, whale_exit, choch_warn, "wave_setup:일봉ABC", "wave_setup:일봉장기선돌파",
+  always_show: [big_bar, spike_bar, daily_dip, vwap_onset, whale_exit, choch_warn, "wave_setup:일봉ABC", "wave_setup:일봉장기선돌파",
                 "leader_break:🎯눌림목타점", "leader_break:🎯눌림목타점2", "leader_break:🎯눌림목타점3",
                 "leader_break:🧱1h장기선터치", "leader_break:💔1h장기선이탈"]   # ⚡ • 🆕🎯 둘(10-11·10-12)도 🔥 없이
   # 추적 줄(↳)을 안 싣는 칸 — 시그널 이름 또는 `시그널:stage`. 추적 자체(상태)는 그대로라
@@ -29,6 +29,19 @@ notify:
   # vwap_onset(10-11): 🟢상승초입은 역배열 자리면 🔥 없이도 다 싣는다 — 🔥는 줄 앞 표시로만
 
 signal:
+  daily_dip:                # 📅 일봉 눌림 (크립토 전용, 10-19~) — ⚡·🚀 종목을 50일 쌓아 두고 일봉 눌림
+    # 풀: ⚡ 감시 종목(24h 상승률 상위에 들었던 종목)과 🚀 급등봉 종목. 마지막으로 들어온 뒤 pool_days일.
+    # 오늘 일봉(진행 중 포함 — 매시 스캔이 닿는 순간)에서, 어제는 선 위였는데 오늘 저가가 선까지 내려오면:
+    #   📉볼밴하단터치   일봉 볼린저 하단선(bb_period, bb_mult)
+    #   🔁일봉단기선터치  상승 중인 일봉 단기 수트(st_period × st_mult) — 지금 가격이 선 위
+    #   💔일봉단기선이탈  같은 자리에서 지금 가격이 선 아래(뚫림)
+    # 같은 종목·같은 사건은 하루 한 번.
+    enabled: true
+    pool_days: 50
+    bb_period: 20
+    bb_mult: 2.0
+    st_period: 22
+    st_mult: 3.0
   big_bar:                  # 🧨 하따봉 (15m봉, 크립토 전용, 10-13~) — 봉 하나의 고가가 시가 +25% 이상
     # 종가가 아니라 **고가**로 잰다(봉 안에서 한 번이라도 +25%를 찍었으면). 거래량·종가위치는 안 본다.
     # 24h 거래대금 하한은 급등봉과 같은 값(spike_bar.min_turnover_usd). 마감된 15m봉 최근 4개(1시간) 소급.
