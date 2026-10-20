@@ -33,7 +33,7 @@ CRYPTO_ONLY = True      # ETF·주식 스캔에서는 돌리지 않는다
 INTERVAL = "15m"
 KLINE_LIMIT = 200       # ma + grace + 여유 (ma를 키워도 넉넉하도록)
 ALIGN_INTERVAL = "1h"   # blocked() 구조 판정용 — 종목마다 따로 받는다
-ALIGN_LIMIT = 600       # MA480 성립(480봉 = 20일) + 여유
+ALIGN_LIMIT = 1000      # MA960 성립(🧲1h240선터치의 240>480>960, 10-20) + 여유 — 예전 600(MA480)
 TREND_INTERVAL = "4h"   # quiet()·turn_up() 판정용 — 스캔이 받아둔 프레임을 쓴다
 TREND_LIMIT = 600
 # 3️⃣3파 눌림목 — 4h MA960을 봐야 해서 따로 받는다(스캔 4h는 750봉이라 모자란다).
@@ -140,6 +140,10 @@ class Params:
     # 선을 터치(종가는 선 위)하거나 뚫은(종가가 선 아래 → 수트 하락 전환) 마감 1h봉. 직전 봉은 선에
     # 안 닿았어야 한다(내려오는 첫 봉). 최근 entry_1h_bars봉 안.
     entry_1h_slow: bool = True
+    # 🧲1h240선터치(10-20~) — 1h MA240 > MA480 > MA960 정배열인데, 직전 1h봉은 저가가 MA240 위였고
+    # 이번 마감 1h봉 저가가 MA240까지 내려옴(터치 또는 하회). 최근 entry_1h_bars봉 안.
+    entry_1h_ma240: bool = True
+    entry_1h_ma_align: tuple = (240, 480, 960)
     # 🎯눌림목타점2(10-13~) — 15m 캔들이 **월 앵커드 VWAP 상단선(+1σ)** 위에 있다가 내려와 닿거나
     # 아래로 하회한 마감 15m봉(직전 봉은 저가가 선 위). 밴드는 4h로 재서 15m에 얹는다(상승초입과 같은 선).
     entry_vwap_upper: bool = True
@@ -160,7 +164,7 @@ class Params:
     rearm_hours: int = 24           # 같은 종목은 이 시간 안에 • 로 다시 안 알린다
     # rearm_hours 안이라도 또 내는 사건(10-13: 1h 장기선 터치·이탈 — 내려오는 첫 봉이라 반복이 적다)
     rearm_exempt: tuple = ("🧱1h장기선터치", "💔1h장기선이탈", "🎯눌림목타점2", "🎯눌림목타점3",
-                           "🎯눌림목타점4", "📦2hFVG")
+                           "🎯눌림목타점4", "📦2hFVG", "🧲1h240선터치")
     # 🔥 재떡상 조짐 — 장기 강세 코인(4h MA480 +40% 위)이 단기 과열이 식고(4h MA120
     # 대비 +20% 이하) 3일 저점 근처(+10% 이내)까지 눌린 자리(fire_mark()).
     fire_enabled: bool = True
@@ -499,6 +503,7 @@ ENTRY_VWAP_UPPER = "🎯눌림목타점2"       # 10-13 — 월 VWAP 상단선(+
 ENTRY_VWAP_LOWER = "🎯눌림목타점4"       # 10-18 — 월 VWAP 하단선(−1σ)으로 내려와 터치·하회
 FVG_MARK = "📦2hFVG"                    # 10-18 — 타점3 자리가 이전 2h 상승 FVG면 같이 붙는 표시
 ENTRY_15M_SLOW_TOUCH = "🎯눌림목타점3"   # 10-14 — 상승 15m 장기 수트(30×6)로 내려와 터치·이탈 + 이전 2h FVG 자리
+ENTRY_1H_MA240 = "🧲1h240선터치"        # 10-20 — 1h 240>480>960 정배열에서 캔들이 1h MA240으로 내려와 터치·하회
 ENTRY_1H_SLOW_TOUCH = "🧱1h장기선터치"     # 10-13 — 상승 1h 장기 수트로 내려와 터치(종가는 선 위)
 ENTRY_1H_SLOW_BREAK = "💔1h장기선이탈"     # 10-13 — 상승 1h 장기 수트를 종가로 뚫음(수트 하락 전환)
 
@@ -632,6 +637,19 @@ def fvg_zones(df15: pd.DataFrame, tf: str = "2h") -> list[tuple]:
     return out
 
 
+def ma_touch_events(df: pd.DataFrame | None, align, bars: int) -> list[int]:
+    """마지막 bars개 봉에서 '정배열(align, 짧은 선이 위)인데 직전 봉 저가는 첫 선(align[0]) 위,
+    이번 봉 저가가 그 선까지 내려옴(터치 또는 하회)' 봉 위치."""
+    align = tuple(align)
+    if df is None or len(df) < max(align) + 2:
+        return []
+    ok = stacked_any(df["Close"], align)
+    ma = df["Close"].rolling(int(align[0])).mean().to_numpy(float)
+    lo = df["Low"].to_numpy(float)
+    return [t for t in range(max(1, len(df) - max(1, bars)), len(df))
+            if ok[t] and not np.isnan(ma[t - 1]) and lo[t - 1] > ma[t - 1] and lo[t] <= ma[t]]
+
+
 def slow_line_events(df: pd.DataFrame, st, bars: int) -> list[tuple[int, str]]:
     """마지막 bars개 봉에서 **상승 중인** 장기 수트로 내려온 첫 봉 — (위치, '터치'|'이탈').
 
@@ -742,6 +760,7 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
       🎯눌림목타점4    월 VWAP 하단선(−1σ) 위에 있던 15m 캔들이 내려와 선에 닿거나 하회(10-18~)
       🎯눌림목타점3    상승 중인 15m 장기 수트(30×6)로 내려와 터치하거나 뚫은 봉(10-14~, 이탈은 10-17~).
                      그 봉이 이전에 생겨 살아 있는 2h 상승 FVG에 걸치면 📦2hFVG를 같이 단다(10-18~ 표시만)
+      🧲1h240선터치    1h 240>480>960 정배열에서 캔들이 1h MA240으로 내려와 터치·하회(10-20~)
       🧱1h장기선터치   상승 중인 1h 장기 수트(30×6)로 내려와 터치, 종가는 선 위(10-13~)
       💔1h장기선이탈   상승 중인 1h 장기 수트를 종가로 뚫음 — 수트 하락 전환(10-13~)
 
@@ -788,6 +807,9 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
                 out.append((ENTRY_VWAP_LOWER, h15v.index[t] + q))
     h1 = _closed(df1h, 1, now)
     if h1 is not None and len(h1) > 2:
+        if params.entry_1h_ma240:
+            for t in ma_touch_events(h1, params.entry_1h_ma_align, params.entry_1h_bars):
+                out.append((ENTRY_1H_MA240, h1.index[t] + hour))
         if params.entry_1h_slow:
             for t, kind in slow_line_events(h1, params.entry_1h_slow_st, params.entry_1h_bars):
                 out.append((ENTRY_1H_SLOW_TOUCH if kind == "터치" else ENTRY_1H_SLOW_BREAK,
@@ -824,7 +846,7 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
 
 
 ENTRY_ORDER = (ENTRY_FIRE, ENTRY_PULLBACK, ENTRY_VWAP_UPPER, ENTRY_15M_SLOW_TOUCH, FVG_MARK,
-               ENTRY_VWAP_LOWER, ENTRY_PULLBACK_BREAK, ENTRY_1H_SLOW_BREAK,
+               ENTRY_VWAP_LOWER, ENTRY_1H_MA240, ENTRY_PULLBACK_BREAK, ENTRY_1H_SLOW_BREAK,
                ENTRY_1H_SLOW_TOUCH, ENTRY_W3, "1h단기선돌파", "1h단기선터치", "4h단기선돌파", "4h단기선터치")
 
 

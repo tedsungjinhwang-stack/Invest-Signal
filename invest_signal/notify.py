@@ -179,6 +179,7 @@ ALWAYS_TITLES = {"big_bar": "🧨 <b>하따봉</b>", "spike_bar": "🚀 <b>급�
                  "leader_break:🎯눌림목타점2": "🎯 <b>눌림목 타점2</b>",
                  "leader_break:🎯눌림목타점3": "🎯 <b>눌림목 타점3</b>",
                  "leader_break:🎯눌림목타점4": "🎯 <b>눌림목 타점4</b>",
+                 "leader_break:🧲1h240선터치": "🧲 <b>1h 240선 터치</b>",
                  "leader_break:🧱1h장기선터치": "🧱 <b>1h 장기선 터치</b>",
                  "leader_break:💔1h장기선이탈": "💔 <b>1h 장기선 이탈</b>"}
 ALWAYS_SIGNALS = tuple(ALWAYS_TITLES)

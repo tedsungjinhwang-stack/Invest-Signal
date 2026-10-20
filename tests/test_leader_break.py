@@ -1135,3 +1135,25 @@ def test_vwap_lower_touch_is_pullback4():
     off = dataclasses_replace(P, entry_vwap_lower=False)
     assert leader_break.ENTRY_VWAP_LOWER not in [
         n for n, _ in leader_break.entry_triggers(None, d4, None, off, now, df15)]
+
+
+def test_1h_ma240_touch_in_uptrend_alignment():
+    """10-20 — 🧲1h240선터치: 1h 240>480>960 정배열, 직전 봉 저가 MA240 위 → 이번 봉 저가가 MA240까지."""
+    c = np.linspace(100, 200, 1100)
+    h1 = _bars(c, "1h", spread=0.002)
+    ma = h1["Close"].rolling(240).mean().to_numpy()
+    t = len(h1) - 1
+    touch = h1.copy()
+    touch.iloc[t, touch.columns.get_loc("Low")] = ma[t] * 0.999
+    assert leader_break.ma_touch_events(touch, (240, 480, 960), 2) == [t]
+    assert leader_break.ma_touch_events(h1, (240, 480, 960), 2) == []           # 안 닿음
+    down = _bars(c[::-1], "1h", spread=0.002)                                    # 역배열이면 아니다
+    mad = down["Close"].rolling(240).mean().to_numpy()
+    down.iloc[t, down.columns.get_loc("Low")] = mad[t] * 0.999
+    assert leader_break.ma_touch_events(down, (240, 480, 960), 2) == []
+    now = h1.index[-1] + pd.Timedelta(hours=1)
+    names = [n for n, _ in leader_break.entry_triggers(touch, None, None, P, now)]
+    assert leader_break.ENTRY_1H_MA240 in names
+    off = dataclasses_replace(P, entry_1h_ma240=False)
+    assert leader_break.ENTRY_1H_MA240 not in [
+        n for n, _ in leader_break.entry_triggers(touch, None, None, off, now)]
