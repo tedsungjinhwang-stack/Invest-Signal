@@ -835,6 +835,9 @@ def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | Non
                     for k in ("gain_24h", "turnover_24h"):
                         if k in d:
                             tev.detail[k] = d[k]
+                    # 거래대금 하한(급등봉과 같은 값, 10-21 $5M) — 지금 24h 거래대금이 모자라면 안 낸다
+                    if d.get("turnover_24h") is not None and d["turnover_24h"] < sp.min_turnover_usd:
+                        continue
                     touches.append(tev)
         if (sym, sig) not in fresh:
             holds.append(ev)
