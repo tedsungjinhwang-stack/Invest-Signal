@@ -15,11 +15,11 @@ notify:
   # ⚡ 추적(↳) 줄도 뺀다(24h 상승률 TOP 5 순위표는 싣는다 — 10-12). 비우면([]) 예전처럼 ⚡ 칸 전부.
   # 새 시그널이 없는 시간에도 ⚡ 24h 상승률 TOP 순위표만 따로 보낸다(10-13 요청)
   board_always: true
-  leader_only_triggers: ["🎯눌림목타점", "🎯눌림목돌파타점", "🎯눌림목타점2", "🧲1h240선터치", "🧱1h장기선터치", "💔1h장기선이탈"]
+  leader_only_triggers: ["🎯눌림목타점", "🎯눌림목돌파타점", "🎯눌림목타점2", "🎯눌림목타점3", "🧲1h240선터치", "🧱1h장기선터치", "💔1h장기선이탈"]
   # 🔥 없이도 항상 싣는 칸 — 시그널 이름 또는 `시그널:stage`(그 변형만)
   # (10-01 급등봉 · 10-02 세력 이탈 · 10-04 파동의 일봉 단기·장기 추세선)
   always_show: [big_bar, spike_bar, daily_dip, vwap_onset, whale_exit, choch_warn, "wave_setup:일봉ABC", "wave_setup:일봉장기선돌파",
-                "leader_break:🎯눌림목타점", "leader_break:🎯눌림목돌파타점", "leader_break:🎯눌림목타점2", "leader_break:🧲1h240선터치",
+                "leader_break:🎯눌림목타점", "leader_break:🎯눌림목돌파타점", "leader_break:🎯눌림목타점2", "leader_break:🎯눌림목타점3", "leader_break:🧲1h240선터치",
                 "leader_break:🧱1h장기선터치", "leader_break:💔1h장기선이탈"]   # ⚡ • 🆕🎯 둘(10-11·10-12)도 🔥 없이
   # 추적 줄(↳)을 안 싣는 칸 — 시그널 이름 또는 `시그널:stage`. 추적 자체(상태)는 그대로라
   # 🚀 🧱·🎯 같은 • 알림은 계속 난다. 10-11: 상승초입 ↳는 160줄 넘게 나가서 추적을 하루로 줄임(track10.days_by),
@@ -869,7 +869,7 @@ signal:
     entry_vwap_mult: 1.0
     # 🎯눌림목타점3(10-14~) — 15m 장기 수퍼트렌드(30×6)가 상승인데 캔들이 내려와 선을 터치하거나(종가는
     # 선 위) 뚫은(종가가 선 아래, 10-17~) 마감 15m봉(직전 봉은 선에 안 닿음). 최근 entry_15m_bars(4)봉 안.
-    entry_15m_slow_touch: false      # 10-22 ⚡에서 끔 — 급등봉 추적(spike_bar.extra_triggers)엔 그대로
+    entry_15m_slow_touch: true       # 10-22 껐다가 다시 켬
     # 그 터치 봉이 **이전에 생긴 2h 상승 FVG** 구간이면 📦2hFVG 표시를 같이 단다(10-18~ 표시만, 거르지 않음). FVG = 마감된 2h봉 셋에서 첫 봉 고가 <
     # 셋째 봉 저가인 빈 구간. 생긴 뒤 가격이 구간 위로 떠났다가(2h봉 저가 > 위 끝) 되돌아와 걸친 봉만.
     # 그 사이 2h 종가가 아래 끝 밑으로 마감했으면 무효. 15m 1,000봉(≈10일) 안에서 찾는다.
