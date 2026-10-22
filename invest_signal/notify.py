@@ -575,7 +575,8 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
     if e.signal == "whale_exit":
         # 🚨 세력 이탈 — 익절·청산 경고. 현선갭(퍼프 ÷ 인덱스)이 언제 얼마나 벌어졌는지와
         # 그 봉의 24h 상승률. 숏 신호가 아니다(절반은 그 전에 +20% 더 쏨).
-        side = "선물<현물" if d["gap"] < 0 else "선물>현물"
+        # 텔레그램 HTML 모드라 '<'·'>'를 그대로 쓰면 태그로 읽혀 메시지 전체가 400으로 거절된다(10-22)
+        side = "선물&lt;현물" if d["gap"] < 0 else "선물&gt;현물"
         tags.append(f"🕒{_kst(e.bar_time)} {d.get('interval', '15m')}봉")
         tags.append(f"현선갭 {_pct(d['gap'])}({side})")
         if d.get("pump_24h") is not None:
@@ -1100,15 +1101,28 @@ def split_chunks(text: str, size: int = CHUNK) -> list[str]:
     return chunks
 
 
+def _plain_text(chunk: str) -> str:
+    """HTML 태그를 벗기고 엔티티를 되돌린다 — 파싱 실패 때 그냥 글자로 다시 보낼 때 쓴다."""
+    import html
+    import re
+    return html.unescape(re.sub(r"</?(?:b|i|u|s|code|pre|a)(?:\s[^>]*)?>", "", chunk))
+
+
 def _post_chunk(token: str, chat: str, chunk: str, log) -> bool:
-    """청크 1개 발송 — 429는 retry_after만큼 쉬고 최대 3회 재시도."""
-    for attempt in range(3):
+    """청크 1개 발송 — 429는 retry_after만큼 쉬고 최대 3회 재시도.
+
+    HTML 파싱 오류(400 "can't parse entities")면 태그를 벗겨 **일반 글자로 한 번 더** 보낸다(10-22) —
+    문구 하나 때문에 그 시간 알림 전체가 빠지고 다음 스캔에서도 같은 이유로 계속 실패하던 것.
+    """
+    plain = False
+    for attempt in range(4):
+        body = {"chat_id": chat, "text": _plain_text(chunk) if plain else chunk,
+                "disable_web_page_preview": True}
+        if not plain:
+            body["parse_mode"] = "HTML"
         try:
-            rsp = requests.post(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": chat, "text": chunk, "parse_mode": "HTML",
-                      "disable_web_page_preview": True},
-                timeout=15)
+            rsp = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                                json=body, timeout=15)
         except requests.RequestException as e:
             log(f"[telegram] 예외(시도 {attempt + 1}): {e}")
             time.sleep(2 * (attempt + 1))
@@ -1121,6 +1135,10 @@ def _post_chunk(token: str, chat: str, chunk: str, log) -> bool:
             except Exception:   # noqa: BLE001
                 wait = 5
             time.sleep(min(wait, 60))
+            continue
+        if rsp.status_code == 400 and not plain and "parse entities" in rsp.text:
+            log(f"[telegram] HTML 파싱 실패 — 일반 글자로 다시 보냄: {rsp.text[:160]}")
+            plain = True
             continue
         log(f"[telegram] 실패 {rsp.status_code}: {rsp.text[:200]}")
         return False

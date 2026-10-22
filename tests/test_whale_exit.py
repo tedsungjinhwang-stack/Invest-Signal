@@ -80,7 +80,7 @@ def test_notify_renders_whale_exit_line():
     out = format_events([e], [], {})
     assert "🚨 <b>세력 이탈</b>" in out
     line = [ln for ln in out.splitlines() if ">TAKE<" in ln][0]
-    assert "🕒09-23 21:30 15m봉" in line and "현선갭 -7.0%(선물<현물)" in line
+    assert "🕒09-23 21:30 15m봉" in line and "현선갭 -7.0%(선물&lt;현물)" in line
     assert "그때 24h +227%" in line
     assert fire_only_title([e]) == "🚨 <b>세력 이탈</b>"
 
@@ -111,3 +111,27 @@ def test_scanner_checks_every_perp_and_skips_rearmed(monkeypatch, tmp_path):
     assert sorted(asked) == ["AUSDT", "BUSDT"]
     assert scanner._scan_whale_exit(cfg, "spot_mirror", frames, {}, state) == []
     assert scanner._scan_whale_exit({}, "fapi", frames, {}, state) == []
+
+
+def test_telegram_falls_back_to_plain_text_on_parse_error(monkeypatch):
+    """10-22 — HTML 파싱 오류(400)면 태그를 벗겨 일반 글자로 한 번 더 보낸다."""
+    from invest_signal import notify
+    sent = []
+
+    class R:
+        def __init__(self, code, text=""):
+            self.status_code, self.text = code, text
+
+        def json(self):
+            return {}
+
+    def post(url, json=None, timeout=None):
+        sent.append(json)
+        if json.get("parse_mode") == "HTML":
+            return R(400, '{"ok":false,"description":"Bad Request: can not parse entities: x"}')
+        return R(200)
+
+    monkeypatch.setattr(notify.requests, "post", post)
+    ok = notify._post_chunk("t", "c", "<b>A</b> 선물<현물 &amp; <a href='u'>X</a>", log=lambda *a: None)
+    assert ok and len(sent) == 2 and "parse_mode" not in sent[1]
+    assert sent[1]["text"] == "A 선물<현물 & X"
