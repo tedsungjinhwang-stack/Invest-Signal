@@ -40,6 +40,7 @@ PULLBACK_BREAK = "눌림목돌파타점"  # 급등 뒤 15m 정배열에서 장�
 PULLBACK = "눌림목타점"            # 급등 뒤 15m 120>240>480 · 240선 위 · 상승 장기 수트 터치(10-12~)
 # 급등 뒤 ⚡와 같은 사건(10-17~) — leader_break.entry_triggers 이름 → stage
 EXTRA_STAGES = {"🎯눌림목타점2": "눌림목타점2", "🎯눌림목타점3": "눌림목타점3", "🎯눌림목타점4": "눌림목타점4",
+                "🎯월VWAP하단터치": "월VWAP하단터치",
                 "🧱1h장기선터치": "1h장기선터치", "💔1h장기선이탈": "1h장기선이탈"}
 EVENT_STAGES = (TOUCH, PULLBACK, PULLBACK_BREAK, *EXTRA_STAGES.values())   # 추적 저장에서 뺄 • 사건
 
@@ -281,7 +282,8 @@ def extra_events(df15: pd.DataFrame, df1h, df4h, symbol: str, spike: SignalEvent
     for name, close_t in trig:
         if name not in names or name not in EXTRA_STAGES:
             continue
-        step = pd.Timedelta(hours=1) if name.startswith(("🧱1h", "💔1h")) else pd.Timedelta(minutes=15)
+        step = (pd.Timedelta(hours=1) if name.startswith(("🧱1h", "💔1h")) or name == "🎯눌림목타점4"
+                else pd.Timedelta(minutes=15))
         start = close_t - step
         if start <= spike.bar_time:
             continue

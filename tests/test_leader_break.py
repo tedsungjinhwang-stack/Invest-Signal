@@ -1157,3 +1157,30 @@ def test_1h_ma240_touch_in_uptrend_alignment():
     off = dataclasses_replace(P, entry_1h_ma240=False)
     assert leader_break.ENTRY_1H_MA240 not in [
         n for n, _ in leader_break.entry_triggers(touch, None, None, off, now)]
+
+
+def test_vwap_retest_after_upper_breakout_1h():
+    """10-26 — 🎯눌림목타점4(1h): 이번 달 월 VWAP 상단선 위로 종가 돌파 → 내려와 월 VWAP 터치·하회."""
+    from invest_signal.indicators import anchored_vwap_bands
+    idx = pd.date_range("2026-10-01", periods=200, freq="1h", tz="UTC")
+    c = np.r_[np.full(60, 100.0) + np.tile([0.0, 2.0], 30),       # 횡보 — VWAP≈101
+              np.linspace(102, 130, 40),                           # 상단선 위로 돌파
+              np.linspace(130, 116, 99), [116.0]]                  # VWAP(≈112) 위로 내려오다가
+    df = pd.DataFrame({"Open": c, "High": c * 1.002, "Low": c * 0.998, "Close": c, "Volume": 1.0},
+                      index=idx)
+    vw, _, up = anchored_vwap_bands(df, "M", 1.0)
+    assert (df.Close.iloc[60:100] > up.iloc[60:100]).any()
+    t = len(df) - 1
+    df.iloc[t, df.columns.get_loc("Low")] = vw.iloc[t] * 0.999
+    df.iloc[t - 1, df.columns.get_loc("Low")] = max(df.Low.iloc[t - 1], vw.iloc[t - 1] * 1.01)
+    assert leader_break.vwap_retest_events(df, P, 2) == [t]
+    # 상단 돌파 없이 내려온 건 아니다
+    flat = df.copy()
+    flat["Close"] = np.minimum(flat.Close, 101.5)
+    flat["High"] = flat.Close * 1.002
+    flat.iloc[t - 1, flat.columns.get_loc("Low")] = 101.4
+    flat.iloc[t, flat.columns.get_loc("Low")] = 99.0
+    assert leader_break.vwap_retest_events(flat, P, 2) == []
+    now = idx[-1] + pd.Timedelta(hours=1)
+    names = [n for n, _ in leader_break.entry_triggers(df, None, None, P, now)]
+    assert leader_break.ENTRY_VWAP_RETEST in names

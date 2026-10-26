@@ -240,10 +240,11 @@ def _scan_leader_break(session, source: str, symbols: list, cfg: dict,
         entry_1h_slow_st=tuple(s.get("entry_1h_slow_st", (30, 6.0))),
         rearm_exempt=tuple(s.get("rearm_exempt", ("🧱1h장기선터치", "💔1h장기선이탈", "🎯눌림목타점2",
                                                   "🎯눌림목타점3", "🎯눌림목타점4", "📦2hFVG",
-                                                  "🧲1h240선터치"))),
+                                                  "🧲1h240선터치", "🎯월VWAP하단터치"))),
         entry_1h_ma240=bool(s.get("entry_1h_ma240", True)),
         entry_1h_ma_align=tuple(s.get("entry_1h_ma_align", (240, 480, 960))),
         entry_vwap_lower=bool(s.get("entry_vwap_lower", True)),
+        entry_vwap_retest=bool(s.get("entry_vwap_retest", True)),
         entry_15m_slow_touch=bool(s.get("entry_15m_slow_touch", True)),
         entry_15m_slow_fvg=bool(s.get("entry_15m_slow_fvg", True)),
         fvg_tf=str(s.get("fvg_tf", "2h")),
@@ -750,7 +751,8 @@ def _spike_extra_params(cfg: dict):
         entry_w3=False, entry_1h_fast=False, entry_4h_fast=False, fire_trigger=False,
         entry_pullback=False, entry_pullback_break=False,
         entry_vwap_upper="🎯눌림목타점2" in names,
-        entry_vwap_lower="🎯눌림목타점4" in names,
+        entry_vwap_lower="🎯월VWAP하단터치" in names,
+        entry_vwap_retest="🎯눌림목타점4" in names,
         entry_15m_slow_touch="🎯눌림목타점3" in names,
         entry_1h_slow=bool({"🧱1h장기선터치", "💔1h장기선이탈"} & set(names)),
         entry_15m_slow_fvg=bool(s.get("entry_15m_slow_fvg", True)),
@@ -821,7 +823,8 @@ def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | Non
             if xsess is not None:
                 # ⚡와 같은 사건(10-17) — 1h·4h는 이 종목만 받는다(캐시가 있으면 새 봉만)
                 try:
-                    df1h = data_binance.klines(xsess, sym, source, "1h", limit=300)
+                    # 1h 1,000봉 — 🎯눌림목타점4가 이번 달 월 VWAP을 1h에서 잰다(달 첫날까지 닿아야 한다)
+                    df1h = data_binance.klines(xsess, sym, source, "1h", limit=leader_break.ALIGN_LIMIT)
                     df4h = (frames4h or {}).get(sym)
                     if df4h is None or len(df4h) < 200:
                         df4h = data_binance.klines(xsess, sym, source, "4h", limit=600)
