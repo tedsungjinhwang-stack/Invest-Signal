@@ -1160,7 +1160,7 @@ def test_1h_ma240_touch_in_uptrend_alignment():
 
 
 def test_vwap_retest_after_upper_breakout_1h():
-    """10-26 — 🎯눌림목타점4(1h): 이번 달 월 VWAP 상단선 위로 종가 돌파 → 내려와 월 VWAP 터치·하회."""
+    """10-26 — 🎯눌림목타점4(1h): 최근 7일 안 월 VWAP 상단선 위 종가 돌파 → 내려와 월 VWAP 터치·하회."""
     from invest_signal.indicators import anchored_vwap_bands
     idx = pd.date_range("2026-10-01", periods=200, freq="1h", tz="UTC")
     c = np.r_[np.full(60, 100.0) + np.tile([0.0, 2.0], 30),       # 횡보 — VWAP≈101
@@ -1181,6 +1181,8 @@ def test_vwap_retest_after_upper_breakout_1h():
     flat.iloc[t - 1, flat.columns.get_loc("Low")] = 101.4
     flat.iloc[t, flat.columns.get_loc("Low")] = 99.0
     assert leader_break.vwap_retest_events(flat, P, 2) == []
+    # 돌파가 창보다 전이면 아니다(마지막 상단 위 종가가 137봉, 지금 199봉 — 62시간 전 → 2일 창이면 빠진다)
+    assert leader_break.vwap_retest_events(df, dataclasses_replace(P, entry_vwap_retest_days=2), 2) == []
     now = idx[-1] + pd.Timedelta(hours=1)
     names = [n for n, _ in leader_break.entry_triggers(df, None, None, P, now)]
     assert leader_break.ENTRY_VWAP_RETEST in names

@@ -865,9 +865,10 @@ signal:
     entry_vwap_upper: true
     # 🎯월VWAP하단터치(10-18~, 예전 이름 타점4) — 같은 판정을 월 VWAP **하단선**(−1σ)으로. 꺼 둠.
     entry_vwap_lower: false
-    # 🎯눌림목타점4(10-26~) — **1h봉**: 이번 달 월 VWAP 상단선(+1σ) 위로 종가 돌파한 적이 있고(마지막으로
-    # VWAP을 건드린 뒤), 내려오면서 직전 1h봉 저가는 VWAP 위 → 이번 1h봉 저가가 월 VWAP선까지(터치·하회).
+    # 🎯눌림목타점4(10-26~) — **1h봉**: 최근 entry_vwap_retest_days(7)일 안에 월 VWAP 상단선(+1σ) 위로 종가
+    # 돌파한 적이 있고, 내려오면서 직전 1h봉 저가는 VWAP 위 → 이번 1h봉 저가가 월 VWAP선까지(터치·하회).
     entry_vwap_retest: true
+    entry_vwap_retest_days: 7
     entry_vwap_anchor: M
     entry_vwap_mult: 1.0
     # 🎯눌림목타점3(10-14~) — 15m 장기 수퍼트렌드(30×6)가 상승인데 캔들이 내려와 선을 터치하거나(종가는

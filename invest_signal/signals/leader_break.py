@@ -148,10 +148,11 @@ class Params:
     # 아래로 하회한 마감 15m봉(직전 봉은 저가가 선 위). 밴드는 4h로 재서 15m에 얹는다(상승초입과 같은 선).
     entry_vwap_upper: bool = True
     entry_vwap_lower: bool = True           # 🎯월VWAP하단터치(10-18~) — 같은 판정을 월 VWAP 하단선(−1σ)으로
-    # 🎯눌림목타점4(10-26~) — 1h봉: 이번 달 월 VWAP 상단선 위로 **종가 돌파**한 적이 있고(마지막으로 VWAP을
-    # 건드린 뒤), 그 뒤 내려오면서 직전 봉 저가는 VWAP 위 → 이번 봉 저가가 VWAP까지(터치·하회).
+    # 🎯눌림목타점4(10-26~) — 1h봉: 최근 entry_vwap_retest_days(7)일 안에 월 VWAP 상단선 위로 **종가 돌파**한
+    # 적이 있고, 내려오면서 직전 봉 저가는 VWAP 위 → 이번 봉 저가가 VWAP까지(터치·하회).
     # 월 VWAP·상단선은 1h 프레임(1,000봉 ≈ 41일)에서 바로 잰다.
     entry_vwap_retest: bool = True
+    entry_vwap_retest_days: float = 7
     # 🎯눌림목타점3(10-14~) — 15m 장기 수퍼트렌드(entry_pullback_st, 30×6)가 상승인데 캔들이 내려와 선을
     # 터치하거나(종가는 선 위) 뚫은(종가가 선 아래, 10-17~) 마감 15m봉(직전 봉은 선에 안 닿음).
     # 최근 entry_15m_bars봉 안.
@@ -643,11 +644,8 @@ def fvg_zones(df15: pd.DataFrame, tf: str = "2h") -> list[tuple]:
 
 
 def vwap_retest_events(h1: pd.DataFrame | None, params: Params, bars: int) -> list[int]:
-    """🎯눌림목타점4 — 마지막 bars봉 중 '이번 달 월 VWAP 상단선 위로 종가 돌파 → 내려와 VWAP 터치·하회' 1h봉 위치.
-
-    돌파는 **마지막으로 VWAP을 건드린 봉 뒤**(같은 달)에 있어야 한다 — 한 번 내려와 닿으면 다시 상단
-    돌파가 나와야 다음 타점이 된다.
-    """
+    """🎯눌림목타점4 — 마지막 bars봉 중 '최근 entry_vwap_retest_days(7)일 안에 월 VWAP 상단선 위로 종가
+    돌파한 적이 있고, 직전 봉 저가는 VWAP 위 → 이번 봉 저가가 VWAP까지(터치·하회)' 1h봉 위치(10-26)."""
     if h1 is None or len(h1) < 10:
         return []
     got = anchored_vwap_bands(h1, params.entry_vwap_anchor, params.entry_vwap_mult)
@@ -657,19 +655,13 @@ def vwap_retest_events(h1: pd.DataFrame | None, params: Params, bars: int) -> li
     idx = h1.index.tz_convert(None) if h1.index.tz is not None else h1.index
     period = idx.to_period(params.entry_vwap_anchor).astype(str).to_numpy()
     lo, cl = h1["Low"].to_numpy(float), h1["Close"].to_numpy(float)
+    above = cl > upper                      # NaN 비교는 False
+    win = int(params.entry_vwap_retest_days * 24)
     out = []
     for t in range(max(1, len(h1) - max(1, bars)), len(h1)):
         if np.isnan(vwap[t]) or np.isnan(vwap[t - 1]) or period[t] != period[t - 1]:
             continue
-        if not (lo[t - 1] > vwap[t - 1] and lo[t] <= vwap[t]):
-            continue
-        k = t - 1
-        broke = False
-        while k >= 0 and period[k] == period[t] and not lo[k] <= vwap[k]:
-            if cl[k] > upper[k]:
-                broke = True
-            k -= 1
-        if broke:
+        if lo[t - 1] > vwap[t - 1] and lo[t] <= vwap[t] and above[max(0, t - win):t].any():
             out.append(t)
     return out
 
@@ -795,8 +787,8 @@ def entry_triggers(df1h: pd.DataFrame | None, df4h: pd.DataFrame | None,
                      내려와 터치(종가는 선 위)(10-12~)
       🎯눌림목타점2    월 VWAP 상단선(+1σ) 위에 있던 15m 캔들이 내려와 선에 닿거나 하회(10-13~)
       🎯월VWAP하단터치  월 VWAP 하단선(−1σ) 위에 있던 15m 캔들이 내려와 선에 닿거나 하회(10-18~, 꺼 둠)
-      🎯눌림목타점4    1h: 이번 달 월 VWAP 상단선(+1σ) 위로 종가 돌파한 뒤, 내려오면서 월 VWAP선에
-                     닿거나 하회한 마감 1h봉(직전 봉 저가는 VWAP 위)(10-26~)
+      🎯눌림목타점4    1h: 최근 7일 안에 월 VWAP 상단선(+1σ) 위로 종가 돌파한 적이 있고, 내려오면서
+                     월 VWAP선에 닿거나 하회한 마감 1h봉(직전 봉 저가는 VWAP 위)(10-26~)
       🎯눌림목타점3    상승 중인 15m 장기 수트(30×6)로 내려와 터치하거나 뚫은 봉(10-14~, 이탈은 10-17~).
                      그 봉이 이전에 생겨 살아 있는 2h 상승 FVG에 걸치면 📦2hFVG를 같이 단다(10-18~ 표시만)
       🧲1h240선터치    1h 240>480>960 정배열에서 캔들이 1h MA240으로 내려와 터치·하회(10-20~)
