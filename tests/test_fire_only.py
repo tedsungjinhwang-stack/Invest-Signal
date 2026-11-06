@@ -226,3 +226,10 @@ def test_board_sent_alone_when_no_signal(monkeypatch, tmp_path):
     monkeypatch.setattr(notify, "send_telegram", lambda msg, log=print: sent.append(msg) or True)
     scanner.run("x.yaml", str(tmp_path / "state" / "alerts_state.json"), log=lambda *x: None)
     assert len(sent) == 1 and "24h 상승률 TOP" in sent[0] and ">Z<" in sent[0]
+
+
+def test_trigger_labels_carry_short_description():
+    """11-06 — ⚡ 줄의 🎯 이름 옆에 한 줄 설명."""
+    e = _ev("PUSDT", "leader_break", triggers=["🎯눌림목타점4", "🧲1h240선터치"])
+    line = [ln for ln in notify.format_events([e], [], {}).splitlines() if ">P<" in ln][0]
+    assert "🆕🎯눌림목타점4(1h 월VWAP상단 돌파 후 VWAP 터치)·🧲1h240선터치" in line

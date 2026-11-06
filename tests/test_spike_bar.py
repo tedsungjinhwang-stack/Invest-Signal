@@ -203,7 +203,7 @@ def test_pullback_entry_after_spike_on_aligned_long_st_flip():
     from invest_signal import notify
     ev.detail["since"] = 0.05
     line = [ln for ln in notify.format_events([ev], [], {}).splitlines() if ">X<" in ln][0]
-    assert "🎯15m눌림목돌파타점 🕒" in line and "급등 후 +5.0%" in line
+    assert "🎯눌림목돌파타점(15m 장기선 상승전환) 🕒" in line and "급등 후 +5.0%" in line
 
 
 def test_pullback_touch_after_spike():
@@ -227,7 +227,7 @@ def test_pullback_touch_after_spike():
     assert spike_bar.pullback_touch(df, "XUSDT", Params(pullback_enabled=False), spike=spike) is None
     from invest_signal import notify
     line_s = [ln for ln in notify.format_events([ev], [], {}).splitlines() if ">X<" in ln][0]
-    assert "🎯15m눌림목타점 🕒" in line_s
+    assert "🎯눌림목타점(15m 정배열·장기선터치) 🕒" in line_s
 
 
 def test_big_bar_uses_high_not_close():
@@ -274,7 +274,7 @@ def test_extra_events_after_spike(monkeypatch):
     assert got[0].dedup_key.endswith("|눌림목타점3") and abs(got[0].detail["since"] - 0.2) < 1e-9
     from invest_signal import notify
     out = notify.format_events(got, [], {})
-    assert "🎯눌림목타점3 🕒" in out and "💔1h장기선이탈 🕒" in out and "급등 후 +20%" in out
+    assert "🎯눌림목타점3(15m 장기선 터치·이탈) 🕒" in out and "💔1h장기선이탈 🕒" in out and "급등 후 +20%" in out
 
 
 def test_extra_event_pullback3_fvg_mark(monkeypatch):

@@ -519,6 +519,22 @@ def _wave_tag(d: dict) -> str:
     return f"{stage} {line} {d.get('kind', '터치')}"
 
 
+# 🎯 타점 이름 옆에 붙이는 한 줄 설명(11-06) — 이름만으로는 어느 봉·어느 선인지 안 보인다
+TRIGGER_DESC = {
+    "🎯눌림목타점": "15m 정배열·장기선터치",
+    "🎯눌림목타점2": "15m 월VWAP상단 터치",
+    "🎯눌림목타점3": "15m 장기선 터치·이탈",
+    "🎯눌림목타점4": "1h 월VWAP상단 돌파 후 VWAP 터치",
+    "🎯눌림목돌파타점": "15m 장기선 상승전환",
+}
+
+
+def _trig_label(name: str) -> str:
+    """'🎯눌림목타점2' → '🎯눌림목타점2(15m 월VWAP상단 터치)'. 설명이 없는 사건은 이름 그대로."""
+    desc = TRIGGER_DESC.get(name)
+    return f"{name}({desc})" if desc else name
+
+
 def _event_line(e, url: str, name: str, kind: str) -> str:
     d = e.detail
     head = (f"• <a href=\"{url}\">{_short_symbol(e.symbol, kind, name)}</a>"
@@ -534,7 +550,7 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
         tags.insert(0, WAVE3_TAG)       # 칸 맨 위에 모이는 이유 — 줄 맨 앞에 둔다
     if e.signal == "leader_break" and d.get("triggers"):
         # 이 줄이 **왜 지금 • 로 났는지** — 마감된 봉에서 새로 생긴 사건
-        tags.insert(0, "🆕" + "·".join(d["triggers"]))
+        tags.insert(0, "🆕" + "·".join(_trig_label(t) for t in d["triggers"]))
     if e.signal == "leader_break" and d.get("warn"):
         tags.insert(0, WARN_TAG)
     if e.signal in FIRE_SIGNALS and d.get("fire"):
@@ -622,7 +638,8 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
             "1h장기선터치", "1h장기선이탈"):
         # 🎯 급등 뒤 — 눌림목타점: 120>240>480 · 240선 위 · 상승 장기 수트 터치,
         # 눌림목돌파타점: 240>480>960(또는 480>960)에서 장기 수트 하락→상승 전환. ⚡ 🎯과 같은 정의
-        tags.append(f"{d.get('tag') or '🎯15m' + d['stage']} 🕒{_kst(e.bar_time)}")
+        tname, _, rest = (d.get("tag") or ("🎯" + d["stage"])).partition(" ")
+        tags.append(f"{_trig_label(tname)}{' ' + rest if rest else ''} 🕒{_kst(e.bar_time)}")
         tags.append(f"급등 🕒{_kst(d['spike_time'])} 몸통 {_pct(d['body'])}")
         if d.get("since") is not None:
             tags.append(f"급등 후 {_pct(d['since'])}")
