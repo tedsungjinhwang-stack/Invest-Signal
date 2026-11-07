@@ -36,7 +36,7 @@ signal:
     #   🔁일봉단기선터치  상승 중인 일봉 단기 수트(st_period × st_mult) — 지금 가격이 선 위
     #   💔일봉단기선이탈  같은 자리에서 지금 가격이 선 아래(뚫림)
     # 같은 종목·같은 사건은 하루 한 번.
-    enabled: true
+    enabled: false           # 11-07 끔 — 📅 일봉 눌림 안 나가게(풀 기록은 그대로 남는다)
     pool_days: 50
     bb_period: 20
     bb_mult: 2.0
