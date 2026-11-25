@@ -52,6 +52,8 @@ class Params:
     vol_ma: int = 96            # ② 평균을 낼 봉 수 (96봉 = 24시간)
     close_pos: float = 0.7      # ③ 종가위치 — 1이면 고가 마감
     min_turnover_usd: float = 1_000_000   # ④ 24h 거래대금 하한
+    # 10일 추적 타점(🎯·🧱·💔)의 24h 거래대금 하한 — None이면 min_turnover_usd와 같다(11-25 분리)
+    track_min_turnover_usd: float | None = None
     # 스캔이 한 시간 간격이라 그 사이 지나간 봉도 소급해 잡는다(15m × 4 = 1시간).
     # **이 시그널은 소급이 특히 중요하다** — 봉이 15분짜리라 소급이 없으면
     # 스캔 직전 봉 하나만 보게 되어 네 봉 중 셋을 놓친다.

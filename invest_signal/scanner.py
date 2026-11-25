@@ -840,8 +840,10 @@ def _track10(cfg: dict, state, events: list, ongoing: list, frames15: dict | Non
                     for k in ("gain_24h", "turnover_24h"):
                         if k in d:
                             tev.detail[k] = d[k]
-                    # 거래대금 하한(급등봉과 같은 값, 11-09 $20M) — 지금 24h 거래대금이 모자라면 안 낸다
-                    if d.get("turnover_24h") is not None and d["turnover_24h"] < sp.min_turnover_usd:
+                    # 거래대금 하한(11-25~ 급등봉 $5M과 따로 track_min_turnover_usd $20M) — 지금 24h 거래대금이 모자라면 안 낸다
+                    tfloor = (sp.track_min_turnover_usd if sp.track_min_turnover_usd is not None
+                              else sp.min_turnover_usd)
+                    if d.get("turnover_24h") is not None and d["turnover_24h"] < tfloor:
                         continue
                     touches.append(tev)
         if (sym, sig) not in fresh:
@@ -992,11 +994,14 @@ def _scan_spike(cfg: dict, frames15: dict, ticker: dict | None,
     track10 = bool(((cfg.get("signal") or {}).get("track10") or {}).get("enabled", False))
     events, ongoing, thin = [], [], 0
 
+    big_floor = float(big_cfg.get("min_turnover_usd", params.min_turnover_usd))
+
     def stamp(ev) -> bool:
         """티커 값을 붙이고 거래대금 하한을 건다. 통과하면 True."""
         stat = (ticker or {}).get(ev.symbol) or {}
         turn = stat.get("quote_volume")
-        if turn is not None and turn < params.min_turnover_usd:
+        floor = big_floor if ev.signal == spike_bar.BIG_NAME else params.min_turnover_usd
+        if turn is not None and turn < floor:
             return False
         if turn is not None:
             ev.detail["turnover_24h"] = turn
@@ -1052,6 +1057,8 @@ def _spike_params(cfg: dict) -> "spike_bar.Params":
         vol_ma=int(s.get("vol_ma", 96)),
         close_pos=float(s.get("close_pos", 0.7)),
         min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
+        track_min_turnover_usd=(None if s.get("track_min_turnover_usd") is None
+                                else float(s["track_min_turnover_usd"])),
         grace_bars=int(s.get("grace_bars", 4)),
         track_bars=int(s.get("track_bars", 288)),
         touch_enabled=bool(s.get("touch_enabled", True)),
