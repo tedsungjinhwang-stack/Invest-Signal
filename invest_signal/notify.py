@@ -307,6 +307,10 @@ def _band_tags(d: dict) -> list[str]:
     판정이 그 밴드 근처인지를 보므로 밴드 위인지 아래인지가 보여야 한다.
     """
     tags = []
+    if d.get("burst_vol_mult") is not None:
+        # 💥 상승초입 자리에서 15m 거래량 폭증(11-25~) — 몇 배였는지와 그 봉 대금
+        tags.append(f"💥15m거래량 {d['burst_vol_mult']:.0f}배"
+                    + (f" ${d['burst_bar_usd'] / 1e6:.1f}M" if d.get("burst_bar_usd") else ""))
     if d.get("trend"):
         tags.append(ALIGN_TAG.get(d["trend"], d["trend"]))
     if d.get("band_dist") is not None:

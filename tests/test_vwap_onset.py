@@ -370,3 +370,53 @@ def test_near_disabled_lets_bear_band_rows_far_below_upper(monkeypatch):
     assert not vo._state(df15, df4h, p).ok.iloc[-1]
     assert vo._state(df15, df4h, _Params(upper_above_ma=None, min_ret_24h=None,
                                          near_enabled=False, bull_enabled=False)).ok.iloc[-1]
+
+
+# ── 💥 거래량 폭증(11-25) ─────────────────────────────────────────
+
+def _burst_frame(n=300, spikes=(), price=1.0):
+    idx = pd.date_range("2026-11-20", periods=n, freq="15min", tz="UTC")
+    v = np.full(n, 1_000.0)
+    for t in spikes:
+        v[t] = 20_000.0                       # 20배 · 봉 대금 ≈ $20k
+    return pd.DataFrame({"Open": price, "High": price, "Low": price, "Close": price,
+                         "Volume": v}, index=idx)
+
+
+def _fake_state(df, ok):
+    return pd.DataFrame({"close": df["Close"], "ok": ok, "bear": ok, "dist": -0.1,
+                         "upper": 1.1, "ret_24h": 0.0, "ret_7d": 0.0,
+                         "ma1h20": 0.0, "from_7d_low": 0.0}, index=df.index)
+
+
+def _bp(**kw):
+    base = dict(burst_enabled=True, burst_vol_mult=10.0, burst_min_bar_usd=10_000)
+    base.update(kw)
+    return vo.Params(**base)
+
+
+def test_burst_fires_inside_onset_zone(monkeypatch):
+    df = _burst_frame(spikes=(298,))
+    monkeypatch.setattr(vo, "_state", lambda a, b, p: _fake_state(df, True))
+    got = vo.bursts(df, df, "XUSDT", _bp())
+    assert [e.bar_time for e in got] == [df.index[298]]
+    e = got[0]
+    assert e.detail["stage"] == vo.BURST_STAGE and e.detail["burst_vol_mult"] >= 19
+    assert e.dedup_key.endswith("|거래량폭증")
+    assert "💥15m거래량 20배" in " ".join(notify._band_tags(e.detail))
+
+
+def test_burst_needs_zone_bar_usd_and_enabled(monkeypatch):
+    df = _burst_frame(spikes=(298,))
+    monkeypatch.setattr(vo, "_state", lambda a, b, p: _fake_state(df, False))
+    assert vo.bursts(df, df, "XUSDT", _bp()) == []
+    monkeypatch.setattr(vo, "_state", lambda a, b, p: _fake_state(df, True))
+    assert vo.bursts(df, df, "XUSDT", _bp(burst_min_bar_usd=50_000)) == []
+    assert vo.bursts(df, df, "XUSDT", _bp(burst_enabled=False)) == []
+
+
+def test_burst_rearm_blocks_repeat_within_a_day(monkeypatch):
+    df = _burst_frame(spikes=(250, 298))      # 48봉(12h) 간격 — 두 번째는 안 나간다
+    monkeypatch.setattr(vo, "_state", lambda a, b, p: _fake_state(df, True))
+    assert vo.bursts(df, df, "XUSDT", _bp()) == []
+    assert len(vo.bursts(df, df, "XUSDT", _bp(burst_rearm_bars=24))) == 1

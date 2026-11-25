@@ -1109,14 +1109,22 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         grace_bars=int(s.get("grace_bars", 4)),
         min_turnover_usd=float(s.get("min_turnover_usd", 1_000_000)),
         track_bars=int(s.get("track_bars", 96)),
+        burst_enabled=bool(s.get("burst_enabled", False)),
+        burst_vol_mult=float(s.get("burst_vol_mult", 10.0)),
+        burst_min_bar_usd=float(s.get("burst_min_bar_usd", 500_000)),
+        burst_min_turnover_usd=float(s.get("burst_min_turnover_usd", 5_000_000)),
+        burst_rearm_bars=int(s.get("burst_rearm_bars", 96)),
     )
     events, ongoing, thin, falling = [], [], 0, 0
+    burst_n = 0
 
     def stamp(ev) -> bool:
         nonlocal thin, falling
         stat = (ticker or {}).get(ev.symbol) or {}
         turn = stat.get("quote_volume")
-        if turn is not None and turn < params.min_turnover_usd:
+        floor = (params.burst_min_turnover_usd if ev.detail.get("stage") == vwap_onset.BURST_STAGE
+                 else params.min_turnover_usd)
+        if turn is not None and turn < floor:
             thin += 1
             return False
         g = stat.get("change_pct")
@@ -1141,12 +1149,16 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         for ev in got:
             if stamp(ev):
                 events.append(ev)
+        for ev in vwap_onset.bursts(df15, df4, sym, params):
+            if stamp(ev):
+                events.append(ev)
+                burst_n += 1
         if not got:
             held = vwap_onset.tracking(df15, df4, sym, params)
             if held is not None and stamp(held):
                 ongoing.append(held)
     if events or ongoing or thin or falling:
-        log(f"[binance] 상승초입 {len(events)}건 · 추적 {len(ongoing)}건"
+        log(f"[binance] 상승초입 {len(events) - burst_n}건 · 💥거래량폭증 {burst_n}건 · 추적 {len(ongoing)}건"
             + (f" · 거래대금 하한 미달 {thin}건 제외" if thin else "")
             + (f" · 24h 하락 {falling}건 제외" if falling else "")
             + (f" (15m {params.bear_lower_ma}선<종가<"

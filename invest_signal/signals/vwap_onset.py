@@ -85,6 +85,15 @@ class Params:
     fire_enabled: bool = True
     fire_ma1h20_min: float = 0.04
     fire_from_low_max: float = 0.25
+    # 💥 거래량 폭증(11-25~) — 상승초입 자리(ok)에 **이미 있는** 동안 15m 거래량이 직전 24h(96봉)
+    # 평균의 burst_vol_mult배 이상, 그 봉 거래대금 ≥ burst_min_bar_usd. 진입 봉이 아니어도 된다 —
+    # 24h 거래대금이 하한 아래일 때 들어와 버린 종목(SAHARA·BIGTIME 11-24)을 터지는 순간 잡는다.
+    # 24h 거래대금 하한은 따로(burst_min_turnover_usd). 같은 종목은 burst_rearm_bars 안에 한 번.
+    burst_enabled: bool = False
+    burst_vol_mult: float = 10.0
+    burst_min_bar_usd: float = 500_000
+    burst_min_turnover_usd: float = 5_000_000
+    burst_rearm_bars: int = 96
 
 
 def _band_on_15m(df15: pd.DataFrame, df4h: pd.DataFrame, anchor: str,
@@ -285,6 +294,37 @@ def detect(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
         row = st.iloc[t]
         out.append(SignalEvent(symbol=symbol, signal=NAME, bar_time=st.index[t],
                                price=float(row.close), detail=_detail(row, params)))
+    return out
+
+
+BURST_STAGE = "거래량폭증"
+
+
+def bursts(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
+           params: Params = Params()) -> list[SignalEvent]:
+    """💥 상승초입 자리에서 15m 거래량이 터진 봉 — 마지막 grace_bars+1봉 중, 직전 burst_rearm_bars봉에
+    같은 조건 봉이 없었던 것. 봉 거래대금은 (고+저+종)/3 × 거래량으로 어림한다(캔들엔 대금이 없다).
+    """
+    if not params.burst_enabled:
+        return []
+    st = _state(df15, df4h, params)
+    if st is None:
+        return []
+    v = df15["Volume"]
+    mult = v / v.shift(1).rolling(96).mean()
+    usd = (df15["High"] + df15["Low"] + df15["Close"]) / 3 * v
+    hit = (st.ok & (mult >= params.burst_vol_mult) & (usd >= params.burst_min_bar_usd)).to_numpy(bool)
+    new = _entries(hit, params.burst_rearm_bars)
+    n = len(st)
+    out = []
+    for t in range(max(1, n - 1 - params.grace_bars), n):
+        if not new[t]:
+            continue
+        row = st.iloc[t]
+        d = _detail(row, params)
+        d.update(stage=BURST_STAGE, burst_vol_mult=float(mult.iloc[t]), burst_bar_usd=float(usd.iloc[t]))
+        out.append(SignalEvent(symbol=symbol, signal=NAME, bar_time=st.index[t],
+                               price=float(row.close), detail=d))
     return out
 
 
