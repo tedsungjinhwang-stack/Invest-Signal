@@ -61,6 +61,13 @@ def test_detect_only_recent_and_line_tags():
 
 def test_two_breakouts_same_return_bar_one_line(monkeypatch):
     df, b = _frame()
-    monkeypatch.setattr(w3, "_find", lambda d, p: [(b - 3, b + 6, 0.4, 6.0), (b, b + 6, 0.3, 6.0)])
+    monkeypatch.setattr(w3, "_find", lambda d, p: [(b - 3, b + 6, 0.4, 6.0, "월VWAP"), (b, b + 6, 0.3, 6.0, "월VWAP")])
     ev = w3.detect(df.iloc[:b + 7], "XUSDT")
     assert len(ev) == 1 and ev[0].detail["break_time"] == df.index[b - 3].isoformat()
+
+
+def test_ma240_or_is_off_by_default_and_on_with_param():
+    assert w3.Params().ma_near is None
+    df, b = _frame()
+    got = w3._find(df, w3.Params(grace_bars=10**6, ma_near=0.05))
+    assert got and got[0][4] in ("월VWAP", "240선")

@@ -36,14 +36,18 @@ class Params:
     vwap_anchor: str = "M"
     vwap_away: float = 0.05              # ① 먼저 VWAP × (1+이 값) 위로 마감
     vwap_near: float = 0.05              # ① 그 뒤 |종가 ÷ VWAP − 1| ≤ 이 값
+    # ① 또는(11-26~) — 240선(ma 가운데)에서도 같은 식: 240선 × (1+ma_away) 위로 마감했다가 ±ma_near 안으로.
+    # ma_near가 None이면 VWAP만 본다.
+    ma_away: float = 0.05
+    ma_near: float | None = None         # 11-26 백테스트: 240선 복귀는 ±3% 25% · ±5% 32%(VWAP 43%) — 기본 끔
     vol_mult: float = 5.0                # ② 1h 거래량 ÷ 직전 vol_ma봉 평균
     vol_ma: int = 24
     grace_bars: int = 1                  # 스캔 1시간 — 직전 마감봉 + 한 봉 소급
     min_turnover_usd: float = 2_000_000
 
 
-def _find(df: pd.DataFrame, p: Params) -> list[tuple[int, int, float, float]]:
-    """(돌파 봉, 신호 봉, 돌파 뒤 고점 상승률, 최대 거래량 배수) — 오래된 것부터."""
+def _find(df: pd.DataFrame, p: Params) -> list[tuple[int, int, float, float, str]]:
+    """(돌파 봉, 신호 봉, 돌파 뒤 고점 상승률, 최대 거래량 배수, 복귀한 선) — 오래된 것부터."""
     n = len(df)
     lo_ma, mid_ma, hi_ma = (int(x) for x in p.ma)
     if n < hi_ma + 2:
@@ -62,18 +66,25 @@ def _find(df: pd.DataFrame, p: Params) -> list[tuple[int, int, float, float]]:
         if not (c[b] > m2[b] and c[b - 1] <= m2[b - 1] and m1[b] < m2[b] < m4[b]):
             continue
         low0 = np.nanmin(l[max(0, b - p.pre_low_bars):b + 1])
-        away, hi = False, h[b]
+        away_v = away_m = False
+        hi = h[b]
         for j in range(b + 1, min(n, b + p.window + 1)):
-            if l[j] <= low0 or np.isnan(vw[j]):
+            if l[j] <= low0:
                 break
             hi = max(hi, h[j])
-            if c[j] > vw[j] * (1 + p.vwap_away):
-                away = True
-                continue
-            if away and abs(c[j] / vw[j] - 1) <= p.vwap_near:
+            hit = None
+            if not np.isnan(vw[j]):
+                if away_v and abs(c[j] / vw[j] - 1) <= p.vwap_near:
+                    hit = "월VWAP"
+                away_v = away_v or c[j] > vw[j] * (1 + p.vwap_away)
+            if hit is None and p.ma_near is not None and not np.isnan(m2[j]):
+                if away_m and abs(c[j] / m2[j] - 1) <= p.ma_near:
+                    hit = f"{mid_ma}선"
+                away_m = away_m or c[j] > m2[j] * (1 + p.ma_away)
+            if hit is not None:
                 vmax = np.nanmax(vr[b:j + 1])
                 if vmax >= p.vol_mult:
-                    out.append((b, j, hi / c[b] - 1, float(vmax)))
+                    out.append((b, j, hi / c[b] - 1, float(vmax), hit))
                 break                    # 돌파 하나에 첫 복귀 봉 한 번만
     return out
 
@@ -82,7 +93,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
     """마감된 1h봉(오름차순, UTC)에서 마지막 grace_bars+1봉 안의 신호 봉."""
     n = len(df)
     out, seen = [], set()
-    for b, j, rise, vmax in _find(df, params):
+    for b, j, rise, vmax, where in _find(df, params):
         # 240선을 두 번 뚫었다 내려와 같은 봉에서 복귀하면 한 줄만 — 먼저 뚫은 쪽으로 적는다(11-26 MOVE)
         if j < n - 1 - params.grace_bars or j in seen:
             continue
@@ -92,6 +103,7 @@ def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[Sig
             symbol=symbol, signal=NAME, bar_time=df.index[j], price=float(df["Close"].iloc[j]),
             detail={"label": LABEL, "interval": INTERVAL,
                     "break_time": df.index[b].isoformat(),
-                    "rise_after": float(rise), "vol_mult": vmax,
+                    "rise_after": float(rise), "vol_mult": vmax, "near": where,
+                    "ma_dist": float(df["Close"].iloc[j] / df["Close"].rolling(int(params.ma[1])).mean().iloc[j] - 1),
                     "vwap_dist": float(df["Close"].iloc[j] / vw.iloc[j] - 1)}))
     return out
