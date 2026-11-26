@@ -1339,7 +1339,9 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
         log(f"[binance] {source} · USDT {len(symbols)}종 스캔 시작 (워커 {workers}"
             + (" · 인트라바" if intrabar else "") + ")")
         frames = {}
-        if detectors:
+        # 4h 프레임은 4h 시그널 말고도 🟢상승초입(월 VWAP 밴드)이 쓴다 — 4h 시그널이 다 꺼져도
+        # 받아야 한다(11-26: 파동을 끈 10-21 뒤로 크립토 4h 시그널이 없어 상승초입이 통째로 건너뛰어졌다)
+        if detectors or (scfg.get("vwap_onset") or {}).get("enabled", False):
             frames = data_binance.fetch_all(s, symbols, source, limit=limit, log=log,
                                             workers=workers, include_live=intrabar)
         # 24hr 티커는 두 군데서 쓴다 — 크립토 모멘텀의 상위권 선정과, 모든
