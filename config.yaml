@@ -18,7 +18,7 @@ notify:
   leader_only_triggers: ["🎯눌림목타점", "🎯눌림목타점2", "🎯눌림목타점3", "🎯눌림목타점4", "🧲1h240선터치", "🧱1h장기선터치", "💔1h장기선이탈"]
   # 🔥 없이도 항상 싣는 칸 — 시그널 이름 또는 `시그널:stage`(그 변형만)
   # (10-01 급등봉 · 10-02 세력 이탈 · 10-04 파동의 일봉 단기·장기 추세선)
-  always_show: [big_bar, spike_bar, daily_dip, vwap_onset, whale_exit, choch_warn, "wave_setup:일봉ABC", "wave_setup:일봉장기선돌파",
+  always_show: [big_bar, spike_bar, daily_dip, vwap_onset, wave3_onset, whale_exit, choch_warn, "wave_setup:일봉ABC", "wave_setup:일봉장기선돌파",
                 "leader_break:🎯눌림목타점", "leader_break:🎯눌림목타점2", "leader_break:🎯눌림목타점3", "leader_break:🎯눌림목타점4", "leader_break:🧲1h240선터치",
                 "leader_break:🧱1h장기선터치", "leader_break:💔1h장기선이탈"]   # ⚡ • 🆕🎯 둘(10-11·10-12)도 🔥 없이
   # 추적 줄(↳)을 안 싣는 칸 — 시그널 이름 또는 `시그널:stage`. 추적 자체(상태)는 그대로라
@@ -194,6 +194,21 @@ signal:
     fire_ma1h20_min: 0.04
     fire_from_low_max: 0.25
 
+  wave3_onset:              # 3️⃣ 3파 초입 (1h봉, 크립토, 11-26~) — signals/wave3_onset.py 설명 참고
+    # 1h 120<240<480 역배열에서 종가 240선 상향 돌파 → 48h 안에 월 VWAP +5% 위로 갔다가 ±5% 안으로
+    # 복귀한 봉에서 알림. 돌파~복귀 사이 1h 거래량 5배+ 봉 하나 이상 · 돌파 전 저점(48봉) 안 깨짐.
+    # 백테스트(521종 08-13~11-26): 하루 ≈3.6건 · 7일 +20% 먼저 43%(아무 봉 27%) · +50% 13.4%(5.5%).
+    enabled: true
+    ma: [120, 240, 480]
+    window: 48
+    pre_low_bars: 48
+    vwap_anchor: M
+    vwap_away: 0.05
+    vwap_near: 0.05
+    vol_mult: 5.0
+    vol_ma: 24
+    grace_bars: 1
+    min_turnover_usd: 2000000
   uptrend_onset:            # 상승초입 (4h봉): 역배열 + 수퍼트렌드 상승 → 20선 이탈
     # **꺼 뒀다.** 파라미터는 그대로 남겨 두니 true로 바꾸면 그대로 돌아온다
     # (pump_early와 같은 취급이다).

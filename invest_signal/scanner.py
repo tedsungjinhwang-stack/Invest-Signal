@@ -20,6 +20,7 @@ import requests
 from . import config as cfg_mod
 from . import data_binance, data_community, data_etf, data_qp, indicators, notify
 from .signals import (SignalEvent, choch_warn, daily_dip, fire2, leader_break, spike_bar, vwap_onset,
+                      wave3_onset,
                       whale_exit)
 from . import sent_log
 from .state import AlertState
@@ -923,6 +924,55 @@ def _mark_fire2(cfg: dict, source: str, items: list, frames15: dict | None,
         f"파동 지금 현선갭 ≤ {params.wave_gap_now_max:+.1%})")
 
 
+def _scan_wave3(cfg: dict, source: str, symbols: list, ticker: dict | None,
+                workers: int, log=print) -> list:
+    """3️⃣ 3파 초입(1h) — 전 종목 1h를 받아(캐시로 이어 받기) 신호 봉을 찾는다."""
+    s = (cfg.get("signal") or {}).get("wave3_onset") or {}
+    if not s.get("enabled", False) or not symbols:
+        return []
+    d = wave3_onset.Params()
+    params = wave3_onset.Params(
+        ma=tuple(s.get("ma", d.ma)), window=int(s.get("window", d.window)),
+        pre_low_bars=int(s.get("pre_low_bars", d.pre_low_bars)),
+        vwap_anchor=str(s.get("vwap_anchor", d.vwap_anchor)),
+        vwap_away=float(s.get("vwap_away", d.vwap_away)),
+        vwap_near=float(s.get("vwap_near", d.vwap_near)),
+        vol_mult=float(s.get("vol_mult", d.vol_mult)), vol_ma=int(s.get("vol_ma", d.vol_ma)),
+        grace_bars=int(s.get("grace_bars", d.grace_bars)),
+        min_turnover_usd=float(s.get("min_turnover_usd", d.min_turnover_usd)))
+    tls = threading.local()
+
+    def grab(sym):
+        if getattr(tls, "s", None) is None:
+            tls.s = requests.Session()
+        try:
+            return sym, data_binance.klines(tls.s, sym, source, wave3_onset.INTERVAL,
+                                            limit=wave3_onset.KLINE_LIMIT)
+        except Exception:                       # noqa: BLE001
+            return sym, None
+
+    out, thin, got = [], 0, 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+        for sym, df in ex.map(grab, symbols):
+            if df is None or not len(df):
+                continue
+            got += 1
+            for ev in wave3_onset.detect(df, sym, params):
+                stat = (ticker or {}).get(sym) or {}
+                turn = stat.get("quote_volume")
+                if turn is not None and turn < params.min_turnover_usd:
+                    thin += 1
+                    continue
+                if turn is not None:
+                    ev.detail["turnover_24h"] = turn
+                if stat.get("change_pct") is not None:
+                    ev.detail["gain_24h"] = stat["change_pct"]
+                out.append(ev)
+    log(f"[binance] 3️⃣ 3파초입 {len(out)}건 (1h {got}종"
+        + (f" · 거래대금 하한 미달 {thin}건 제외" if thin else "") + ")")
+    return out
+
+
 def _scan_whale_exit(cfg: dict, source: str, frames15: dict, ticker: dict | None,
                      state=None, workers: int = 6, log=print) -> list:
     """🚨 세력 이탈 — 전 종목 현선갭(퍼프 15m ÷ 인덱스 15m). 선물 소스에서만.
@@ -1329,6 +1379,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
             s, source, symbols, cfg, state, log, frames, ticker,
             intrabar=intrabar, frames15=frames15)
         leader_events = (spike_events + vo_events + leader_events
+                         + _scan_wave3(cfg, source, symbols, ticker, workers, log)
                          + _scan_daily_dip(cfg, source, state, spike_events, ticker, workers, log))
         leader_ongoing = spike_ongoing + vo_ongoing + leader_ongoing
         if not detectors:           # 인트라바인데 4h 대상 시그널이 없을 때
