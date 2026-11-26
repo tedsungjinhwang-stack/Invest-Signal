@@ -179,8 +179,10 @@ signal:
     # · +50% 도달 12.6% (1.7%). SAHARA 11-24 10:45(69배) · BIGTIME 11-24 15:15(78배) 잡힘.
     burst_enabled: true
     burst_vol_mult: 10.0
-    burst_min_bar_usd: 500000
-    burst_min_turnover_usd: 5000000
+    # 11-26: 봉 $0.5M → $0.2M · 24h $5M → $2M (MOVE 11-25 17:15 거래량 11배·봉 $0.28M·24h $2.6M 잡게).
+    #   백테스트: 하루 9.0 → 14.9건 · +20% 먼저 37% → 29% · +50% 도달 14.3% → 9.3% (조금 묽어짐)
+    burst_min_bar_usd: 200000
+    burst_min_turnover_usd: 2000000
     burst_rearm_bars: 96
     grace_bars: 4               # 15m × 4 = 1시간(스캔 주기) 소급
     track_bars: 96              # 추적 상한 — 96봉 = 하루

@@ -390,7 +390,8 @@ def _fake_state(df, ok):
 
 
 def _bp(**kw):
-    base = dict(burst_enabled=True, burst_vol_mult=10.0, burst_min_bar_usd=10_000)
+    base = dict(burst_enabled=True, burst_vol_mult=10.0, burst_min_bar_usd=10_000,
+                burst_min_turnover_usd=0)
     base.update(kw)
     return vo.Params(**base)
 
@@ -420,3 +421,13 @@ def test_burst_rearm_blocks_repeat_within_a_day(monkeypatch):
     monkeypatch.setattr(vo, "_state", lambda a, b, p: _fake_state(df, True))
     assert vo.bursts(df, df, "XUSDT", _bp()) == []
     assert len(vo.bursts(df, df, "XUSDT", _bp(burst_rearm_bars=24))) == 1
+
+
+def test_burst_blocked_by_day_turnover_does_not_eat_rearm(monkeypatch):
+    # 250봉 폭증은 24h 대금 하한에 걸리고(그땐 대금이 얇다) 298봉 폭증은 넘는다 — 298봉이 나가야 한다
+    df = _burst_frame(spikes=(250, 298))
+    df.iloc[251:298, df.columns.get_loc("Volume")] = 3_000.0     # 그 사이 대금이 차오른다
+    monkeypatch.setattr(vo, "_state", lambda a, b, p: _fake_state(df, True))
+    df.iloc[298, df.columns.get_loc("Volume")] = 60_000.0          # 직전 평균(≈2.5k)의 20배 넘게
+    got = vo.bursts(df, df, "XUSDT", _bp(burst_min_turnover_usd=150_000))
+    assert [e.bar_time for e in got] == [df.index[298]]

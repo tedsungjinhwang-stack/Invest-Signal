@@ -313,7 +313,11 @@ def bursts(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
     v = df15["Volume"]
     mult = v / v.shift(1).rolling(96).mean()
     usd = (df15["High"] + df15["Low"] + df15["Close"]) / 3 * v
-    hit = (st.ok & (mult >= params.burst_vol_mult) & (usd >= params.burst_min_bar_usd)).to_numpy(bool)
+    # 24h 대금(96봉 합)도 여기서 건다 — 하한에 걸려 안 나간 봉이 rearm을 잡아먹으면 대금이 차오른
+    # 뒤의 폭증을 놓친다(MOVE 11-25: 15:15봉 $1.6M에 막혀 17:15 · 18:15를 놓쳤다). 스캐너가 티커로 한 번 더 본다.
+    day = usd.rolling(96, min_periods=1).sum()
+    hit = (st.ok & (mult >= params.burst_vol_mult) & (usd >= params.burst_min_bar_usd)
+           & (day >= params.burst_min_turnover_usd)).to_numpy(bool)
     new = _entries(hit, params.burst_rearm_bars)
     n = len(st)
     out = []
