@@ -57,3 +57,10 @@ def test_detect_only_recent_and_line_tags():
     ev[0].detail.update(turnover_24h=5e6, gain_24h=0.1)
     line = notify._event_line(ev[0], "https://x", "", "crypto")
     assert "240선돌파" in line and "월VWAP" in line and "💥1h거래량 6배" in line
+
+
+def test_two_breakouts_same_return_bar_one_line(monkeypatch):
+    df, b = _frame()
+    monkeypatch.setattr(w3, "_find", lambda d, p: [(b - 3, b + 6, 0.4, 6.0), (b, b + 6, 0.3, 6.0)])
+    ev = w3.detect(df.iloc[:b + 7], "XUSDT")
+    assert len(ev) == 1 and ev[0].detail["break_time"] == df.index[b - 3].isoformat()

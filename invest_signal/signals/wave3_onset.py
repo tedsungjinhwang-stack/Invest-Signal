@@ -81,10 +81,12 @@ def _find(df: pd.DataFrame, p: Params) -> list[tuple[int, int, float, float]]:
 def detect(df: pd.DataFrame, symbol: str, params: Params = Params()) -> list[SignalEvent]:
     """마감된 1h봉(오름차순, UTC)에서 마지막 grace_bars+1봉 안의 신호 봉."""
     n = len(df)
-    out = []
+    out, seen = [], set()
     for b, j, rise, vmax in _find(df, params):
-        if j < n - 1 - params.grace_bars:
+        # 240선을 두 번 뚫었다 내려와 같은 봉에서 복귀하면 한 줄만 — 먼저 뚫은 쪽으로 적는다(11-26 MOVE)
+        if j < n - 1 - params.grace_bars or j in seen:
             continue
+        seen.add(j)
         vw = anchored_vwap_bands(df, params.vwap_anchor, 1.0)[0]
         out.append(SignalEvent(
             symbol=symbol, signal=NAME, bar_time=df.index[j], price=float(df["Close"].iloc[j]),
