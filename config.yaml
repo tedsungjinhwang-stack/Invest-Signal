@@ -18,7 +18,7 @@ notify:
   leader_only_triggers: ["🎯눌림목타점", "🎯눌림목타점2", "🎯눌림목타점3", "🎯눌림목타점4", "🧲1h240선터치", "🧱1h장기선터치", "💔1h장기선이탈"]
   # 🔥 없이도 항상 싣는 칸 — 시그널 이름 또는 `시그널:stage`(그 변형만)
   # (10-01 급등봉 · 10-02 세력 이탈 · 10-04 파동의 일봉 단기·장기 추세선)
-  always_show: [big_bar, spike_bar, daily_dip, vwap_onset, wave3_onset, whale_exit, choch_warn, "wave_setup:일봉ABC", "wave_setup:일봉장기선돌파",
+  always_show: [big_bar, spike_bar, daily_dip, vwap_onset, wave3_onset, wave3_confirm, whale_exit, choch_warn, "wave_setup:일봉ABC", "wave_setup:일봉장기선돌파",
                 "leader_break:🎯눌림목타점", "leader_break:🎯눌림목타점2", "leader_break:🎯눌림목타점3", "leader_break:🎯눌림목타점4", "leader_break:🧲1h240선터치",
                 "leader_break:🧱1h장기선터치", "leader_break:💔1h장기선이탈"]   # ⚡ • 🆕🎯 둘(10-11·10-12)도 🔥 없이
   # 추적 줄(↳)을 안 싣는 칸 — 시그널 이름 또는 `시그널:stage`. 추적 자체(상태)는 그대로라
@@ -209,6 +209,9 @@ signal:
     vol_ma: 24
     grace_bars: 1
     min_turnover_usd: 2000000
+    # 3️⃣ 3파 확정(11-27) — 3파 초입이 나간 돌파가 1파 고점을 넘은 봉. 줄에 🎯2.618후보/⚠️1배형 · 목표가.
+    confirm_enabled: true
+    confirm_lookback: 336
   uptrend_onset:            # 상승초입 (4h봉): 역배열 + 수퍼트렌드 상승 → 20선 이탈
     # **꺼 뒀다.** 파라미터는 그대로 남겨 두니 true로 바꾸면 그대로 돌아온다
     # (pump_early와 같은 취급이다).

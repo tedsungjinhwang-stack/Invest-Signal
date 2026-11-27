@@ -37,12 +37,12 @@ def chart_url(symbol: str, kind: str, market: str = "US") -> str:
     return f"https://www.tradingview.com/symbols/{symbol}/"
 
 
-SIGNAL_EMOJI = {"하따봉": "🧨", "급등봉": "🚀", "일봉 눌림": "📅", "상승초입": "🟢", "3파초입": "3️⃣", "눌림목": "🔵", "펌핑초기": "🌱",
+SIGNAL_EMOJI = {"하따봉": "🧨", "급등봉": "🚀", "일봉 눌림": "📅", "상승초입": "🟢", "3파초입": "3️⃣", "3파확정": "3️⃣", "눌림목": "🔵", "펌핑초기": "🌱",
                 "파동": "🌊", "크립토 모멘텀 눌림목/이탈": "⚡", "세력 이탈": "🚨",
                 "하락 CHoCH": "🔻", "하락전환": "🔻"}
 # 🚀급등봉이 맨 위다 — 방금 터진 봉이라 시의성이 제일 짧다. 나머지는
 # 자리(셋업)라 한두 시간 늦게 읽어도 뜻이 안 변하지만 이건 변한다.
-SIGNAL_ORDER = ["하따봉", "급등봉", "일봉 눌림", "상승초입", "3파초입", "눌림목", "펌핑초기", "파동",
+SIGNAL_ORDER = ["하따봉", "급등봉", "일봉 눌림", "상승초입", "3파초입", "3파확정", "눌림목", "펌핑초기", "파동",
                 "크립토 모멘텀 눌림목/이탈", "세력 이탈", "하락 CHoCH", "하락전환"]
 PULLBACK_STAGES = ("타점", "대기")   # 그 외 stage는 시그널별로 따로 표기한다
 DISPLAY_GROUP = {"MSS": "눌림목", "풀백": "눌림목"}   # MSS는 눌림목 칸에 태그로 표시
@@ -171,6 +171,7 @@ WARN_TAG = "⚠️"
 ALWAYS_TITLES = {"big_bar": "🧨 <b>하따봉</b>", "spike_bar": "🚀 <b>급등봉</b>",
                  "daily_dip": "📅 <b>일봉 눌림</b>", "vwap_onset": "🟢 <b>상승초입</b>",
                  "wave3_onset": "3️⃣ <b>3파 초입</b>",
+                 "wave3_confirm": "3️⃣ <b>3파 확정</b>",
                  "whale_exit": "🚨 <b>세력 이탈</b>",
                  "choch_warn": "🔻 <b>하락 CHoCH</b>",
                  "wave_setup:일봉ABC": "🌊 <b>일봉 파동</b>",
@@ -308,6 +309,8 @@ def _band_tags(d: dict) -> list[str]:
     판정이 그 밴드 근처인지를 보므로 밴드 위인지 아래인지가 보여야 한다.
     """
     tags = []
+    if d.get("grade"):
+        tags.append(d["grade"])         # 🎯2.618후보 · ⚠️1배형(11-27)
     if d.get("burst_vol_mult") is not None:
         # 💥 상승초입 자리에서 15m 거래량 폭증(11-25~) — 몇 배였는지와 그 봉 대금
         tags.append(f"💥15m거래량 {d['burst_vol_mult']:.0f}배"
@@ -596,14 +599,40 @@ def _event_line(e, url: str, name: str, kind: str) -> str:
             tags.append(tv)
     if e.signal == "wave3_onset":
         # 3️⃣ 3파 초입 — 언제 240선을 뚫었는지 · 그 뒤 얼마나 올랐다 내려왔는지 · 월 VWAP 거리 · 거래량
+        if d.get("grade"):
+            tags.append(d["grade"])     # 🎯2.618후보 · ⚠️1배형(11-27)
         if d.get("break_time"):
             tags.append(f"🕒240선돌파 {_kst(pd.Timestamp(d['break_time']))}")
         if d.get("rise_after") is not None:
             tags.append(f"돌파후고점 {_pct(d['rise_after'])}")
+        if d.get("retrace") is not None:
+            tags.append(f"되돌림 {d['retrace'] * 100:.0f}%")
+        if d.get("ma480_dist") is not None:
+            tags.append(f"480선 {_pct(d['ma480_dist'])}")
         if d.get("vwap_dist") is not None:
             tags.append(f"월VWAP {_pct(d['vwap_dist'])}")
         if d.get("vol_mult") is not None:
             tags.append(f"💥1h거래량 {d['vol_mult']:.0f}배")
+        day = _daily_gain(d)
+        if day is not None:
+            tags.append(f"24h {_pct(day)}")
+        tv = _turnover_tag(d)
+        if tv:
+            tags.append(tv)
+    if e.signal == "wave3_confirm":
+        # 3️⃣ 3파 확정(11-27) — 1파 고점 돌파. 등급 · 1파 크기 · 2파 되돌림 · 2파 저점 위치 · 목표가(1파 길이 배수)
+        if d.get("grade"):
+            tags.append(d["grade"])
+        if d.get("break_time"):
+            tags.append(f"🕒240선돌파 {_kst(pd.Timestamp(d['break_time']))}")
+        tags.append(f"1파 {_pct(d['wave1'])}")
+        tags.append(f"2파 되돌림 {d['retrace'] * 100:.0f}%")
+        loc = f"2파저점 {_fmt_price(d['w2_low'])}(240선 {_pct(d['w2_vs_240'])}"
+        if d.get("w2_vs_vwap") is not None:
+            loc += f" · 월VWAP {_pct(d['w2_vs_vwap'])}"
+        tags.append(loc + ")")
+        t1, t2, t3 = d["targets"]
+        tags.append(f"목표 1배 {_fmt_price(t1)} · 1.618배 {_fmt_price(t2)} · 2.618배 {_fmt_price(t3)}")
         day = _daily_gain(d)
         if day is not None:
             tags.append(f"24h {_pct(day)}")

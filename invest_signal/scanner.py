@@ -939,7 +939,9 @@ def _scan_wave3(cfg: dict, source: str, symbols: list, ticker: dict | None,
         vwap_near=float(s.get("vwap_near", d.vwap_near)),
         vol_mult=float(s.get("vol_mult", d.vol_mult)), vol_ma=int(s.get("vol_ma", d.vol_ma)),
         grace_bars=int(s.get("grace_bars", d.grace_bars)),
-        min_turnover_usd=float(s.get("min_turnover_usd", d.min_turnover_usd)))
+        min_turnover_usd=float(s.get("min_turnover_usd", d.min_turnover_usd)),
+        confirm_enabled=bool(s.get("confirm_enabled", d.confirm_enabled)),
+        confirm_lookback=int(s.get("confirm_lookback", d.confirm_lookback)))
     tls = threading.local()
 
     def grab(sym):
@@ -957,7 +959,7 @@ def _scan_wave3(cfg: dict, source: str, symbols: list, ticker: dict | None,
             if df is None or not len(df):
                 continue
             got += 1
-            for ev in wave3_onset.detect(df, sym, params):
+            for ev in wave3_onset.detect(df, sym, params) + wave3_onset.confirmations(df, sym, params):
                 stat = (ticker or {}).get(sym) or {}
                 turn = stat.get("quote_volume")
                 if turn is not None and turn < params.min_turnover_usd:
@@ -968,7 +970,8 @@ def _scan_wave3(cfg: dict, source: str, symbols: list, ticker: dict | None,
                 if stat.get("change_pct") is not None:
                     ev.detail["gain_24h"] = stat["change_pct"]
                 out.append(ev)
-    log(f"[binance] 3️⃣ 3파초입 {len(out)}건 (1h {got}종"
+    nconf = sum(e.signal == wave3_onset.CONFIRM_NAME for e in out)
+    log(f"[binance] 3️⃣ 3파초입 {len(out) - nconf}건 · 3파확정 {nconf}건 (1h {got}종"
         + (f" · 거래대금 하한 미달 {thin}건 제외" if thin else "") + ")")
     return out
 

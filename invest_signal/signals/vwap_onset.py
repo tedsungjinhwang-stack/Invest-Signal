@@ -292,12 +292,37 @@ def detect(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
         if not new[t]:
             continue
         row = st.iloc[t]
+        d = _detail(row, params)
+        d["grade"] = grade(df15, t)
         out.append(SignalEvent(symbol=symbol, signal=NAME, bar_time=st.index[t],
-                               price=float(row.close), detail=_detail(row, params)))
+                               price=float(row.close), detail=d))
     return out
 
 
 BURST_STAGE = "거래량폭증"
+GOOD = "🎯2.618후보"
+WEAK = "⚠️1배형"
+
+
+def grade(df15: pd.DataFrame, t: int) -> str | None:
+    """상승초입 등급(11-27 · 퍼프 1,344건 학습/검증, 손절=15m 장기 수트선 1R) —
+    🎯 최근 4h(16봉) 안 15m 거래량 7배+ · 24h 대금이 7일 평균의 1.32배+ (2.618R+ 학습 26% → 검증 28%, 평균 9%/17%)
+    ⚠️ 이 봉 거래량 1.2배 미만 · 직전 24h 고저폭 7% 미만 (1R 미만 87% → 71%)."""
+    if t < 96 + 672 or t >= len(df15):
+        return None
+    v = df15["Volume"].to_numpy(float)
+    hi, lo = df15["High"].to_numpy(float), df15["Low"].to_numpy(float)
+    usd = ((df15["High"] + df15["Low"] + df15["Close"]) / 3 * df15["Volume"]).to_numpy(float)
+    mult = v / pd.Series(v).shift(1).rolling(96).mean().to_numpy()
+    day = pd.Series(usd).rolling(96).sum().to_numpy()
+    v16 = np.nanmax(mult[t - 15:t + 1])
+    vs7 = day[t] / np.nanmean(day[t - 672:t])
+    if v16 >= 7.0 and vs7 >= 1.32:
+        return GOOD
+    base = np.nanmax(hi[t - 96:t]) / np.nanmin(lo[t - 96:t]) - 1
+    if mult[t] < 1.2 and base < 0.07:
+        return WEAK
+    return None
 
 
 def bursts(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
@@ -327,6 +352,7 @@ def bursts(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
         row = st.iloc[t]
         d = _detail(row, params)
         d.update(stage=BURST_STAGE, burst_vol_mult=float(mult.iloc[t]), burst_bar_usd=float(usd.iloc[t]))
+        d["grade"] = grade(df15, t)
         out.append(SignalEvent(symbol=symbol, signal=NAME, bar_time=st.index[t],
                                price=float(row.close), detail=d))
     return out

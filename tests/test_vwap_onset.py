@@ -431,3 +431,17 @@ def test_burst_blocked_by_day_turnover_does_not_eat_rearm(monkeypatch):
     df.iloc[298, df.columns.get_loc("Volume")] = 60_000.0          # 직전 평균(≈2.5k)의 20배 넘게
     got = vo.bursts(df, df, "XUSDT", _bp(burst_min_turnover_usd=150_000))
     assert [e.bar_time for e in got] == [df.index[298]]
+
+
+def test_onset_grade_good_and_weak():
+    n = 1000
+    idx = pd.date_range("2026-11-01", periods=n, freq="15min", tz="UTC")
+    c = np.full(n, 100.0)
+    v = np.full(n, 1000.0)
+    flat = pd.DataFrame({"Open": c, "High": c * 1.001, "Low": c * 0.999, "Close": c, "Volume": v}, index=idx)
+    assert vo.grade(flat, n - 1) == vo.WEAK          # 거래량 그대로 · 24h 고저폭 0.2%
+    hot = flat.copy()
+    hot.iloc[-96:, hot.columns.get_loc("Volume")] = 3000.0   # 24h 대금 ↑(7일 평균의 1.32배+)
+    hot.iloc[-3, hot.columns.get_loc("Volume")] = 40000.0    # 최근 4h 안 거래량 7배+
+    assert vo.grade(hot, n - 1) == vo.GOOD
+    assert vo.grade(flat, 100) is None                # 이력 부족
