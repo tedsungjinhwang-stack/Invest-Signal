@@ -448,6 +448,12 @@ def _quiet_first(e):
     return 0 if e.detail.get("quiet") else 1
 
 
+def _grade_first(e) -> int:
+    """🎯2.618후보 줄을 칸 맨 위로(11-27 요청) — 상승초입·3파 초입·3파 확정. ⚠️1배형은 맨 아래."""
+    g = e.detail.get("grade")
+    return 0 if g and g.startswith("🎯") else (2 if g and g.startswith("⚠️") else 1)
+
+
 def _below960_first(e) -> int:
     """🟢상승초입 줄 중 종가가 15m 960선 아래(📉)인 줄을 칸 맨 위로(11-27 요청)."""
     d = e.detail.get("ma960_dist")
@@ -457,14 +463,14 @@ def _below960_first(e) -> int:
 def _new_order(e):
     """신규 줄 — 변형·🍃로 묶고, ⚡는 단기선 마크 먼저·거래대금 순,
     나머지는 24h 수익률 순."""
-    return (_variant(e), _below960_first(e), _fire_first(e), *_abc_first(e), *_spike_desc(e), _leader_fast_first(e),
+    return (_variant(e), _grade_first(e), _below960_first(e), _fire_first(e), *_abc_first(e), *_spike_desc(e), _leader_fast_first(e),
             *_turnover_desc(e), _quiet_first(e), *_by_gain_desc(e), e.symbol)
 
 
 def _hold_order(e):
     """추적 줄 — 신규 줄과 같은 축(⚡는 단기선 마크 먼저·거래대금 순),
     동률이면 최신 발생 순."""
-    return (_variant(e), _below960_first(e), _fire_first(e), *_abc_first(e), *_spike_desc(e), _leader_fast_first(e),
+    return (_variant(e), _grade_first(e), _below960_first(e), _fire_first(e), *_abc_first(e), *_spike_desc(e), _leader_fast_first(e),
             *_turnover_desc(e), _quiet_first(e), *_by_gain_desc(e),
             -e.bar_time.timestamp())
 

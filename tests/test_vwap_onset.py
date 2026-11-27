@@ -472,3 +472,12 @@ def test_burst_grade_b_rule():
     assert vo.burst_grade(df, n - 1, -0.01) is None          # 월상단에 너무 붙음
     df.iloc[-96:, df.columns.get_loc("Volume")] = 1100.0      # 대금 급증 아님
     assert vo.burst_grade(df, n - 1, -0.10) is None
+
+
+def test_good_grade_sorts_first_then_below960():
+    from invest_signal.signals import SignalEvent
+    t = pd.Timestamp("2026-11-27", tz="UTC")
+    mk = lambda s, dist, g: SignalEvent(symbol=s, signal="vwap_onset", bar_time=t, price=1.0,
+                                        detail={"label": "상승초입", "ma960_dist": dist, "grade": g})
+    evs = [mk("AUSDT", -0.02, None), mk("BUSDT", 0.03, vo.GOOD), mk("CUSDT", 0.01, vo.WEAK), mk("DUSDT", 0.02, None)]
+    assert [e.symbol for e in sorted(evs, key=notify._new_order)] == ["BUSDT", "AUSDT", "DUSDT", "CUSDT"]
