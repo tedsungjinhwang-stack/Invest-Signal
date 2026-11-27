@@ -1234,7 +1234,7 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
             + (f"종가가 {params.band_anchor} 상단 ±{params.near_pct:.0%}"
                if params.near_enabled or params.bull_enabled
                else (f"{params.band_anchor} 상단 > {params.upper_above_ma}선" if params.upper_above_ma
-                     else "960선 아래는 📉표시"))
+                     else "월상단 > 960선 조건 끔"))
               + (f" · 24h {params.min_ret_24h:+.0%} 이상"
                  if params.min_ret_24h is not None else "") + ")")
     return events, ongoing

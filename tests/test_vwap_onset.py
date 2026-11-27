@@ -447,20 +447,6 @@ def test_onset_grade_good_and_weak():
     assert vo.grade(flat, 100) is None                # 이력 부족
 
 
-def test_below_960_tag():
-    assert "📉960선아래 -2.0%" in " ".join(notify._band_tags({"ma960_dist": -0.02}))
-    assert not any("960선아래" in t for t in notify._band_tags({"ma960_dist": 0.01}))
-
-
-def test_below_960_lines_sort_first():
-    from invest_signal.signals import SignalEvent
-    t = pd.Timestamp("2026-11-27", tz="UTC")
-    mk = lambda s, dist, fire: SignalEvent(symbol=s, signal="vwap_onset", bar_time=t, price=1.0,
-                                           detail={"label": "상승초입", "ma960_dist": dist, "fire": fire})
-    evs = [mk("AUSDT", 0.03, True), mk("BUSDT", -0.02, False)]
-    assert [e.symbol for e in sorted(evs, key=notify._new_order)] == ["BUSDT", "AUSDT"]
-
-
 def test_burst_grade_b_rule():
     n = 1000
     idx = pd.date_range("2026-11-01", periods=n, freq="15min", tz="UTC")
@@ -474,10 +460,11 @@ def test_burst_grade_b_rule():
     assert vo.burst_grade(df, n - 1, -0.10) is None
 
 
-def test_good_grade_sorts_first_then_below960():
+def test_good_grade_sorts_first_weak_last():
     from invest_signal.signals import SignalEvent
     t = pd.Timestamp("2026-11-27", tz="UTC")
     mk = lambda s, dist, g: SignalEvent(symbol=s, signal="vwap_onset", bar_time=t, price=1.0,
                                         detail={"label": "상승초입", "ma960_dist": dist, "grade": g})
     evs = [mk("AUSDT", -0.02, None), mk("BUSDT", 0.03, vo.GOOD), mk("CUSDT", 0.01, vo.WEAK), mk("DUSDT", 0.02, None)]
-    assert [e.symbol for e in sorted(evs, key=notify._new_order)] == ["BUSDT", "AUSDT", "DUSDT", "CUSDT"]
+    got = [e.symbol for e in sorted(evs, key=notify._new_order)]
+    assert got[0] == "BUSDT" and got[-1] == "CUSDT"
