@@ -445,3 +445,8 @@ def test_onset_grade_good_and_weak():
     hot.iloc[-3, hot.columns.get_loc("Volume")] = 40000.0    # 최근 4h 안 거래량 7배+
     assert vo.grade(hot, n - 1) == vo.GOOD
     assert vo.grade(flat, 100) is None                # 이력 부족
+
+
+def test_below_960_tag():
+    assert "📉960선아래 -2.0%" in " ".join(notify._band_tags({"ma960_dist": -0.02}))
+    assert not any("960선아래" in t for t in notify._band_tags({"ma960_dist": 0.01}))

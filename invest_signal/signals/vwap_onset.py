@@ -223,7 +223,8 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
     low7 = df4h["Close"] / df4h["Low"].rolling(42).min() - 1
     low7 = pd.Series(low7.to_numpy(), index=df4h.index + pd.Timedelta(hours=4))
     f7l = low7.reindex(df15.index + pd.Timedelta(minutes=15), method="ffill").to_numpy()
-    return pd.DataFrame({"close": c, "bear": bear, "bull": bull,
+    ma960 = c.rolling(960).mean()      # 표시용(11-27) — 종가가 15m 960선(=1h 240선) 아래인지
+    return pd.DataFrame({"close": c, "ma960": ma960, "bear": bear, "bull": bull,
                          "bear_known": bear_known, "upper": band.upper,
                          "vwap": band.vwap, "dist": dist,
                          "ret_24h": d1, "ret_7d": d7, "rest": rest,
@@ -242,6 +243,9 @@ def _detail(row, params: Params) -> dict:
         d["ret_24h"] = float(row.ret_24h)   # 티커 값(gain_24h)이 있으면 그게 우선
     if pd.notna(row.ret_7d):
         d["ret_7d"] = float(row.ret_7d)
+    m960 = getattr(row, "ma960", None)
+    if m960 is not None and pd.notna(m960) and m960 > 0:
+        d["ma960_dist"] = float(row.close / m960 - 1)
     f = fire(row, params)
     if f is not None:
         d["fire"] = f
