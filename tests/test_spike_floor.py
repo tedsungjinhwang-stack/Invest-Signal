@@ -35,3 +35,10 @@ def test_spike_passes_at_5m_but_big_bar_needs_20m():
 def test_track_floor_defaults_to_spike_floor():
     p = scanner._spike_params(_cfg())
     assert p.min_turnover_usd == 5_000_000 and p.track_min_turnover_usd is None
+
+
+def test_board_only_message_has_title_once():
+    from invest_signal import notify
+    board = [dict(rank=1, symbol="MOVEUSDT", price=0.0055, gain_24h=0.23)]
+    msg = notify.format_events([], [], {}, crypto_board=board, title="📈 <b>24h 상승률 TOP</b>")
+    assert msg.count("24h 상승률 TOP") == 1 and "MOVE" in msg and "크립토 모멘텀" not in msg

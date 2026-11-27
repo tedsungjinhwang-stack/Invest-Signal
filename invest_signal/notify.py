@@ -909,6 +909,13 @@ def format_events(events_crypto: list, events_etf: list,
         return DISPLAY_GROUP.get(label, label)
 
     present = {label_of(e) for _, new, hold, _ in markets for e in list(new) + list(hold)}
+    if crypto_board and not present:
+        # 순위표만 나가는 메시지(board_always) — 머리가 이미 '📈 24h 상승률 TOP'이라 ⚡칸 머리·순위표
+        # 머리를 또 달면 같은 제목이 두 번 찍힌다(11-27). 순위만 바로 잇는다.
+        lines.append("")
+        lines.extend(_board_lines(crypto_board)[1:] if title and "상승률 TOP" in title
+                     else _board_lines(crypto_board))
+        crypto_board = ()
     if crypto_board:            # 순위표만 있고 이벤트가 없어도 칸은 만든다
         present.add(LEADER_LABEL)
     ordered = [k for k in SIGNAL_ORDER if k in present] + \
