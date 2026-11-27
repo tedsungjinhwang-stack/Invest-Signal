@@ -459,3 +459,16 @@ def test_below_960_lines_sort_first():
                                            detail={"label": "상승초입", "ma960_dist": dist, "fire": fire})
     evs = [mk("AUSDT", 0.03, True), mk("BUSDT", -0.02, False)]
     assert [e.symbol for e in sorted(evs, key=notify._new_order)] == ["BUSDT", "AUSDT"]
+
+
+def test_burst_grade_b_rule():
+    n = 1000
+    idx = pd.date_range("2026-11-01", periods=n, freq="15min", tz="UTC")
+    c = np.full(n, 100.0)
+    v = np.full(n, 1000.0)
+    df = pd.DataFrame({"Open": c, "High": c * 1.05, "Low": c * 0.95, "Close": c, "Volume": v}, index=idx)
+    df.iloc[-96:, df.columns.get_loc("Volume")] = 2000.0      # 24h 대금 = 7일 평균의 ~2배
+    assert vo.burst_grade(df, n - 1, -0.10) == vo.GOOD
+    assert vo.burst_grade(df, n - 1, -0.01) is None          # 월상단에 너무 붙음
+    df.iloc[-96:, df.columns.get_loc("Volume")] = 1100.0      # 대금 급증 아님
+    assert vo.burst_grade(df, n - 1, -0.10) is None

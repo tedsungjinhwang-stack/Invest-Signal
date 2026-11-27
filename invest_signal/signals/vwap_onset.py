@@ -308,6 +308,21 @@ GOOD = "🎯2.618후보"
 WEAK = "⚠️1배형"
 
 
+def burst_grade(df15: pd.DataFrame, t: int, upper_dist: float) -> str | None:
+    """💥거래량폭증 등급(11-27 · 💥 336건 학습/검증, 무브·사하라·빅타임 통과) —
+    🎯 24h 대금이 7일 평균의 1.63배+ · 종가가 월상단보다 3%+ 아래(위로 여유) — 3일 +20% 먼저 33%→52%
+    (기준 22%/34%) · 2.618R+ 41%/48%(21%/25%). ⚠️는 상승초입과 같은 규칙(grade)."""
+    if t < 96 + 672 or t >= len(df15):
+        return None
+    usd = ((df15["High"] + df15["Low"] + df15["Close"]) / 3 * df15["Volume"]).to_numpy(float)
+    day = pd.Series(usd).rolling(96).sum().to_numpy()
+    vs7 = day[t] / np.nanmean(day[t - 672:t])
+    if vs7 >= 1.63 and upper_dist <= -0.03:
+        return GOOD
+    g = grade(df15, t)
+    return g if g == WEAK else None
+
+
 def grade(df15: pd.DataFrame, t: int) -> str | None:
     """상승초입 등급(11-27 · 퍼프 1,344건 학습/검증, 손절=15m 장기 수트선 1R) —
     🎯 최근 4h(16봉) 안 15m 거래량 7배+ · 24h 대금이 7일 평균의 1.32배+ (2.618R+ 학습 26% → 검증 28%, 평균 9%/17%)
@@ -356,7 +371,7 @@ def bursts(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
         row = st.iloc[t]
         d = _detail(row, params)
         d.update(stage=BURST_STAGE, burst_vol_mult=float(mult.iloc[t]), burst_bar_usd=float(usd.iloc[t]))
-        d["grade"] = grade(df15, t)
+        d["grade"] = burst_grade(df15, t, float(row.dist))
         out.append(SignalEvent(symbol=symbol, signal=NAME, bar_time=st.index[t],
                                price=float(row.close), detail=d))
     return out
