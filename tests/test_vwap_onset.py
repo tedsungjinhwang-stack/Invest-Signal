@@ -450,3 +450,12 @@ def test_onset_grade_good_and_weak():
 def test_below_960_tag():
     assert "📉960선아래 -2.0%" in " ".join(notify._band_tags({"ma960_dist": -0.02}))
     assert not any("960선아래" in t for t in notify._band_tags({"ma960_dist": 0.01}))
+
+
+def test_below_960_lines_sort_first():
+    from invest_signal.signals import SignalEvent
+    t = pd.Timestamp("2026-11-27", tz="UTC")
+    mk = lambda s, dist, fire: SignalEvent(symbol=s, signal="vwap_onset", bar_time=t, price=1.0,
+                                           detail={"label": "상승초입", "ma960_dist": dist, "fire": fire})
+    evs = [mk("AUSDT", 0.03, True), mk("BUSDT", -0.02, False)]
+    assert [e.symbol for e in sorted(evs, key=notify._new_order)] == ["BUSDT", "AUSDT"]
