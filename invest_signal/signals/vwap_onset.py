@@ -94,6 +94,10 @@ class Params:
     burst_min_bar_usd: float = 500_000
     burst_min_turnover_usd: float = 5_000_000
     burst_rearm_bars: int = 96
+    # 💥가 든 1h봉의 1h 장기 수트(30×6)가 상승이어야 한다(11-28) — 판정 단계에서 거른다(걸린 봉은
+    # rearm을 안 쓴다). 💥 21일: +20% 먼저 27%→33% · 2.618R+ 22%→29% · 하루 16→10건. 빅타임은
+    # 15:15 첫 폭증(장기선 아래) 대신 23:00 돌파봉에서 잡힌다.
+    burst_need_1h_st: bool = False
 
 
 def _band_on_15m(df15: pd.DataFrame, df4h: pd.DataFrame, anchor: str,
@@ -344,6 +348,18 @@ def grade(df15: pd.DataFrame, t: int) -> str | None:
     return None
 
 
+def _st1h_up(df15: pd.DataFrame) -> np.ndarray:
+    """15m 봉마다 '그 봉이 든 1h봉의 1h 장기 수트(30×6)가 상승인가'. 15m를 1h로 묶어 낸다
+    (스캔은 정시+5분이라 소급 봉들의 1h봉은 이미 마감돼 있다)."""
+    g = df15.resample("1h")
+    h1 = g.agg({"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"})
+    h1 = h1[g["Close"].count() == 4].dropna()
+    if len(h1) < 32:
+        return np.zeros(len(df15), bool)
+    d = supertrend_full(h1, 30, 6.0)["dir"]
+    return (d.reindex(df15.index.floor("1h")).to_numpy(float) > 0)
+
+
 def bursts(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
            params: Params = Params()) -> list[SignalEvent]:
     """💥 상승초입 자리에서 15m 거래량이 터진 봉 — 마지막 grace_bars+1봉 중, 직전 burst_rearm_bars봉에
@@ -362,6 +378,8 @@ def bursts(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
     day = usd.rolling(96, min_periods=1).sum()
     hit = (st.ok & (mult >= params.burst_vol_mult) & (usd >= params.burst_min_bar_usd)
            & (day >= params.burst_min_turnover_usd)).to_numpy(bool)
+    if params.burst_need_1h_st:
+        hit = hit & _st1h_up(df15)
     new = _entries(hit, params.burst_rearm_bars)
     n = len(st)
     out = []

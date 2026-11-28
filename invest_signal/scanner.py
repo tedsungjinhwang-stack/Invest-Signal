@@ -1174,6 +1174,7 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         burst_min_bar_usd=float(s.get("burst_min_bar_usd", 500_000)),
         burst_min_turnover_usd=float(s.get("burst_min_turnover_usd", 5_000_000)),
         burst_rearm_bars=int(s.get("burst_rearm_bars", 96)),
+        burst_need_1h_st=bool(s.get("burst_need_1h_st", False)),
     )
     events, ongoing, thin, falling = [], [], 0, 0
     burst_n = 0

@@ -185,6 +185,8 @@ signal:
     burst_min_bar_usd: 200000
     burst_min_turnover_usd: 2000000
     burst_rearm_bars: 96
+    # 💥가 든 1h봉의 1h 장기 수트(30×6) 상승일 때만(11-28) — +20% 먼저 27→33% · 2.618R+ 22→29% · 하루 16→10건
+    burst_need_1h_st: true
     grace_bars: 4               # 15m × 4 = 1시간(스캔 주기) 소급
     track_bars: 96              # 추적 상한 — 96봉 = 하루
     # 🔥 떡상 조짐 표시(09-30) — 알림 순간 1h 단위로 막 점화(1h MA20 +4% 이상)됐는데

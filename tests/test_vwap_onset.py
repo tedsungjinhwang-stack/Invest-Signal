@@ -468,3 +468,21 @@ def test_good_grade_sorts_first_weak_last():
     evs = [mk("AUSDT", -0.02, None), mk("BUSDT", 0.03, vo.GOOD), mk("CUSDT", 0.01, vo.WEAK), mk("DUSDT", 0.02, None)]
     got = [e.symbol for e in sorted(evs, key=notify._new_order)]
     assert got[0] == "BUSDT" and got[-1] == "CUSDT"
+
+
+def test_burst_needs_1h_long_st_up(monkeypatch):
+    df = _burst_frame(spikes=(298,))
+    monkeypatch.setattr(vo, "_state", lambda a, b, p: _fake_state(df, True))
+    monkeypatch.setattr(vo, "_st1h_up", lambda d: np.zeros(len(d), bool))
+    assert vo.bursts(df, df, "XUSDT", _bp(burst_need_1h_st=True)) == []
+    monkeypatch.setattr(vo, "_st1h_up", lambda d: np.ones(len(d), bool))
+    assert len(vo.bursts(df, df, "XUSDT", _bp(burst_need_1h_st=True))) == 1
+
+
+def test_blocked_burst_does_not_eat_rearm_for_1h_filter(monkeypatch):
+    df = _burst_frame(spikes=(250, 298))
+    monkeypatch.setattr(vo, "_state", lambda a, b, p: _fake_state(df, True))
+    up = np.zeros(len(df), bool); up[290:] = True          # 250봉 폭증 땐 1h 장기 수트 하락 → 298봉에서 나간다
+    monkeypatch.setattr(vo, "_st1h_up", lambda d: up)
+    got = vo.bursts(df, df, "XUSDT", _bp(burst_need_1h_st=True))
+    assert [e.bar_time for e in got] == [df.index[298]]
