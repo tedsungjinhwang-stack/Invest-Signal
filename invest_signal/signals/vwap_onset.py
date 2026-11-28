@@ -101,6 +101,8 @@ class Params:
     # ↩️ 💥 뒤 되돌림 알림(11-28) — 1파의 이만큼 처음 되돌린 봉에서(None이면 끔)
     burst_pullback: float | None = None
     burst_pullback_bars: int = 96
+    # 3️⃣ 💥 뒤 3파 확정(11-28) — 💥 뒤 1파 고점을 다시 넘는 15m봉. 🎯2.618형 / ⚠️1배형 판정
+    burst_confirm: bool = False
 
 
 def _band_on_15m(df15: pd.DataFrame, df4h: pd.DataFrame, anchor: str,
@@ -448,6 +450,74 @@ def pullbacks(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
                                            price=float(c[k]), detail=d))
                 break
             top = max(top, hi[k])
+    return out
+
+
+CONFIRM_STAGE = "💥3파확정"
+TYPE_BIG = "🎯2.618형"
+TYPE_ONE = "⚠️1배형"
+
+
+def wave_type(retrace: float, w2_hours: float) -> str | None:
+    """💥 뒤 3파 확정 시점 판정(11-28 · 💥 21일, 15m 파동) — 2파 되돌림 61.8%+ → 🎯2.618형
+    (2.618배+ 29~40%, 중앙 1.6~2.0배) · 되돌림 50% 미만 & 2파 2시간 미만 → ⚠️1배형(73%가 1.618배 미만,
+    중앙 0.75배). 무브 68%·빅타임 63% → 🎯, 사하라 45%·30분 → ⚠️."""
+    if retrace >= 0.618:
+        return TYPE_BIG
+    if retrace < 0.5 and w2_hours < 2:
+        return TYPE_ONE
+    return None
+
+
+def confirms(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
+             params: Params = Params()) -> list[SignalEvent]:
+    """3️⃣ 💥 뒤 3파 확정 — 1파 시작 = 💥 봉까지 24h 최저가, 1파 고점 = 💥 뒤 고점에서 1파의 23.6% 이상
+    밀린 그 고점, 2파 저점 = 1파 고점을 다시 넘기 전 최저가(그 전에 1파 시작을 깨면 무효). 1파 고점을 넘는
+    15m봉이 마지막 grace_bars+1봉 안이면 낸다. 목표가는 2파 저점 + 1파 길이 × 1·1.618·2.618."""
+    if not (params.burst_enabled and params.burst_confirm):
+        return []
+    got = _burst_bars(df15, df4h, params)
+    if got is None:
+        return []
+    _, new, _, _ = got
+    hi, lo, c = (df15[k].to_numpy(float) for k in ("High", "Low", "Close"))
+    n = len(df15)
+    out = []
+    for t in np.flatnonzero(new):
+        w0 = float(np.nanmin(lo[max(0, t - 96):t + 1]))
+        top, ti, w1i = hi[t], t, None
+        for k in range(t + 1, min(n, t + 192)):
+            if hi[k] > top:
+                top, ti = hi[k], k
+            if lo[k] <= w0:
+                break
+            if lo[k] <= top - 0.236 * (top - w0):
+                w1i = ti
+                break
+        if w1i is None:
+            continue
+        w1 = hi[w1i]
+        low, lowi, ov = np.inf, None, None
+        for k in range(w1i + 1, min(n, w1i + 672)):
+            if lo[k] <= w0:
+                break
+            if lo[k] < low:
+                low, lowi = lo[k], k
+            if hi[k] > w1:
+                ov = k
+                break
+        if ov is None or lowi is None or ov < n - 1 - params.grace_bars:
+            continue
+        leg = w1 - w0
+        retr = (w1 - low) / leg
+        w2h = (ov - w1i) / 4
+        d = {"label": LABEL, "interval": INTERVAL, "stage": CONFIRM_STAGE,
+             "burst_time": df15.index[t].isoformat(), "wave_start": w0, "wave_top": float(w1),
+             "w2_low": float(low), "retrace": float(retr), "w2_hours": float(w2h),
+             "wave1": float(w1 / w0 - 1), "wave_type": wave_type(retr, w2h),
+             "targets": [float(f"{low + k * leg:.4g}") for k in (1.0, 1.618, 2.618)]}
+        out.append(SignalEvent(symbol=symbol, signal=NAME, bar_time=df15.index[ov],
+                               price=float(c[ov]), detail=d))
     return out
 
 

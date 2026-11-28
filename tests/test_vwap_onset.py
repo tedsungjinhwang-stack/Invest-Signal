@@ -508,3 +508,33 @@ def test_pullback_alert_on_first_382_retrace(monkeypatch):
     line = " ".join(notify._band_tags(d))
     assert "↩️💥되돌림" in line and "무효" in line and "61.8%" in line
     assert vo.pullbacks(df.iloc[:294], df, "XUSDT", _bp(burst_pullback=None)) == []
+
+
+def test_wave_type_rules():
+    assert vo.wave_type(0.68, 6.5) == vo.TYPE_BIG          # 무브
+    assert vo.wave_type(0.63, 10.2) == vo.TYPE_BIG         # 빅타임
+    assert vo.wave_type(0.45, 0.5) == vo.TYPE_ONE          # 사하라
+    assert vo.wave_type(0.55, 1.0) is None
+    assert vo.wave_type(0.45, 5.0) is None
+
+
+def test_confirm_alert_after_burst(monkeypatch):
+    n = 320
+    idx = pd.date_range("2026-11-20", periods=n, freq="15min", tz="UTC")
+    c = np.full(n, 100.0)
+    v = np.full(n, 1000.0)
+    c[290] = 106.0; v[290] = 20000.0                     # 💥
+    c[291:293] = [110.0, 110.0]                          # 1파 고점 ≈ 110.1
+    c[293:300] = 103.5                                    # 2파 — 1파의 ~66% 되돌림
+    c[300:] = 112.0                                       # 1파 고점 돌파 → 3파 확정(300봉)
+    df = pd.DataFrame({"Open": c, "High": c * 1.001, "Low": c * 0.999, "Close": c, "Volume": v}, index=idx)
+    monkeypatch.setattr(vo, "_state", lambda a, b, p: _fake_state(df, True))
+    p = _bp(burst_confirm=True, grace_bars=4)
+    assert vo.confirms(df.iloc[:300], df, "XUSDT", p) == []
+    ev = vo.confirms(df.iloc[:301], df, "XUSDT", p)
+    assert len(ev) == 1 and ev[0].bar_time == idx[300]
+    d = ev[0].detail
+    assert d["stage"] == vo.CONFIRM_STAGE and d["wave_type"] == vo.TYPE_BIG and len(d["targets"]) == 3
+    line = " ".join(notify._band_tags(d))
+    assert "🎯2.618형" in line and "3️⃣3파확정" in line and "목표 1배" in line
+    assert vo.confirms(df.iloc[:301], df, "XUSDT", _bp(burst_confirm=False)) == []

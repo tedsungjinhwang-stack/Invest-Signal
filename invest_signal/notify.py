@@ -311,6 +311,16 @@ def _band_tags(d: dict) -> list[str]:
     tags = []
     if d.get("grade"):
         tags.append(d["grade"])         # 🎯2.618후보 · ⚠️1배형(11-27)
+    if d.get("stage") == "💥3파확정":
+        # 3️⃣ 💥 뒤 3파 확정(11-28) — 🎯2.618형 / ⚠️1배형 · 1파 · 2파 되돌림·기간 · 목표가 · 무효선(2파 저점)
+        if d.get("wave_type"):
+            tags.append(d["wave_type"])
+        tags.append("3️⃣3파확정" + (f"(💥 {_kst(pd.Timestamp(d['burst_time']))})" if d.get("burst_time") else ""))
+        tags.append(f"1파 {_fmt_price(d['wave_start'])}→{_fmt_price(d['wave_top'])}({_pct(d['wave1'])})")
+        tags.append(f"2파 되돌림 {d['retrace'] * 100:.0f}% · {d['w2_hours']:.1f}h")
+        t1, t2, t3 = d["targets"]
+        tags.append(f"목표 1배 {_fmt_price(t1)} · 1.618배 {_fmt_price(t2)} · 2.618배 {_fmt_price(t3)}")
+        tags.append(f"무효 {_fmt_price(d['w2_low'])} 이탈")
     if d.get("stage") == "💥되돌림":
         # ↩️ 💥 뒤 되돌림(11-28) — 지금 몇 % 되돌렸는지 · 1파 · 분할 진입 자리 · 무효선
         lv = d.get("levels") or {}
@@ -456,7 +466,7 @@ def _quiet_first(e):
 
 def _grade_first(e) -> int:
     """🎯2.618후보 줄을 칸 맨 위로(11-27 요청) — 상승초입·3파 초입·3파 확정. ⚠️1배형은 맨 아래."""
-    g = e.detail.get("grade")
+    g = e.detail.get("grade") or e.detail.get("wave_type")
     return 0 if g and g.startswith("🎯") else (2 if g and g.startswith("⚠️") else 1)
 
 
