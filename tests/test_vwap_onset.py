@@ -552,7 +552,8 @@ def test_prior_ext_1to1_done():
     lo[301:] = 105.5
     ext = vo.prior_ext(hi, lo, 300, 10.0)
     assert abs(ext - 1.0) < 1e-9 and vo._done_tag(ext) == vo.DONE_1TO1
-    assert vo._done_tag(vo.prior_ext(hi, lo, 300, 20.0)) == vo.DONE_1TO1  # 2배 — 1:1 넘김(TAG형)
+    assert vo._done_tag(vo.prior_ext(hi, lo, 300, 17.0)) == vo.DONE_1TO1  # 1.7배까지 완성
+    assert vo._done_tag(vo.prior_ext(hi, lo, 300, 20.0)) == vo.DONE_OVER  # 2배 — 숏도 금지(TAG형)
     assert vo._done_tag(vo.prior_ext(hi, lo, 300, 8.0)) is None            # 0.8배 — 아직 미완성
     lo2 = lo.copy(); lo2[300] = 99.0                                       # W0가 A 아래면 새 시작
     assert vo.prior_ext(hi, lo2, 300, 10.0) is None

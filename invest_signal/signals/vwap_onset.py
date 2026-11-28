@@ -427,7 +427,8 @@ def bursts(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
 PULLBACK_STAGE = "💥되돌림"
 PULLBACK_LEVELS = (0.382, 0.5, 0.618, 0.786)
 DONE_1TO1 = "✅파동완성"
-DONE_MIN = 0.9
+DONE_OVER = "✅파동완성·⛔숏금지"
+DONE_MIN, DONE_MAX = 0.9, 1.7
 
 
 def prior_ext(hi: np.ndarray, lo: np.ndarray, w0i: int, leg: float, lookback: int = 672) -> float | None:
@@ -452,7 +453,11 @@ def prior_ext(hi: np.ndarray, lo: np.ndarray, w0i: int, leg: float, lookback: in
 
 
 def _done_tag(ext: float | None) -> str | None:
-    return DONE_1TO1 if ext is not None and ext >= DONE_MIN else None
+    """0.9~1.7배 ✅파동완성 — 그 💥 되돌림 112건은 C파 시작 이탈 46%(전체 42%, 앞/뒤 달 45/46%).
+    1.7배 초과 ✅파동완성·⛔숏금지 — 95건 이탈 41%·1배+ 33%로 평범하다(새 큰 파동일 수 있어 숏도 말린다)."""
+    if ext is None or ext < DONE_MIN:
+        return None
+    return DONE_1TO1 if ext <= DONE_MAX else DONE_OVER
 
 
 def pullbacks(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
