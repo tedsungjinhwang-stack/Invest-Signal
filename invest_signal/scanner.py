@@ -1211,7 +1211,9 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         df4 = frames4h.get(sym)
         if df4 is None:
             continue
-        got = vwap_onset.detect(df15, df4, sym, params)
+        # 일반 진입(자리에 새로 들어온 봉, 24h $20M+)은 끌 수 있다(11-28 — 💥 흐름만 받기). 추적 줄도 같이 끈다.
+        entry_on = bool(s.get("entry_alert", True))
+        got = vwap_onset.detect(df15, df4, sym, params) if entry_on else []
         for ev in got:
             if stamp(ev):
                 events.append(ev)
@@ -1228,7 +1230,7 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
             if stamp(ev):
                 events.append(ev)
                 burst_n += 1
-        if not got:
+        if entry_on and not got:
             held = vwap_onset.tracking(df15, df4, sym, params)
             if held is not None and stamp(held):
                 ongoing.append(held)
