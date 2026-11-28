@@ -233,3 +233,24 @@ def test_trigger_labels_carry_short_description():
     e = _ev("PUSDT", "leader_break", triggers=["🎯눌림목타점4", "🧲1h240선터치"])
     line = [ln for ln in notify.format_events([e], [], {}).splitlines() if ">P<" in ln][0]
     assert "🆕🎯눌림목타점4(1h 월VWAP상단 돌파 후 VWAP 터치)·🧲1h240선터치" in line
+
+
+
+def test_board_only_on_the_hour_with_30min_scans(monkeypatch, tmp_path):
+    """11-28 — 30분 스캔: board_minute_before=30이면 :30 이후 실행에선 순위표만 나가는 메시지를 안 보낸다."""
+    import pandas as pd
+    cfg = {"notify": {"fire_only": True, "board_always": True, "board_minute_before": 30}}
+    monkeypatch.setattr(scanner.cfg_mod, "load", lambda p: cfg)
+    monkeypatch.setattr(scanner, "scan_crypto",
+                        lambda *a, **k: ([], [], [{"symbol": "ZUSDT", "rank": 1, "gain_24h": 0.5}]))
+    monkeypatch.setattr(scanner, "scan_yfinance", lambda *a, **k: ([], [], {}, {}))
+    monkeypatch.setattr(scanner, "_scan_community", lambda *a, **k: {})
+    sent = []
+    monkeypatch.setattr(notify, "send_telegram", lambda msg, log=print: sent.append(msg) or True)
+    real = pd.Timestamp.now
+    for minute, want in ((5, 1), (35, 0)):
+        sent.clear()
+        monkeypatch.setattr(pd.Timestamp, "now",
+                            classmethod(lambda cls, tz=None, m=minute: real(tz="UTC").replace(minute=m)))
+        scanner.run("x.yaml", str(tmp_path / f"s{minute}" / "alerts_state.json"), log=lambda *x: None)
+        assert len(sent) == want

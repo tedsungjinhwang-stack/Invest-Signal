@@ -1930,7 +1930,9 @@ def run(config_path: str, state_path: str, only: str | None = None,
         # 이유다. 유지 중 목록까지 딸려 나가면 조용한 스캔이 긴 알림으로
         # 바뀌므로, 여기서는 **커뮤니티 칸만** 따로 만들어 보낸다.
         # 24h 상승률 순위표는 새 시그널이 없어도 매번 보낸다(notify.board_always, 10-13 요청)
-        if crypto_board and ncfg.get("board_always", False):
+        # 30분 스캔(11-28~)에서는 순위표만 나가는 메시지는 정시 실행(:00~:29)에만 — 30분마다 오면 시끄럽다
+        board_now = pd.Timestamp.now(tz="UTC").minute < int(ncfg.get("board_minute_before", 60))
+        if crypto_board and ncfg.get("board_always", False) and board_now:
             msg = notify.format_events([], [], {}, crypto_board=crypto_board, community=community,
                                        title="📈 <b>24h 상승률 TOP</b>")
             if dry_run:

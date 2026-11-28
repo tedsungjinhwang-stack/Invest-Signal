@@ -1,4 +1,5 @@
-# 매시 1회 스캔 — 실행 시각의 UTC 시(hour)를 보고 모드를 스스로 고른다.
+# 30분마다 스캔(11-28~, 외부 크론 :02·:32) — 실행 시각의 UTC 시(hour)를 보고 모드를 스스로 고른다.
+# 마감 스캔은 4시간마다 정시 실행만(:30 이후 실행은 인트라바).
 # (수동 실행 트리거: 11-27 Decodo 프록시 교체 확인)
 #
 #   UTC 00/04/08/12/16/20시 (= KST 09/13/17/21/01/05) → 마감 스캔
@@ -103,8 +104,9 @@ jobs:
         run: |
           MODE="${MODE_IN:-auto}"
           HOUR=$((10#$(date -u +%H)))          # 10# — "08"을 8진수로 읽지 않게
+          MIN=$((10#$(date -u +%M)))            # 11-28 30분 스캔 — :30 이후 실행은 늘 인트라바
           if [ "$MODE" = "auto" ]; then
-            if [ $((HOUR % 4)) -eq 0 ]; then MODE=close; else MODE=intrabar; fi
+            if [ $((HOUR % 4)) -eq 0 ] && [ "$MIN" -lt 30 ]; then MODE=close; else MODE=intrabar; fi
           fi
           echo "UTC $(date -u '+%Y-%m-%d %H:%M') · 모드 $MODE"
           if [ "$MODE" = "close" ]; then
