@@ -514,8 +514,8 @@ def test_wave_type_rules():
     assert vo.wave_type(0.68, 6.5) == vo.TYPE_BIG          # 무브
     assert vo.wave_type(0.63, 10.2) == vo.TYPE_BIG         # 빅타임
     assert vo.wave_type(0.45, 0.5) == vo.TYPE_ONE          # 사하라
-    assert vo.wave_type(0.55, 1.0) is None
-    assert vo.wave_type(0.45, 5.0) is None
+    assert vo.wave_type(0.55, 1.0) == vo.TYPE_ONE
+    assert vo.wave_type(0.31, 4.0) == vo.TYPE_ONE         # BICO 11-28
 
 
 def test_confirm_alert_after_burst(monkeypatch):

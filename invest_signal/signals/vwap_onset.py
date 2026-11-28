@@ -458,15 +458,12 @@ TYPE_BIG = "🎯2.618형"
 TYPE_ONE = "⚠️1배형"
 
 
-def wave_type(retrace: float, w2_hours: float) -> str | None:
-    """💥 뒤 3파 확정 시점 판정(11-28 · 💥 21일, 15m 파동) — 2파 되돌림 61.8%+ → 🎯2.618형
-    (2.618배+ 29~40%, 중앙 1.6~2.0배) · 되돌림 50% 미만 & 2파 2시간 미만 → ⚠️1배형(73%가 1.618배 미만,
-    중앙 0.75배). 무브 68%·빅타임 63% → 🎯, 사하라 45%·30분 → ⚠️."""
-    if retrace >= 0.618:
-        return TYPE_BIG
-    if retrace < 0.5 and w2_hours < 2:
-        return TYPE_ONE
-    return None
+def wave_type(retrace: float, w2_hours: float) -> str:
+    """💥 뒤 3파 확정 시점 판정(11-28 · 💥 21일, 15m 파동) — 늘 둘 중 하나.
+    2파 되돌림 61.8%+ → 🎯2.618형(2.618배+ 29~40%, 중앙 1.6~2.0배)
+    그 아래 → ⚠️1배형(2.618배+ ≈10%, 1.618배 미만 ≈78%, 중앙 ≈0.8배 — 38.2% 미만·38.2~50·50~61.8% 모두 약함).
+    무브 68%·빅타임 63% → 🎯, 사하라 45%·BICO 31% → ⚠️. w2_hours는 줄 표기용(판정엔 안 쓴다)."""
+    return TYPE_BIG if retrace >= 0.618 else TYPE_ONE
 
 
 def confirms(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
