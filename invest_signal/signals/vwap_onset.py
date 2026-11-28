@@ -481,7 +481,7 @@ def pullbacks(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
             continue
         w0i = max(0, t - 96) + int(np.nanargmin(lo[max(0, t - 96):t + 1]))
         w0 = float(lo[w0i])
-        top = hi[t]
+        top = float(np.nanmax(hi[w0i:t + 1]))   # 💥 전에 이미 찍은 고점도 1파 고점이다(ACE 11-28 — 펌핑 뒤 음봉 💥)
         for k in range(t + 1, min(n, t + win + 1)):
             if lo[k] <= w0:
                 break
@@ -547,7 +547,8 @@ def confirms(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
     for t in np.flatnonzero(new):
         w0i = max(0, t - 96) + int(np.nanargmin(lo[max(0, t - 96):t + 1]))
         w0 = float(lo[w0i])
-        top, ti, w1i = hi[t], t, None
+        ti = w0i + int(np.nanargmax(hi[w0i:t + 1]))   # 💥 전에 찍은 고점 포함(ACE 11-28)
+        top, w1i = hi[ti], None
         for k in range(t + 1, min(n, t + 192)):
             if hi[k] > top:
                 top, ti = hi[k], k
