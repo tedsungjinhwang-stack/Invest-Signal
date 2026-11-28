@@ -511,12 +511,16 @@ def test_pullback_alert_on_first_382_retrace(monkeypatch):
 
 
 def test_wave_type_rules():
-    assert vo.wave_type(0.68, 6.5) == vo.TYPE_BIG          # 무브
-    assert vo.wave_type(0.63, 10.2) == vo.TYPE_BIG         # 빅타임
-    assert vo.wave_type(0.45, 0.5) == vo.TYPE_ONE          # 사하라
-    assert vo.wave_type(0.55, 1.0) == vo.TYPE_ONE
-    assert vo.wave_type(0.31, 4.0) == vo.TYPE_ONE         # BICO 11-28
-
+    # 3파 출발 거래량 ↑ + 가점 2개(1h 장기선 근처 · 되돌림 50%+) → 🎯
+    assert vo.wave_type(1.3, None, 0.03, 0.6, 20e6) == vo.TYPE_BIG
+    assert vo.wave_type(1.3, -0.001, 0.10, 0.3, 3e6) is None          # 가점 1개(대금)뿐
+    assert vo.wave_type(1.3, 0.0002, 0.10, 0.3, 3e6) == vo.TYPE_BIG    # 대금 + 현선갭
+    # 거래량 ↓ + 현선갭 − → ⚠️
+    assert vo.wave_type(0.8, -0.0005, 0.03, 0.7, 3e6) == vo.TYPE_ONE
+    assert vo.wave_type(0.8, 0.0005, 0.03, 0.7, 3e6) is None
+    assert vo.wave_type(0.8, None, 0.03, 0.7, 3e6) is None             # 현선갭 모르면 ⚠️ 안 매김
+    assert vo.wave_type(float("nan"), None, 0.0, 0.5, 1e6) is None
+    assert vo.wave_type(0.8, -0.0005, 0.2, 0.1, 50e6, 179.0) is None    # 포털 11-27 — 폭증 50배+면 ⚠️ 안 매김
 
 def test_confirm_alert_after_burst(monkeypatch):
     n = 320
@@ -534,7 +538,8 @@ def test_confirm_alert_after_burst(monkeypatch):
     ev = vo.confirms(df.iloc[:301], df, "XUSDT", p)
     assert len(ev) == 1 and ev[0].bar_time == idx[300]
     d = ev[0].detail
-    assert d["stage"] == vo.CONFIRM_STAGE and d["wave_type"] == vo.TYPE_BIG and len(d["targets"]) == 3
+    assert d["stage"] == vo.CONFIRM_STAGE and "wave_type" in d and "v3_v2" in d and len(d["targets"]) == 3
+    d["wave_type"] = vo.TYPE_BIG
     line = " ".join(notify._band_tags(d))
-    assert "🎯2.618형" in line and "3️⃣3파확정" in line and "목표 1배" in line
+    assert "🎯2.618후보" in line and "3️⃣3파확정" in line and "목표 1배" in line
     assert vo.confirms(df.iloc[:301], df, "XUSDT", _bp(burst_confirm=False)) == []

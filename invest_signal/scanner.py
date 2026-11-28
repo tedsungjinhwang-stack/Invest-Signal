@@ -1128,7 +1128,7 @@ def _spike_params(cfg: dict) -> "spike_bar.Params":
 
 
 def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
-                     ticker: dict | None, log=print) -> tuple[list, list]:
+                     ticker: dict | None, log=print, source: str | None = None) -> tuple[list, list]:
     """🟢상승초입 — 15m 역배열 또는 정배열 · 종가가 월 VWAP 상단밴드 근처 ·
     24h 플러스.
 
@@ -1181,6 +1181,7 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
     )
     events, ongoing, thin, falling = [], [], 0, 0
     burst_n = 0
+    prem_sess = requests.Session()
 
     def stamp(ev) -> bool:
         nonlocal thin, falling
@@ -1224,6 +1225,14 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
                 burst_n += 1
         for ev in vwap_onset.confirms(df15, df4, sym, params):
             if stamp(ev):
+                # 판정엔 24h 현선갭·티커 24h 대금이 든다 — 확정 알림이 나갈 때만 그 종목 것을 받는다(11-28)
+                d = ev.detail
+                try:
+                    d["prem24"] = data_binance.premium_mean(prem_sess, sym, source) if source else None
+                except Exception:                       # noqa: BLE001
+                    d["prem24"] = None
+                d["wave_type"] = vwap_onset.wave_type(d.get("v3_v2"), d.get("prem24"), d.get("w2_vs_1hst", float("nan")),
+                                                      d["retrace"], d.get("turnover_24h"), d.get("burst_vol_mult"))
                 events.append(ev)
                 burst_n += 1
         for ev in vwap_onset.pullbacks(df15, df4, sym, params):
@@ -1395,7 +1404,7 @@ def scan_crypto(cfg: dict, detectors, log=print, intrabar: bool = False,
             deep = {it["symbol"] for it in state.tracked(("spike_bar",), days)}
             deep |= {e.symbol for e in spike_events if e.signal == "spike_bar"}
             _deepen(s, source, frames15, deep, workers, log)
-        vo_events, vo_ongoing = _scan_vwap_onset(cfg, frames15, frames, ticker, log)
+        vo_events, vo_ongoing = _scan_vwap_onset(cfg, frames15, frames, ticker, log, source)
         # 15m 판정이라 마감·인트라바 양쪽에서 매번 돈다. 4h 프레임은 제외 조건
         # (정배열 + 480선 아래) 판정에만 쓰고, 없으면 대상 종목만 따로 받는다.
         leader_events, leader_ongoing, board = _scan_leader_break(

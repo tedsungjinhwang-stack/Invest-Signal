@@ -354,6 +354,21 @@ def grade(df15: pd.DataFrame, t: int) -> str | None:
     return None
 
 
+def _h1(df15: pd.DataFrame) -> pd.DataFrame:
+    g = df15.resample("1h")
+    h1 = g.agg({"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"})
+    return h1[g["Close"].count() == 4].dropna()
+
+
+def _st1h_line(df15: pd.DataFrame) -> np.ndarray:
+    """15m 봉마다 그 봉이 든 1h봉의 1h 장기 수트(30×6) 선 값 — 못 재면 NaN."""
+    h1 = _h1(df15)
+    if len(h1) < 32:
+        return np.full(len(df15), np.nan)
+    line = supertrend_full(h1, 30, 6.0)["line"]
+    return line.reindex(df15.index.floor("1h")).to_numpy(float)
+
+
 def _st1h_up(df15: pd.DataFrame) -> np.ndarray:
     """15m 봉마다 '그 봉이 든 1h봉의 1h 장기 수트(30×6)가 상승인가'. 15m를 1h로 묶어 낸다
     (스캔은 정시+5분이라 소급 봉들의 1h봉은 이미 마감돼 있다)."""
@@ -454,16 +469,30 @@ def pullbacks(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
 
 
 CONFIRM_STAGE = "💥3파확정"
-TYPE_BIG = "🎯2.618형"
+TYPE_BIG = "🎯2.618후보"
 TYPE_ONE = "⚠️1배형"
 
 
-def wave_type(retrace: float, w2_hours: float) -> str:
-    """💥 뒤 3파 확정 시점 판정(11-28 · 💥 21일, 15m 파동) — 늘 둘 중 하나.
-    2파 되돌림 61.8%+ → 🎯2.618형(2.618배+ 29~40%, 중앙 1.6~2.0배)
-    그 아래 → ⚠️1배형(2.618배+ ≈10%, 1.618배 미만 ≈78%, 중앙 ≈0.8배 — 38.2% 미만·38.2~50·50~61.8% 모두 약함).
-    무브 68%·빅타임 63% → 🎯, 사하라 45%·BICO 31% → ⚠️. w2_hours는 줄 표기용(판정엔 안 쓴다)."""
-    return TYPE_BIG if retrace >= 0.618 else TYPE_ONE
+def wave_type(v3_v2: float, prem24: float | None, w2_vs_1hst: float, retrace: float,
+              turnover_24h: float | None, burst_x: float | None = None) -> str | None:
+    """💥 뒤 3파 확정 판정(11-28 · 💥 2달 3파 확정 329건, 앞 60% 학습 / 뒤 40% 검증).
+
+    3파 출발 거래량 = 2파 저점~확정 봉 평균 거래량 ÷ 1파 고점~2파 저점 평균 거래량.
+    🎯2.618형: 3파 출발 거래량 1.1배+ 그리고 가점 2개+ — 2파 저점이 1h 장기선 +6% 안(돌파한 선 재테스트) ·
+      되돌림 50%+ · 24h 대금 $5M 미만 · 24h 현선갭 ≥ 0 → 2.618배+ 35%(학습 38/검증 29, 전체 12%), 중앙 1.93배
+    ⚠️1배형: 3파 출발 거래량 1.1배 미만 그리고 24h 현선갭 < 0 → 1.618배 미만 86%(88/82), 2.618배+ 6%.
+      단 💥 폭증이 50배+면 빼다(그 경우 1배형 70% · 2.618배+ 15% — 포털 11-27 179배는 +130% 갔다).
+    그 밖은 None(중간). 현선갭을 못 받으면(None) ⚠️는 안 매기고 🎯 가점에서만 뺀다."""
+    if v3_v2 is None or np.isnan(v3_v2):
+        return None
+    if v3_v2 >= 1.1:
+        pts = int(w2_vs_1hst < 0.06) + int(retrace >= 0.5)
+        pts += int(turnover_24h is not None and turnover_24h < 5_000_000)
+        pts += int(prem24 is not None and prem24 >= 0)
+        return TYPE_BIG if pts >= 2 else None
+    if prem24 is not None and prem24 < 0 and not (burst_x is not None and burst_x >= 50):
+        return TYPE_ONE
+    return None
 
 
 def confirms(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
@@ -476,7 +505,7 @@ def confirms(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
     got = _burst_bars(df15, df4h, params)
     if got is None:
         return []
-    _, new, _, _ = got
+    _, new, mult, _ = got
     hi, lo, c = (df15[k].to_numpy(float) for k in ("High", "Low", "Close"))
     n = len(df15)
     out = []
@@ -508,10 +537,18 @@ def confirms(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
         leg = w1 - w0
         retr = (w1 - low) / leg
         w2h = (ov - w1i) / 4
+        vol = df15["Volume"].to_numpy(float)
+        v2 = vol[w1i + 1:lowi + 1].mean() if lowi > w1i else np.nan
+        v3_v2 = float(vol[lowi:ov + 1].mean() / v2) if v2 and v2 > 0 else np.nan
+        line1 = _st1h_line(df15)
+        w2_1h = float(low / line1[lowi] - 1) if not np.isnan(line1[lowi]) else np.nan
+        day = float(((df15["High"] + df15["Low"] + df15["Close"]) / 3 * df15["Volume"]).iloc[max(0, ov - 95):ov + 1].sum())
         d = {"label": LABEL, "interval": INTERVAL, "stage": CONFIRM_STAGE,
              "burst_time": df15.index[t].isoformat(), "wave_start": w0, "wave_top": float(w1),
              "w2_low": float(low), "retrace": float(retr), "w2_hours": float(w2h),
-             "wave1": float(w1 / w0 - 1), "wave_type": wave_type(retr, w2h),
+             "wave1": float(w1 / w0 - 1), "v3_v2": v3_v2, "w2_vs_1hst": w2_1h,
+             "burst_vol_mult": float(mult.iloc[t]),
+             "wave_type": wave_type(v3_v2, None, w2_1h, retr, day, float(mult.iloc[t])),
              "targets": [float(f"{low + k * leg:.4g}") for k in (1.0, 1.618, 2.618)]}
         out.append(SignalEvent(symbol=symbol, signal=NAME, bar_time=df15.index[ov],
                                price=float(c[ov]), detail=d))

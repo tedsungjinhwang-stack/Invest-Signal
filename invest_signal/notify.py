@@ -318,6 +318,15 @@ def _band_tags(d: dict) -> list[str]:
         tags.append("3️⃣3파확정" + (f"(💥 {_kst(pd.Timestamp(d['burst_time']))})" if d.get("burst_time") else ""))
         tags.append(f"1파 {_fmt_price(d['wave_start'])}→{_fmt_price(d['wave_top'])}({_pct(d['wave1'])})")
         tags.append(f"2파 되돌림 {d['retrace'] * 100:.0f}% · {d['w2_hours']:.1f}h")
+        why = []
+        if d.get("v3_v2") is not None and d["v3_v2"] == d["v3_v2"]:
+            why.append(f"3파출발 거래량 {d['v3_v2']:.1f}배")
+        if d.get("w2_vs_1hst") is not None and d["w2_vs_1hst"] == d["w2_vs_1hst"]:
+            why.append(f"2파저점 1h장기선 {_pct(d['w2_vs_1hst'])}")
+        if d.get("prem24") is not None:
+            why.append(f"현선갭 {d['prem24'] * 100:+.2f}%")
+        if why:
+            tags.append(" · ".join(why))
         t1, t2, t3 = d["targets"]
         tags.append(f"목표 1배 {_fmt_price(t1)} · 1.618배 {_fmt_price(t2)} · 2.618배 {_fmt_price(t3)}")
         tags.append(f"무효 {_fmt_price(d['w2_low'])} 이탈")

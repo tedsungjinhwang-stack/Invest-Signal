@@ -344,6 +344,16 @@ def klines(session: requests.Session, symbol: str, source: str,
     return parse_klines(rows, include_live=include_live)
 
 
+def premium_mean(session: requests.Session, symbol: str, source: str, hours: int = 24) -> float | None:
+    """최근 hours시간 프리미엄 지수(선물 ÷ 인덱스 − 1) 1h 종가 평균 — 현물 미러 소스면 None(11-28)."""
+    if source != "fapi":
+        return None
+    rows = _get(session, fapi_base(), "/fapi/v1/premiumIndexKlines",
+                {"symbol": symbol, "interval": "1h", "limit": hours + 1}).json()
+    df = parse_klines(rows)
+    return float(df["Close"].tail(hours).mean()) if len(df) else None
+
+
 def index_klines(session: requests.Session, symbol: str, source: str,
                  interval: str = "5m", limit: int = 30) -> pd.DataFrame | None:
     """선물 인덱스 가격 캔들 — 여러 거래소 **현물** 가격의 가중 평균(현선갭용).
