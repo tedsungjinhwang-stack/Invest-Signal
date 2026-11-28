@@ -426,16 +426,17 @@ def bursts(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
 
 PULLBACK_STAGE = "💥되돌림"
 PULLBACK_LEVELS = (0.382, 0.5, 0.618, 0.786)
-DONE_1TO1 = "⚠️이미1:1완성"
-DONE_BAND = (0.9, 1.15)
+DONE_1TO1 = "✅파동완성"
+DONE_MIN = 0.9
 
 
 def prior_ext(hi: np.ndarray, lo: np.ndarray, w0i: int, leg: float, lookback: int = 672) -> float | None:
     """💥 1파가 사실은 **더 큰 흐름의 3파 1:1 완성**인지(11-28 · GUN) — 1파 시작(W0) 전 7일 안의
     최저가 A → 그 뒤 최고가 B를 직전 파동으로 보고, 1파 길이 ÷ (B−A)를 낸다. W0가 A보다 높고
     (B 뒤 23.6%+ 되돌린 2파 저점) 직전 파동이 +5% 이상일 때만, 아니면 None.
-    0.9~1.15배면 💥가 직전 파동의 1:1을 막 채운 자리다 — 💥 되돌림 538건(10-07~11-28, 7일)에서
-    그 48건은 3파 확정 50%·1배+ 21%(전체 54%·30%), W0 이탈 50%(전체 41%)."""
+    0.9배+면 💥가 직전 파동의 1:1 이상을 채운 자리다(GUN 1.04배 · TAG 1.79배) — 그 되돌림은 진입 자리가
+    아니라 "✅파동완성" 알림으로만 낸다. 💥 되돌림 538건(10-07~11-28, 7일)에서 0.9~1.15배 48건은
+    3파 확정 50%·1배+ 21%(전체 54%·30%), W0 이탈 50%(전체 41%)."""
     a0 = max(0, w0i - lookback)
     if w0i - 3 - a0 <= 10:
         return None
@@ -451,7 +452,7 @@ def prior_ext(hi: np.ndarray, lo: np.ndarray, w0i: int, leg: float, lookback: in
 
 
 def _done_tag(ext: float | None) -> str | None:
-    return DONE_1TO1 if ext is not None and DONE_BAND[0] <= ext < DONE_BAND[1] else None
+    return DONE_1TO1 if ext is not None and ext >= DONE_MIN else None
 
 
 def pullbacks(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,

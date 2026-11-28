@@ -316,7 +316,7 @@ def _band_tags(d: dict) -> list[str]:
         if d.get("wave_type"):
             tags.append(d["wave_type"])
         if d.get("done_1to1"):
-            # ⚠️ 💥 1파가 직전 파동의 1:1을 막 채운 자리(11-28 · GUN)
+            # ✅ 💥 1파가 직전 파동의 1:1 이상을 채운 자리(11-28 · GUN·TAG) — 진입이 아니라 완성 알림
             tags.append(f"{d['done_1to1']}(직전파동 {d['prior_ext']:.2f}배)")
         tags.append("3️⃣3파확정" + (f"(💥 {_kst(pd.Timestamp(d['burst_time']))})" if d.get("burst_time") else ""))
         tags.append(f"1파 {_fmt_price(d['wave_start'])}→{_fmt_price(d['wave_top'])}({_pct(d['wave1'])})")
@@ -337,14 +337,17 @@ def _band_tags(d: dict) -> list[str]:
         # ↩️ 💥 뒤 되돌림(11-28) — 지금 몇 % 되돌렸는지 · 1파 · 분할 진입 자리 · 무효선
         lv = d.get("levels") or {}
         if d.get("done_1to1"):
-            # ⚠️ 💥 1파가 직전 파동의 1:1을 막 채운 자리(11-28 · GUN)
+            # ✅ 💥 1파가 직전 파동의 1:1 이상을 채운 자리(11-28 · GUN·TAG) — 진입이 아니라 완성 알림
             tags.append(f"{d['done_1to1']}(직전파동 {d['prior_ext']:.2f}배)")
         tags.append(f"↩️💥되돌림 {d['retrace'] * 100:.0f}%"
                     + (f"(💥 {_kst(pd.Timestamp(d['burst_time']))})" if d.get("burst_time") else ""))
         tags.append(f"1파 {_fmt_price(d['wave_start'])}→{_fmt_price(d['wave_top'])}")
-        if lv:
-            tags.append(" · ".join(f"{k}% {_fmt_price(v)}" for k, v in lv.items()))
-        tags.append(f"무효 {_fmt_price(d['wave_start'])} 이탈")
+        if d.get("done_1to1"):
+            pass                        # ✅ 파동 완성 — 진입 자리가 아니니 분할 자리·무효선을 안 적는다
+        else:
+            if lv:
+                tags.append(" · ".join(f"{k}% {_fmt_price(v)}" for k, v in lv.items()))
+            tags.append(f"무효 {_fmt_price(d['wave_start'])} 이탈")
     if d.get("burst_vol_mult") is not None:
         # 💥 상승초입 자리에서 15m 거래량 폭증(11-25~) — 몇 배였는지와 그 봉 대금
         tags.append(f"💥15m거래량 {d['burst_vol_mult']:.0f}배"

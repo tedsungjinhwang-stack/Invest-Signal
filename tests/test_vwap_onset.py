@@ -552,7 +552,8 @@ def test_prior_ext_1to1_done():
     lo[301:] = 105.5
     ext = vo.prior_ext(hi, lo, 300, 10.0)
     assert abs(ext - 1.0) < 1e-9 and vo._done_tag(ext) == vo.DONE_1TO1
-    assert vo._done_tag(vo.prior_ext(hi, lo, 300, 20.0)) is None          # 2배 — 1:1 막 완성 아님
+    assert vo._done_tag(vo.prior_ext(hi, lo, 300, 20.0)) == vo.DONE_1TO1  # 2배 — 1:1 넘김(TAG형)
+    assert vo._done_tag(vo.prior_ext(hi, lo, 300, 8.0)) is None            # 0.8배 — 아직 미완성
     lo2 = lo.copy(); lo2[300] = 99.0                                       # W0가 A 아래면 새 시작
     assert vo.prior_ext(hi, lo2, 300, 10.0) is None
     hi3 = hi.copy(); hi3[150] = 104.0                                      # 직전 파동 +5% 미만
@@ -562,5 +563,7 @@ def test_prior_ext_1to1_done():
 def test_done_1to1_line():
     from invest_signal import notify
     d = {"stage": "💥되돌림", "retrace": 0.46, "wave_start": 0.001345, "wave_top": 0.001484,
-         "levels": {}, "prior_ext": 0.93, "done_1to1": vo.DONE_1TO1}
-    assert any("⚠️이미1:1완성(직전파동 0.93배)" in t for t in notify._band_tags(d))
+         "levels": {"38.2": 0.00143}, "prior_ext": 0.93, "done_1to1": vo.DONE_1TO1}
+    tags = notify._band_tags(d)
+    assert any("✅파동완성(직전파동 0.93배)" in t for t in tags)
+    assert not any("무효" in t or "38.2%" in t for t in tags)            # 진입 자리는 안 적는다
