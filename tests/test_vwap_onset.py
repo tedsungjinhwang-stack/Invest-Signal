@@ -486,3 +486,25 @@ def test_blocked_burst_does_not_eat_rearm_for_1h_filter(monkeypatch):
     monkeypatch.setattr(vo, "_st1h_up", lambda d: up)
     got = vo.bursts(df, df, "XUSDT", _bp(burst_need_1h_st=True))
     assert [e.bar_time for e in got] == [df.index[298]]
+
+
+def test_pullback_alert_on_first_382_retrace(monkeypatch):
+    n = 300
+    idx = pd.date_range("2026-11-20", periods=n, freq="15min", tz="UTC")
+    c = np.full(n, 100.0)
+    v = np.full(n, 1000.0)
+    c[290] = 106.0; v[290] = 20000.0          # 💥
+    c[291:293] = [110.0, 110.0]                # 1파 고점 110(1파 시작 ≈ 99.9)
+    c[293:] = 105.0                            # 1파의 ~49% 되돌림
+    df = pd.DataFrame({"Open": c, "High": c * 1.001, "Low": c * 0.999, "Close": c, "Volume": v}, index=idx)
+    monkeypatch.setattr(vo, "_state", lambda a, b, p: _fake_state(df, True))
+    p = _bp(burst_pullback=0.382, grace_bars=4)
+    assert vo.pullbacks(df.iloc[:292], df, "XUSDT", p) == []            # 아직 안 내려옴
+    ev = vo.pullbacks(df.iloc[:294], df, "XUSDT", p)
+    assert len(ev) == 1 and ev[0].bar_time == idx[293]
+    d = ev[0].detail
+    assert d["stage"] == vo.PULLBACK_STAGE and 0.38 <= d["retrace"] < 0.6 and set(d["levels"]) == {"38.2", "50", "61.8", "78.6"}
+    assert vo.pullbacks(df.iloc[:299], df, "XUSDT", p) == []            # 지나간 건 안 낸다
+    line = " ".join(notify._band_tags(d))
+    assert "↩️💥되돌림" in line and "무효" in line and "61.8%" in line
+    assert vo.pullbacks(df.iloc[:294], df, "XUSDT", _bp(burst_pullback=None)) == []

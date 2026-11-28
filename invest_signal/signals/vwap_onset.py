@@ -98,6 +98,9 @@ class Params:
     # rearm을 안 쓴다). 💥 21일: +20% 먼저 27%→33% · 2.618R+ 22%→29% · 하루 16→10건. 빅타임은
     # 15:15 첫 폭증(장기선 아래) 대신 23:00 돌파봉에서 잡힌다.
     burst_need_1h_st: bool = False
+    # ↩️ 💥 뒤 되돌림 알림(11-28) — 1파의 이만큼 처음 되돌린 봉에서(None이면 끔)
+    burst_pullback: float | None = None
+    burst_pullback_bars: int = 96
 
 
 def _band_on_15m(df15: pd.DataFrame, df4h: pd.DataFrame, anchor: str,
@@ -238,8 +241,9 @@ def _state(df15: pd.DataFrame, df4h: pd.DataFrame,
 
 def _detail(row, params: Params) -> dict:
     """줄에 실을 값 — 어느 배열로 섰는지, 밴드에 얼마나 붙었는지, 수익률."""
+    # 10-11부터 band 모드는 이평 배열을 안 본다 — '역배열' 표시는 옛 이름이라 band 모드에선 안 단다(11-28)
     d = {"label": LABEL, "interval": INTERVAL,
-         "trend": "역배열" if row.bear else "정배열",
+         "trend": (None if params.bear_mode == "band" and row.bear else ("역배열" if row.bear else "정배열")),
          "near_band": params.band_anchor,
          "band_dist": float(row.dist),        # 종가 ÷ 상단밴드 − 1
          "band_upper": float(row.upper)}
@@ -360,16 +364,11 @@ def _st1h_up(df15: pd.DataFrame) -> np.ndarray:
     return (d.reindex(df15.index.floor("1h")).to_numpy(float) > 0)
 
 
-def bursts(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
-           params: Params = Params()) -> list[SignalEvent]:
-    """💥 상승초입 자리에서 15m 거래량이 터진 봉 — 마지막 grace_bars+1봉 중, 직전 burst_rearm_bars봉에
-    같은 조건 봉이 없었던 것. 봉 거래대금은 (고+저+종)/3 × 거래량으로 어림한다(캔들엔 대금이 없다).
-    """
-    if not params.burst_enabled:
-        return []
+def _burst_bars(df15: pd.DataFrame, df4h: pd.DataFrame, params: Params):
+    """(st, 💥 새 봉 마스크, 거래량 배수, 봉 대금) — 판정 못 하면 None."""
     st = _state(df15, df4h, params)
     if st is None:
-        return []
+        return None
     v = df15["Volume"]
     mult = v / v.shift(1).rolling(96).mean()
     usd = (df15["High"] + df15["Low"] + df15["Close"]) / 3 * v
@@ -380,7 +379,20 @@ def bursts(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
            & (day >= params.burst_min_turnover_usd)).to_numpy(bool)
     if params.burst_need_1h_st:
         hit = hit & _st1h_up(df15)
-    new = _entries(hit, params.burst_rearm_bars)
+    return st, _entries(hit, params.burst_rearm_bars), mult, usd
+
+
+def bursts(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
+           params: Params = Params()) -> list[SignalEvent]:
+    """💥 상승초입 자리에서 15m 거래량이 터진 봉 — 마지막 grace_bars+1봉 중, 직전 burst_rearm_bars봉에
+    같은 조건 봉이 없었던 것. 봉 거래대금은 (고+저+종)/3 × 거래량으로 어림한다(캔들엔 대금이 없다).
+    """
+    if not params.burst_enabled:
+        return []
+    got = _burst_bars(df15, df4h, params)
+    if got is None:
+        return []
+    st, new, mult, usd = got
     n = len(st)
     out = []
     for t in range(max(1, n - 1 - params.grace_bars), n):
@@ -392,6 +404,50 @@ def bursts(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
         d["grade"] = burst_grade(df15, t, float(row.dist))
         out.append(SignalEvent(symbol=symbol, signal=NAME, bar_time=st.index[t],
                                price=float(row.close), detail=d))
+    return out
+
+
+PULLBACK_STAGE = "💥되돌림"
+PULLBACK_LEVELS = (0.382, 0.5, 0.618, 0.786)
+
+
+def pullbacks(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
+              params: Params = Params()) -> list[SignalEvent]:
+    """↩️ 💥 뒤 되돌림(11-28) — 💥 봉부터 burst_pullback_bars(24h) 안에 1파의 burst_pullback(38.2%)를
+    처음 되돌린 15m봉(마지막 grace_bars+1봉 안). 1파 시작 = 💥 봉까지 24h 최저가, 1파 고점 = 💥 뒤 지금까지
+    최고가(1파 시작 대비 +5% 이상일 때만). 그 전에 1파 시작을 깨면 무효. 줄에 분할 진입 자리(38.2·50·61.8·78.6%)와
+    무효선을 적는다 — 무브·빅타임은 61.8~68%, 사하라는 45%에서 2파가 끝났다."""
+    if not (params.burst_enabled and params.burst_pullback):
+        return []
+    got = _burst_bars(df15, df4h, params)
+    if got is None:
+        return []
+    st, new, _, _ = got
+    hi, lo, c = (df15[k].to_numpy(float) for k in ("High", "Low", "Close"))
+    n = len(df15)
+    win = int(params.burst_pullback_bars)
+    out = []
+    for t in np.flatnonzero(new):
+        if t < n - 1 - win - params.grace_bars - 1:
+            continue
+        w0 = float(np.nanmin(lo[max(0, t - 96):t + 1]))
+        top = hi[t]
+        for k in range(t + 1, min(n, t + win + 1)):
+            if lo[k] <= w0:
+                break
+            level = top - params.burst_pullback * (top - w0)
+            if top / w0 - 1 >= 0.05 and lo[k] <= level:
+                if k >= n - 1 - params.grace_bars:
+                    leg = top - w0
+                    d = _detail(st.iloc[k], params)
+                    d.update(stage=PULLBACK_STAGE, burst_time=df15.index[t].isoformat(),
+                             wave_start=w0, wave_top=float(top),
+                             retrace=float((top - lo[k]) / leg),          # 그 봉 저가 기준(알림 기준과 같게)
+                             levels={f"{x * 100:g}": float(f"{top - x * leg:.4g}") for x in PULLBACK_LEVELS})
+                    out.append(SignalEvent(symbol=symbol, signal=NAME, bar_time=df15.index[k],
+                                           price=float(c[k]), detail=d))
+                break
+            top = max(top, hi[k])
     return out
 
 

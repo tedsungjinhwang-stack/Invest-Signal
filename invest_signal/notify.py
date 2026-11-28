@@ -311,6 +311,15 @@ def _band_tags(d: dict) -> list[str]:
     tags = []
     if d.get("grade"):
         tags.append(d["grade"])         # 🎯2.618후보 · ⚠️1배형(11-27)
+    if d.get("stage") == "💥되돌림":
+        # ↩️ 💥 뒤 되돌림(11-28) — 지금 몇 % 되돌렸는지 · 1파 · 분할 진입 자리 · 무효선
+        lv = d.get("levels") or {}
+        tags.append(f"↩️💥되돌림 {d['retrace'] * 100:.0f}%"
+                    + (f"(💥 {_kst(pd.Timestamp(d['burst_time']))})" if d.get("burst_time") else ""))
+        tags.append(f"1파 {_fmt_price(d['wave_start'])}→{_fmt_price(d['wave_top'])}")
+        if lv:
+            tags.append(" · ".join(f"{k}% {_fmt_price(v)}" for k, v in lv.items()))
+        tags.append(f"무효 {_fmt_price(d['wave_start'])} 이탈")
     if d.get("burst_vol_mult") is not None:
         # 💥 상승초입 자리에서 15m 거래량 폭증(11-25~) — 몇 배였는지와 그 봉 대금
         tags.append(f"💥15m거래량 {d['burst_vol_mult']:.0f}배"

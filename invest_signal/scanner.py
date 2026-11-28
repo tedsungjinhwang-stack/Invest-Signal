@@ -1175,6 +1175,8 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         burst_min_turnover_usd=float(s.get("burst_min_turnover_usd", 5_000_000)),
         burst_rearm_bars=int(s.get("burst_rearm_bars", 96)),
         burst_need_1h_st=bool(s.get("burst_need_1h_st", False)),
+        burst_pullback=(None if s.get("burst_pullback") is None else float(s["burst_pullback"])),
+        burst_pullback_bars=int(s.get("burst_pullback_bars", 96)),
     )
     events, ongoing, thin, falling = [], [], 0, 0
     burst_n = 0
@@ -1183,7 +1185,8 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         nonlocal thin, falling
         stat = (ticker or {}).get(ev.symbol) or {}
         turn = stat.get("quote_volume")
-        floor = (params.burst_min_turnover_usd if ev.detail.get("stage") == vwap_onset.BURST_STAGE
+        floor = (params.burst_min_turnover_usd
+                 if ev.detail.get("stage") in (vwap_onset.BURST_STAGE, vwap_onset.PULLBACK_STAGE)
                  else params.min_turnover_usd)
         if turn is not None and turn < floor:
             thin += 1
@@ -1211,6 +1214,10 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
             if stamp(ev):
                 events.append(ev)
         for ev in vwap_onset.bursts(df15, df4, sym, params):
+            if stamp(ev):
+                events.append(ev)
+                burst_n += 1
+        for ev in vwap_onset.pullbacks(df15, df4, sym, params):
             if stamp(ev):
                 events.append(ev)
                 burst_n += 1
