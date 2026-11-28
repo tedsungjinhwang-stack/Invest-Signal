@@ -1215,7 +1215,8 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
         for ev in got:
             if stamp(ev):
                 events.append(ev)
-        for ev in vwap_onset.bursts(df15, df4, sym, params):
+        # 💥 자체 알림은 끌 수 있다(11-28 — 되돌림·3파 확정만 받기). 판정은 되돌림·확정이 내부에서 다시 한다.
+        for ev in (vwap_onset.bursts(df15, df4, sym, params) if s.get("burst_alert", True) else ()):
             if stamp(ev):
                 events.append(ev)
                 burst_n += 1
@@ -1232,7 +1233,7 @@ def _scan_vwap_onset(cfg: dict, frames15: dict, frames4h: dict,
             if held is not None and stamp(held):
                 ongoing.append(held)
     if events or ongoing or thin or falling:
-        log(f"[binance] 상승초입 {len(events) - burst_n}건 · 💥거래량폭증 {burst_n}건 · 추적 {len(ongoing)}건"
+        log(f"[binance] 상승초입 {len(events) - burst_n}건 · 💥(폭증·되돌림·3파확정) {burst_n}건 · 추적 {len(ongoing)}건"
             + (f" · 거래대금 하한 미달 {thin}건 제외" if thin else "")
             + (f" · 24h 하락 {falling}건 제외" if falling else "")
             + (f" (15m {params.bear_lower_ma}선<종가<"
