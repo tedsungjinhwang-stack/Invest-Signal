@@ -299,7 +299,7 @@ signal:
     enabled: true
     days: 10
     days_by: {vwap_onset: 1}   # 10-11 — 상승초입 추적은 하루만(↳ 줄도 하루)
-    signals: [spike_bar, vwap_onset, wave_setup]
+    signals: [spike_bar, wave_setup]   # 11-28 상승초입 ↳ 추적 줄 뺌(지나간 💥가 하루 내내 다시 실렸다)
   fire2:                    # 🔥🔥 — 🔥 줄 중 '롱이 몰려 있지 않은' 줄 (크립토, 선물 소스에서만, 10-02~)
     # 🔥 줄에 선물 수급 조건 하나를 더 본다(칸마다 다름). 맞으면 🔥 대신 🔥🔥, 칸 맨 위.
     #   상승초입 최근 24h 평균 현선갭(퍼프 ÷ 인덱스 − 1) ≤ onset_gap_mean24_max

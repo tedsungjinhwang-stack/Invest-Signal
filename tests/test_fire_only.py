@@ -254,3 +254,14 @@ def test_board_only_on_the_hour_with_30min_scans(monkeypatch, tmp_path):
                             classmethod(lambda cls, tz=None, m=minute: real(tz="UTC").replace(minute=m)))
         scanner.run("x.yaml", str(tmp_path / f"s{minute}" / "alerts_state.json"), log=lambda *x: None)
         assert len(sent) == want
+
+
+def test_onset_only_cfg_keeps_only_vwap_onset():
+    cfg = {"signal": {"vwap_onset": {"enabled": True}, "leader_break": {"enabled": True},
+                      "whale_exit": {"enabled": True}, "fire2": {"enabled": True}},
+           "notify": {"board_always": True}}
+    c = scanner._onset_only_cfg(cfg)
+    assert c["signal"]["vwap_onset"]["enabled"] and c["signal"]["fire2"]["enabled"]
+    assert not c["signal"]["leader_break"]["enabled"] and not c["signal"]["whale_exit"]["enabled"]
+    assert c["notify"]["board_always"] is False
+    assert cfg["signal"]["leader_break"]["enabled"]          # 원본은 그대로

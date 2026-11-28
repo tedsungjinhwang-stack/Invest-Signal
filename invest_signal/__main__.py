@@ -48,6 +48,8 @@ def main(argv=None) -> int:
                    help="알림 발송·상태 저장 없이 결과만 출력")
     p.add_argument("--intrabar", action="store_true",
                    help="진행 중 봉을 포함해 인트라바 판정 가능한 시그널만 스캔 (크립토 전용)")
+    p.add_argument("--onset-only", action="store_true",
+                   help="🟢상승초입(💥 되돌림·3파 확정)만 스캔 — 30분 스캔용(11-28)")
     p.add_argument("--history", nargs="?", type=int, const=5, default=None,
                    metavar="N", help="스캔 대신 최근 발송 알림 N건 출력 (기본 5)")
     p.add_argument("--raw", action="store_true", help="--history에서 HTML 태그 그대로")
@@ -62,7 +64,7 @@ def main(argv=None) -> int:
         print(f"[cache] 캔들 캐시 {n}개 불러옴 — {args.kline_cache}")
     try:
         return scanner.run(args.config, args.state, only=args.only,
-                           dry_run=args.dry_run, intrabar=args.intrabar)
+                           dry_run=args.dry_run, intrabar=args.intrabar, onset_only=args.onset_only)
     finally:
         if args.kline_cache:
             from . import data_binance

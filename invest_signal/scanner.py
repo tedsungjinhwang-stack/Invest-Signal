@@ -1824,9 +1824,27 @@ def _collapse(events: list) -> list:
     return list(best.values())
 
 
+ONSET_ONLY_KEEP = {"vwap_onset", "fire2"}
+
+
+def _onset_only_cfg(cfg: dict) -> dict:
+    """30분 스캔용(11-28) — 🟢상승초입(💥 되돌림·3파 확정)만 남기고 나머지 시그널·순위표·커뮤니티는 끈다."""
+    import copy
+    c = copy.deepcopy(cfg)
+    for k, v in (c.get("signal") or {}).items():
+        if isinstance(v, dict) and k not in ONSET_ONLY_KEEP:
+            v["enabled"] = False
+    (c.setdefault("notify", {}))["board_always"] = False
+    return c
+
+
 def run(config_path: str, state_path: str, only: str | None = None,
-        dry_run: bool = False, intrabar: bool = False, log=print) -> int:
+        dry_run: bool = False, intrabar: bool = False, log=print, onset_only: bool = False) -> int:
     cfg = cfg_mod.load(config_path)
+    if onset_only:
+        cfg = _onset_only_cfg(cfg)
+        intrabar = True
+        log("[run] 상승초입 전용 스캔(30분) — 다른 시그널·순위표·커뮤니티 끔")
     # 시장별로 파라미터가 갈리는 시그널이 있어 목록을 따로 만든다
     crypto_detectors = cfg_mod.detectors(cfg, crypto=True)
     yf_detectors = cfg_mod.detectors(cfg)
