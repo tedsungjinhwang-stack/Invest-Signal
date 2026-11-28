@@ -543,3 +543,24 @@ def test_confirm_alert_after_burst(monkeypatch):
     line = " ".join(notify._band_tags(d))
     assert "🎯2.618후보" in line and "3️⃣3파확정" in line and "목표 1배" in line
     assert vo.confirms(df.iloc[:301], df, "XUSDT", _bp(burst_confirm=False)) == []
+
+
+def test_prior_ext_1to1_done():
+    # 직전 파동 A=100 → B=110, 2파 저점 W0=105(되돌림 50%), 💥 1파 +10 → 1:1 완성(1.0배)
+    lo = np.full(400, 104.0); hi = np.full(400, 106.0)
+    lo[50] = 100.0; hi[150] = 110.0; lo[300] = 105.0
+    lo[301:] = 105.5
+    ext = vo.prior_ext(hi, lo, 300, 10.0)
+    assert abs(ext - 1.0) < 1e-9 and vo._done_tag(ext) == vo.DONE_1TO1
+    assert vo._done_tag(vo.prior_ext(hi, lo, 300, 20.0)) is None          # 2배 — 1:1 막 완성 아님
+    lo2 = lo.copy(); lo2[300] = 99.0                                       # W0가 A 아래면 새 시작
+    assert vo.prior_ext(hi, lo2, 300, 10.0) is None
+    hi3 = hi.copy(); hi3[150] = 104.0                                      # 직전 파동 +5% 미만
+    assert vo.prior_ext(hi3, lo, 300, 10.0) is None
+
+
+def test_done_1to1_line():
+    from invest_signal import notify
+    d = {"stage": "💥되돌림", "retrace": 0.46, "wave_start": 0.001345, "wave_top": 0.001484,
+         "levels": {}, "prior_ext": 0.93, "done_1to1": vo.DONE_1TO1}
+    assert any("⚠️이미1:1완성(직전파동 0.93배)" in t for t in notify._band_tags(d))

@@ -315,6 +315,9 @@ def _band_tags(d: dict) -> list[str]:
         # 3️⃣ 💥 뒤 3파 확정(11-28) — 🎯2.618형 / ⚠️1배형 · 1파 · 2파 되돌림·기간 · 목표가 · 무효선(2파 저점)
         if d.get("wave_type"):
             tags.append(d["wave_type"])
+        if d.get("done_1to1"):
+            # ⚠️ 💥 1파가 직전 파동의 1:1을 막 채운 자리(11-28 · GUN)
+            tags.append(f"{d['done_1to1']}(직전파동 {d['prior_ext']:.2f}배)")
         tags.append("3️⃣3파확정" + (f"(💥 {_kst(pd.Timestamp(d['burst_time']))})" if d.get("burst_time") else ""))
         tags.append(f"1파 {_fmt_price(d['wave_start'])}→{_fmt_price(d['wave_top'])}({_pct(d['wave1'])})")
         tags.append(f"2파 되돌림 {d['retrace'] * 100:.0f}% · {d['w2_hours']:.1f}h")
@@ -333,6 +336,9 @@ def _band_tags(d: dict) -> list[str]:
     if d.get("stage") == "💥되돌림":
         # ↩️ 💥 뒤 되돌림(11-28) — 지금 몇 % 되돌렸는지 · 1파 · 분할 진입 자리 · 무효선
         lv = d.get("levels") or {}
+        if d.get("done_1to1"):
+            # ⚠️ 💥 1파가 직전 파동의 1:1을 막 채운 자리(11-28 · GUN)
+            tags.append(f"{d['done_1to1']}(직전파동 {d['prior_ext']:.2f}배)")
         tags.append(f"↩️💥되돌림 {d['retrace'] * 100:.0f}%"
                     + (f"(💥 {_kst(pd.Timestamp(d['burst_time']))})" if d.get("burst_time") else ""))
         tags.append(f"1파 {_fmt_price(d['wave_start'])}→{_fmt_price(d['wave_top'])}")

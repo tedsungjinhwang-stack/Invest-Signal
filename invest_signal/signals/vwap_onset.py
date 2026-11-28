@@ -426,6 +426,32 @@ def bursts(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
 
 PULLBACK_STAGE = "💥되돌림"
 PULLBACK_LEVELS = (0.382, 0.5, 0.618, 0.786)
+DONE_1TO1 = "⚠️이미1:1완성"
+DONE_BAND = (0.9, 1.15)
+
+
+def prior_ext(hi: np.ndarray, lo: np.ndarray, w0i: int, leg: float, lookback: int = 672) -> float | None:
+    """💥 1파가 사실은 **더 큰 흐름의 3파 1:1 완성**인지(11-28 · GUN) — 1파 시작(W0) 전 7일 안의
+    최저가 A → 그 뒤 최고가 B를 직전 파동으로 보고, 1파 길이 ÷ (B−A)를 낸다. W0가 A보다 높고
+    (B 뒤 23.6%+ 되돌린 2파 저점) 직전 파동이 +5% 이상일 때만, 아니면 None.
+    0.9~1.15배면 💥가 직전 파동의 1:1을 막 채운 자리다 — 💥 되돌림 538건(10-07~11-28, 7일)에서
+    그 48건은 3파 확정 50%·1배+ 21%(전체 54%·30%), W0 이탈 50%(전체 41%)."""
+    a0 = max(0, w0i - lookback)
+    if w0i - 3 - a0 <= 10:
+        return None
+    ai = a0 + int(np.nanargmin(lo[a0:w0i - 3]))
+    a, w0 = lo[ai], lo[w0i]
+    if not a < w0:
+        return None
+    b = float(np.nanmax(hi[ai:w0i + 1]))
+    prior = b - a
+    if prior / a < 0.05 or (b - w0) / prior < 0.236:
+        return None
+    return float(leg / prior)
+
+
+def _done_tag(ext: float | None) -> str | None:
+    return DONE_1TO1 if ext is not None and DONE_BAND[0] <= ext < DONE_BAND[1] else None
 
 
 def pullbacks(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
@@ -447,7 +473,8 @@ def pullbacks(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
     for t in np.flatnonzero(new):
         if t < n - 1 - win - params.grace_bars - 1:
             continue
-        w0 = float(np.nanmin(lo[max(0, t - 96):t + 1]))
+        w0i = max(0, t - 96) + int(np.nanargmin(lo[max(0, t - 96):t + 1]))
+        w0 = float(lo[w0i])
         top = hi[t]
         for k in range(t + 1, min(n, t + win + 1)):
             if lo[k] <= w0:
@@ -461,6 +488,8 @@ def pullbacks(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
                              wave_start=w0, wave_top=float(top),
                              retrace=float((top - lo[k]) / leg),          # 그 봉 저가 기준(알림 기준과 같게)
                              levels={f"{x * 100:g}": float(f"{top - x * leg:.4g}") for x in PULLBACK_LEVELS})
+                    ext = prior_ext(hi, lo, w0i, leg)
+                    d.update(prior_ext=ext, done_1to1=_done_tag(ext))
                     out.append(SignalEvent(symbol=symbol, signal=NAME, bar_time=df15.index[k],
                                            price=float(c[k]), detail=d))
                 break
@@ -510,7 +539,8 @@ def confirms(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
     n = len(df15)
     out = []
     for t in np.flatnonzero(new):
-        w0 = float(np.nanmin(lo[max(0, t - 96):t + 1]))
+        w0i = max(0, t - 96) + int(np.nanargmin(lo[max(0, t - 96):t + 1]))
+        w0 = float(lo[w0i])
         top, ti, w1i = hi[t], t, None
         for k in range(t + 1, min(n, t + 192)):
             if hi[k] > top:
@@ -550,6 +580,8 @@ def confirms(df15: pd.DataFrame, df4h: pd.DataFrame, symbol: str,
              "burst_vol_mult": float(mult.iloc[t]),
              "wave_type": wave_type(v3_v2, None, w2_1h, retr, day, float(mult.iloc[t])),
              "targets": [float(f"{low + k * leg:.4g}") for k in (1.0, 1.618, 2.618)]}
+        ext = prior_ext(hi, lo, w0i, leg)
+        d.update(prior_ext=ext, done_1to1=_done_tag(ext))
         out.append(SignalEvent(symbol=symbol, signal=NAME, bar_time=df15.index[ov],
                                price=float(c[ov]), detail=d))
     return out
